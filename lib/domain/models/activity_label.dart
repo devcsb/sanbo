@@ -25,16 +25,16 @@ extension ActivityLabelX on ActivityLabel {
   };
 
   String get labelKo => switch (this) {
-    ActivityLabel.walkSteady => '걷기',
-    ActivityLabel.walkBrisk => '빠른 걷기',
-    ActivityLabel.strollSlow => '느리게 거닐기',
-    ActivityLabel.stationary => '정지',
-    ActivityLabel.placeStay => '한곳 체류',
-    ActivityLabel.cafeOrShop => '카페·상점 추정',
-    ActivityLabel.parkLinger => '공원 체류',
-    ActivityLabel.vehicle => '차량 이동 가능',
-    ActivityLabel.unknown => '알 수 없음',
-  };
+        ActivityLabel.walkSteady => '걷기',
+        ActivityLabel.walkBrisk => '빠른 걷기',
+        ActivityLabel.strollSlow => '느리게 거닐기',
+        ActivityLabel.stationary => '정지',
+        ActivityLabel.placeStay => '한곳 체류',
+        ActivityLabel.cafeOrShop => '카페·상점',
+        ActivityLabel.parkLinger => '공원 체류',
+        ActivityLabel.vehicle => '차량 이동',
+        ActivityLabel.unknown => '알 수 없음',
+      };
 
   static ActivityLabel fromStorage(String? key) {
     if (key == null) return ActivityLabel.unknown;

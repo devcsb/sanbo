@@ -2,23 +2,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
-import '../../platform/map/tile_source.dart';
-
-/// OpenStreetMap (public tiles) + polyline. No commercial map SDK.
+/// OSM-compatible raster basemap (Carto Voyager) + session polyline.
+/// No commercial map SDK and no third-party map API key.
 class RouteMap extends StatelessWidget {
   const RouteMap({
     super.key,
     required this.points,
-    this.tileSource = TileSourceId.osmPublic,
     this.height = 220,
     /// When true, skips network tiles (widget/unit tests).
     this.offlinePreview = false,
   });
 
   final List<({double lat, double lon})> points;
-  final TileSourceId tileSource;
   final double height;
   final bool offlinePreview;
+
+  /// Public OSM data via CartoCDN. Free for moderate app use; no API key.
+  static const tileUrlTemplate =
+      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+
+  static const attribution = '© OpenStreetMap · © CARTO';
 
   @override
   Widget build(BuildContext context) {
@@ -45,10 +48,10 @@ class RouteMap extends StatelessWidget {
               children: [
                 if (!offlinePreview)
                   TileLayer(
-                    urlTemplate: _urlFor(tileSource),
+                    urlTemplate: tileUrlTemplate,
                     userAgentPackageName: 'com.sanbo.sanbo',
                     maxZoom: 19,
-                    errorTileCallback: (tile, error, stackTrace) {},
+                    subdomains: const ['a', 'b', 'c', 'd'],
                   )
                 else
                   const ColoredMapBackground(),
@@ -96,7 +99,7 @@ class RouteMap extends StatelessWidget {
               right: 8,
               child: IgnorePointer(
                 child: Text(
-                  tileSource.attribution,
+                  attribution,
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: Colors.black87,
                     backgroundColor: Colors.white70,
@@ -108,14 +111,6 @@ class RouteMap extends StatelessWidget {
         ),
       ),
     );
-  }
-
-  String _urlFor(TileSourceId source) {
-    // Public OSM-compatible tiles. VWorld key path falls back until configured.
-    return switch (source) {
-      TileSourceId.osmPublic || TileSourceId.vworld2d =>
-        'https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
-    };
   }
 }
 

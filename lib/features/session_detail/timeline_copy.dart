@@ -10,12 +10,12 @@ String timelineWindowSubtitle(MinuteWindow w) {
       : '${w.distanceM.round()} m';
   final kmh = (w.avgSpeedMps * 3.6).toStringAsFixed(1);
   final conf = w.userConfirmed
-      ? '확정'
+      ? '내가 확정함'
       : w.hypothesisConfidence >= 0.55
-          ? '추정'
-          : '추정 (불확실)';
+          ? '자동 추정'
+          : '추정 · 불확실';
   final qualityNote = switch (w.quality) {
-    WindowQuality.low => ' · 위치 정확도 낮음',
+    WindowQuality.low => ' · GPS 약함',
     WindowQuality.medium => '',
     WindowQuality.high => '',
     WindowQuality.gap => '',

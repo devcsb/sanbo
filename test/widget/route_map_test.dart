@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sanbo/platform/map/tile_source.dart';
 import 'package:sanbo/shared/widgets/route_map.dart';
 
 void main() {
@@ -16,7 +15,6 @@ void main() {
               (lat: 37.5670, lon: 126.9785),
               (lat: 37.5675, lon: 126.9790),
             ],
-            tileSource: TileSourceId.osmPublic,
           ),
         ),
       ),

@@ -135,18 +135,16 @@ Phase B: iOS 포트
 ```
 
 **결정 D-MAP-01**: 지도 **렌더러 = MapLibre GL Flutter 플러그인** (벡터/래스터 타일·폴리라인·마커).  
-**결정 D-MAP-02**: MVP 기본 타일 = **공개 OSM 호환 타일** + 화면 코너 **© OpenStreetMap 기여자** 표기.  
-**결정 D-MAP-03**: v1에서 **VWorld 키**로 베이스맵 전환 또는 하이브리드(공공 베이스 + OSM 폴백).  
+**결정 D-MAP-02**: 제품 기본 타일 = **공개 OSM 호환 타일**(Carto Voyager) + 화면 코너 **© OpenStreetMap · © CARTO** 표기. **API 키 없음.**  
+**결정 D-MAP-03**: **브이월드(VWorld) 베이스맵 연동은 제품 범위에서 제외** (키·쿼터·약관·배포 복잡도 대비 OSM만으로 충분). 검색/역지오코딩이 필요해지면 별도 검토.  
 **결정 D-MAP-04**: 카카오/네이버 **맵 SDK는 MVP 비포함**. 한국어 상호·주소가 꼭 필요해지면 **REST 역지오코딩만** 검토 (맵 렌더와 분리).
 
-### 4.4 브이월드(VWorld) 실무 메모
+### 4.4 브이월드(VWorld) — 비교만 (연동 안 함)
 
 - 포털: [vworld.kr](https://www.vworld.kr/) — 국가 공간정보 개방·2D/3D·OpenAPI.  
-- 용도 적합: **한국 공식감 베이스맵**, 행정구역·검색, (정책 허용 범위 내) 앱 표출.  
-- 주의:  
-  - 키 발급·일일 트래픽·**서비스 유형(개발/운영)** 약관 준수  
-  - 타일/API 장애 시 **OSM 폴백** 필수 (앱이 지도 때문에 죽지 않게)  
-  - 위치 **원본 로그를 VWorld에 올리지 않음** — 필요 시 역지오코딩 좌표만 최소 전송  
+- 산보 **현재 구현**: 베이스맵은 **OSM만**. VWorld 키 UI·타일 URL 없음.  
+- 제외 사유: 운영키·일일 호출 제한·키 유출(클라이언트 내장)·사용자 공통 쿼터 부담.  
+- 향후 필요 시: 검색/역지오코딩 REST만 최소 연동을 재검토할 수 있음 (맵 렌더는 OSM 유지 권장).
 
 ### 4.5 역지오코딩·장소 (가벼운 범위)
 
@@ -236,7 +234,7 @@ lib/
   domain/        # pure: filter, window, metrics, infer (테스트 가능)
   data/          # sqflite, export
   platform/      # location, background, geocoder adapters
-  map/           # MapPort + tile sources (osm, vworld)
+  map/           # MapPort + OSM tile (flutter_map RouteMap)
 ```
 
 **결정 D-ARCH-01**: `domain/` 은 Flutter 위젯·플러그인 import 금지 → 단위 테스트 용이.  
@@ -303,7 +301,7 @@ Google Maps 패키지·Firebase 기본 탑재는 **하지 않음** (가벼움).
 | 3 | MapLibre + OSM 타일 + 폴리라인 | 세션 상세 맵 |
 | 4 | 요약 카드 + 세션 리스트 | 러닝앱 결과 화면 패리티(심플) |
 | 5 | 활동 가설 규칙 + 타임라인 수정 | 칩 선택 저장 |
-| 6 | (v1) VWorld 타일/검색 키 연동 | 설정에서 지도 소스 전환 |
+| 6 | ~~(v1) VWorld 타일~~ → **OSM 단일 베이스맵** (D-MAP-03 개정) | 설정 지도 소스는 고정 안내만 |
 | 7 | (later) iOS 타깃 | 동일 domain |
 
 ---

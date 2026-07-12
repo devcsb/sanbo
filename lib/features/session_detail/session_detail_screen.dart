@@ -10,11 +10,9 @@ import '../../data/walk_repository.dart';
 import '../../domain/models/activity_label.dart';
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/minute_window.dart';
-import '../../domain/models/tracking_mode.dart';
 import '../../domain/models/walk_session.dart';
 import '../../shared/widgets/route_map.dart';
 import '../history/history_providers.dart';
-import '../settings/settings_screen.dart';
 import 'timeline_copy.dart';
 
 final sessionDetailProvider =
@@ -52,7 +50,6 @@ class SessionDetailScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(sessionDetailProvider(sessionId));
-    final tile = ref.watch(tileSourceSettingProvider);
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -102,10 +99,24 @@ class SessionDetailScreen extends ConsumerWidget {
       ),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(child: Text('오류: $e')),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text(
+              '요약을 불러오지 못했어요.\n잠시 후 다시 시도해 주세요.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyLarge,
+            ),
+          ),
+        ),
         data: (data) {
           if (data == null) {
-            return const Center(child: Text('기록을 찾을 수 없습니다'));
+            return Center(
+              child: Text(
+                '이 기록을 찾을 수 없어요',
+                style: theme.textTheme.bodyLarge,
+              ),
+            );
           }
           final session = data.session;
           final dateFmt = DateFormat('yyyy.MM.dd HH:mm', 'ko');
@@ -122,7 +133,6 @@ class SessionDetailScreen extends ConsumerWidget {
             children: [
               RouteMap(
                 points: points,
-                tileSource: tile,
                 // Avoid hanging on tile HTTP during `flutter test`.
                 offlinePreview: !kIsWeb &&
                     Platform.environment.containsKey('FLUTTER_TEST'),
@@ -146,21 +156,13 @@ class SessionDetailScreen extends ConsumerWidget {
                     label: '평균 속도',
                     value: '${kmh.toStringAsFixed(1)} km/h',
                   ),
-                  _MetricChip(
-                    label: '포인트',
-                    value: '${session.validSampleCount ?? points.length}',
-                  ),
-                  _MetricChip(
-                    label: '모드',
-                    value: session.trackingMode.labelKo,
-                  ),
                 ],
               ),
               const SizedBox(height: 24),
-              Text('분 단위 타임라인', style: theme.textTheme.titleSmall),
+              Text('시간대별 활동', style: theme.textTheme.titleSmall),
               const SizedBox(height: 4),
               Text(
-                '활동은 추정입니다. 탭하면 수정·확정할 수 있어요.',
+                '자동으로 추정한 활동이에요. 탭해서 고칠 수 있습니다.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -218,12 +220,23 @@ class SessionDetailScreen extends ConsumerWidget {
           child: ListView(
             shrinkWrap: true,
             children: [
-              const ListTile(title: Text('활동 수정 (추정 → 내 기록)')),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                child: Text(
+                  '이 구간의 활동',
+                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+              ),
               for (final label in ActivityLabel.values)
                 ListTile(
                   title: Text(label.labelKo),
                   trailing: w.displayLabel == label
-                      ? const Icon(Icons.check)
+                      ? Icon(
+                          Icons.check_circle,
+                          color: Theme.of(ctx).colorScheme.primary,
+                        )
                       : null,
                   onTap: () => Navigator.pop(ctx, label),
                 ),

@@ -56,9 +56,9 @@
 - 탭해서 **수정 · 확정** 가능 (사용자 라벨 우선)  
 
 ### 🗺️ 공개 지도 경로
-- **OpenStreetMap** 공개 타일 + 폴리라인  
-- 상용 맵 SDK 종속을 기본 경로로 두지 않음  
-- 저작권 attribution 표시  
+- **OpenStreetMap** 공개 타일(Carto Voyager) + 폴리라인 — **API 키 불필요**  
+- 상용 맵 SDK · 브이월드 키 연동 없음  
+- 저작권 attribution 표시 (`© OpenStreetMap · © CARTO`)  
 
 ### 🔒 프라이버시 우선
 - **로컬 SQLite** 저장, 계정 · 서버 업로드 없음 (MVP)  
@@ -112,8 +112,13 @@ flutter build apk --release --split-per-abi
 
 산출물 예:
 ```text
+build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   # 갤럭시 등
 build/app/outputs/flutter-apk/app-debug.apk
 ```
+
+### 지도
+
+베이스맵은 **OpenStreetMap** 데이터(Carto 타일)만 사용합니다. 별도 API 키·브이월드 연동은 없습니다.
 
 USB 디버깅이 켜진 폰:
 
@@ -141,7 +146,7 @@ adb shell am start -n com.sanbo.sanbo/.MainActivity
 4. 틀린 활동 추정은 탭해서 수정 · 확정  
 5. **기록** 탭에서 과거 세션 다시 보기 · 삭제  
 
-설정에서 추적 모드(절전 / 균형 / 고정확)와 베이스맵 표기를 바꿀 수 있습니다.
+설정에서 추적 모드(절전 / 균형 / 고정확)를 바꿀 수 있습니다.
 
 ---
 
@@ -187,8 +192,8 @@ flutter test --concurrency=1
 | 단계 | 내용 | 상태 |
 |------|------|------|
 | MVP | 세션 추적 · 분 윈도우 · 추정 · OSM 맵 · 로컬 저장 | ✅ |
-| UX | 복구 카드 · busy CTA · 추정 카피 · 빈 상태 | ✅ |
-| v1 | 브이월드 타일/검색 키 연동, NDJSON export 강화 | 🔜 |
+| 0.2.0 | OSM 전용 지도 · 카피/설정 UX 정리 · 브이월드 제거 | ✅ |
+| v1 | NDJSON export 강화, 장소 이름 개선 | 🔜 |
 | Later | iOS, 온디바이스 ML, 일기 연동 | 🔜 |
 
 ---

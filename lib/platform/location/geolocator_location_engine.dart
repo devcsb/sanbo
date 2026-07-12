@@ -71,7 +71,7 @@ class GeolocatorLocationEngine implements LocationEngine {
       intervalDuration: interval,
       foregroundNotificationConfig: const ForegroundNotificationConfig(
         notificationTitle: '산보',
-        notificationText: '산책 경로를 기록 중입니다',
+        notificationText: '산책을 기록하고 있어요',
         enableWakeLock: true,
         setOngoing: true,
       ),

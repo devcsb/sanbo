@@ -1,9 +1,5 @@
-import 'tile_source.dart';
-
-/// Abstract map surface (TRD MapPort). MapLibre implementation comes later.
+/// Abstract map surface (TRD MapPort). UI uses [RouteMap] (flutter_map + OSM).
 abstract class MapPort {
-  TileSourceId get tileSource;
-  Future<void> setTileSource(TileSourceId source);
   Future<void> setPolyline(List<({double lat, double lon})> points);
   Future<void> setMarkers({
     ({double lat, double lon})? start,
@@ -12,21 +8,9 @@ abstract class MapPort {
   Future<void> dispose();
 }
 
-/// Skeleton stub — UI shows placeholder until MapLibre is wired.
+/// Skeleton stub — kept for architecture parity with TRD.
 class PlaceholderMapPort implements MapPort {
-  PlaceholderMapPort({TileSourceId initial = TileSourceId.osmPublic})
-    : _tileSource = initial;
-
-  TileSourceId _tileSource;
   List<({double lat, double lon})> polyline = const [];
-
-  @override
-  TileSourceId get tileSource => _tileSource;
-
-  @override
-  Future<void> setTileSource(TileSourceId source) async {
-    _tileSource = source;
-  }
 
   @override
   Future<void> setPolyline(List<({double lat, double lon})> points) async {

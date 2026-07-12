@@ -74,7 +74,7 @@ class HistoryScreen extends ConsumerWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '홈에서 산책을 시작하면\n여기에 분 단위 기록이 쌓입니다.',
+                      '홈에서 산책을 시작하면\n여기에 지난 기록이 모입니다.',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,

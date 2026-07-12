@@ -39,7 +39,7 @@
 | 저장 | **sqflite (SQLite)** 온디바이스 | FR-19 |
 | 지도 렌더러 | **MapLibre GL** (Flutter 플러그인) | D-MAP-01; 타일 교체 가능 |
 | MVP 타일 | **OSM 호환 공개 타일** + attribution | D-MAP-02; 영감 UX 패리티 |
-| v1 타일/검색 | **VWorld(브이월드)** 키 연동, 실패 시 OSM 폴백 | D-MAP-03 |
+| 베이스맵 | **OSM 공개 타일만** (VWorld 연동 제외, D-MAP-03 개정) | D-MAP-02·03 |
 | 상용 맵 SDK | **MVP 비포함** (카카오/네이버/구글 맵 뷰) | D-MAP-04 |
 | 지오코딩 | 체류 시만; VWorld 또는 (선택) 카카오 로컬 **REST**; 실패 시 좌표 | D-MAP-05, FR-08 |
 | 상태관리 | Provider **또는** Riverpod **중 하나** | 심플 원칙 |
@@ -68,7 +68,7 @@ lib/
 │  platform/  adapters                                      │
 │  LocationEngine │ AndroidFgs │ GeocoderClient │ MapPort   │
 ├─────────────────────────────────────────────────────────┤
-│  data/  sqflite  │  map/ tile: osm | vworld               │
+│  data/  sqflite  │  map/ tile: osm (Carto)                 │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -473,25 +473,25 @@ NFR-02: 기본 balanced; 고주기는 토글.
 | OS Location (Android) | 예 | 샘플 | 앱 핵심 불가 |
 | SQLite (sqflite) | 예 | 저장 | — |
 | MapLibre + **OSM 타일** | 예(조회) | FR-06, D-MAP-02 | 좌표 텍스트 리스트 폴백 |
-| **VWorld API/타일** | 아니오 (v1) | 한국 공공 베이스·검색 | OSM 유지 |
+| **VWorld API/타일** | **아니오** (제품 제외) | 비교만 — D-MAP-03 | OSM 단일 소스 |
 | Reverse geocoder REST | 아니오 | FR-08/09 | 좌표만 · `장소 미확인` |
 | 카카오/네이버/구글 **Map SDK** | **아니오** | — | 사용하지 않음 (D-MAP-04) |
 | Firebase / 계정 백엔드 | 아니오 | — | MVP 금지 |
 | 라우팅/도로 스냅 | 아니오 | later | 직선 폴리라인 |
 | LLM API | 아니오 | 비목표 | — |
 
-### 9.1 지도 소스 설정 모델
+### 9.1 지도 소스 모델
 
 ```text
-enum TileSourceId { osmPublic, vworld2d }
-
-TileSourceId default = osmPublic
-if (vworldApiKey configured && userPrefersKoreaPublicBase) → vworld2d
-on tile load failure → fallback osmPublic + snackbar "공개 지도로 전환됨"
+// 제품 단일 소스 (D-MAP-02 · D-MAP-03 개정)
+basemap = OSM-compatible public tiles (Carto Voyager)
+url = https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png
+attribution = © OpenStreetMap · © CARTO
+// VWorld / 상용 SDK: 없음
 ```
 
-- 화면 하단/코너: 현재 소스에 맞는 **attribution** (OSM / VWorld 약관 문구).  
-- 내부 좌표: 항상 **WGS84**. VWorld 요청 시 변환은 Geocoder/Tile 어댑터 내부.
+- 화면 하단/코너: **OSM·CARTO attribution**.  
+- 내부 좌표: 항상 **WGS84**.
 
 ### 9.2 Export 포맷 (P1, 레퍼런스 NDJSON 정신)
 
@@ -636,7 +636,7 @@ PRD §14와 정합. 기술 결론:
 5. 홈 시작/종료 · 라이브 3숫자 · 요약 카드 (러닝앱 심플 골격)  
 6. 타임라인 + 활동 칩 수정  
 7. 설정: 추적 모드 · 데이터 삭제 · (자리) 지도 소스  
-8. (v1) VWorld 키 · 타일/검색 · OSM 폴백  
+8. ~~(v1) VWorld 키~~ → **OSM 단일 베이스맵** (연동 제외)  
 9. (later) iOS LocationEngine  
 
 ---

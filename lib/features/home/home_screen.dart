@@ -35,7 +35,7 @@ class HomeScreen extends ConsumerWidget {
                     ? '산책 기록 중'
                     : recovery
                         ? '이어갈 산책이 있어요'
-                        : '가벼운 산책 로그',
+                        : '오늘의 산책을 남겨 볼까요?',
                 style: theme.textTheme.headlineSmall?.copyWith(
                   fontWeight: FontWeight.w600,
                 ),
@@ -43,11 +43,11 @@ class HomeScreen extends ConsumerWidget {
               const SizedBox(height: 8),
               Text(
                 tracking
-                    ? (live.statusMessage ?? '위치를 수집하고 있습니다')
+                    ? (live.statusMessage ?? '위치를 기록하고 있어요')
                     : recovery
                         ? (live.statusMessage ??
                             '이전에 끝내지 못한 산책입니다. 이어서 기록하거나 저장·삭제할 수 있어요.')
-                        : '분 단위 동선 · 속도 · 활동 추정\n공개 지도 위에 남기는 개인 기록',
+                        : '걸은 길, 멈춘 순간, 분 단위 활동을\n지도와 함께 이 기기에만 저장합니다.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
@@ -158,14 +158,16 @@ class HomeScreen extends ConsumerWidget {
                         )
                       : const Text('산책 시작'),
                 ),
-              const SizedBox(height: 12),
-              Text(
-                _permissionHint(live.permissionState),
-                textAlign: TextAlign.center,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.outline,
+              if (_shouldShowPermissionHint(live.permissionState)) ...[
+                const SizedBox(height: 12),
+                Text(
+                  _permissionHint(live.permissionState),
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
                 ),
-              ),
+              ],
               const SizedBox(height: 8),
             ],
           ),
@@ -181,13 +183,18 @@ class HomeScreen extends ConsumerWidget {
     }
   }
 
+  bool _shouldShowPermissionHint(LocationPermissionState p) {
+    return p != LocationPermissionState.granted &&
+        p != LocationPermissionState.unknown;
+  }
+
   String _permissionHint(LocationPermissionState p) {
     return switch (p) {
-      LocationPermissionState.granted => '위치 권한이 허용되어 있습니다',
-      LocationPermissionState.denied => '시작 시 위치 권한을 요청합니다',
+      LocationPermissionState.granted => '',
+      LocationPermissionState.denied => '시작을 누르면 위치 권한을 요청합니다',
       LocationPermissionState.deniedForever => '설정에서 위치 권한을 허용해 주세요',
-      LocationPermissionState.serviceDisabled => '기기 위치 서비스를 켜 주세요',
-      LocationPermissionState.unknown => '개인 기기 로컬 저장 · 공개 지도',
+      LocationPermissionState.serviceDisabled => '기기의 위치 서비스를 켜 주세요',
+      LocationPermissionState.unknown => '',
     };
   }
 }
@@ -324,7 +331,7 @@ class _RecoveryCard extends StatelessWidget {
             TextButton(
               onPressed: busy ? null : onDiscard,
               child: Text(
-                '기록 삭제…',
+                '이 기록 지우기',
                 style: TextStyle(color: theme.colorScheme.error),
               ),
             ),
@@ -394,10 +401,10 @@ class _LiveStats extends StatelessWidget {
                 ),
               ],
             ),
-            if (active) ...[
+            if (active && sampleCount > 0) ...[
               const SizedBox(height: 12),
               Text(
-                '수집 포인트 $sampleCount',
+                '위치 $sampleCount곳 기록됨',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
