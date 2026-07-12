@@ -3,32 +3,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../app/app_info.dart';
+import '../../core/theme/app_theme.dart';
 import 'intro_providers.dart';
 
-/// First-run brand intro using [assets/branding/sanbo-main.jpg].
+/// First-run brand intro.
 class IntroScreen extends ConsumerWidget {
   const IntroScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final bottom = MediaQuery.paddingOf(context).bottom;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0B1B33),
+      backgroundColor: AppTheme.brandNavy,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // Full-bleed brand art
           Image.asset(
             AppInfo.brandMainAsset,
             fit: BoxFit.cover,
             alignment: Alignment.center,
-            errorBuilder: (_, _, _) => const ColoredBox(
-              color: Color(0xFF0B1B33),
-            ),
+            errorBuilder: (_, _, _) =>
+                const ColoredBox(color: AppTheme.brandNavy),
           ),
-          // Soft bottom gradient so CTA stays readable on any crop
           const DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
@@ -36,27 +33,27 @@ class IntroScreen extends ConsumerWidget {
                 end: Alignment.bottomCenter,
                 colors: [
                   Color(0x000B1B33),
-                  Color(0x660B1B33),
-                  Color(0xE60B1B33),
+                  Color(0x550B1B33),
+                  Color(0xF00B1B33),
                 ],
-                stops: [0.45, 0.7, 1.0],
+                stops: [0.4, 0.68, 1],
               ),
             ),
           ),
           SafeArea(
             child: Padding(
-              padding: EdgeInsets.fromLTRB(24, 16, 24, 16 + bottom * 0.25),
+              padding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  const Spacer(flex: 3),
+                  const Spacer(flex: 4),
                   Text(
                     AppInfo.nameKo,
                     textAlign: TextAlign.center,
                     style: theme.textTheme.headlineMedium?.copyWith(
                       color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 0.5,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -68,26 +65,13 @@ class IntroScreen extends ConsumerWidget {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    '산책의 그때 그 순간을 분 단위로 남기는\n개인 로그',
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: Colors.white.withValues(alpha: 0.72),
-                      height: 1.45,
-                    ),
-                  ),
                   const Spacer(flex: 1),
                   FilledButton(
                     onPressed: () => _continue(context, ref),
                     style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(54),
-                      backgroundColor: const Color(0xFF2EC4B6),
-                      foregroundColor: const Color(0xFF0B1B33),
-                      textStyle: const TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
+                      minimumSize: const Size.fromHeight(52),
+                      backgroundColor: AppTheme.brandTeal,
+                      foregroundColor: AppTheme.brandNavy,
                     ),
                     child: const Text('시작하기'),
                   ),
@@ -103,8 +87,6 @@ class IntroScreen extends ConsumerWidget {
   Future<void> _continue(BuildContext context, WidgetRef ref) async {
     await ref.read(appFlagsStoreProvider).setHasSeenIntro(true);
     ref.read(introSeenProvider.notifier).state = true;
-    if (context.mounted) {
-      context.go('/');
-    }
+    if (context.mounted) context.go('/');
   }
 }

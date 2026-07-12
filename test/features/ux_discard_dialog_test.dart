@@ -70,7 +70,7 @@ void main() {
       await tester.tap(find.text('기록 삭제…'));
       await tester.pump();
       expect(find.byType(AlertDialog), findsOneWidget);
-      expect(find.text('미완료 기록 삭제'), findsOneWidget);
+      expect(find.text('기록 지우기'), findsOneWidget);
       await tester.tap(find.widgetWithText(TextButton, '취소'));
       await tester.pump();
 

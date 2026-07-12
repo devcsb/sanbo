@@ -2,14 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
-/// OSM-compatible raster basemap (Carto Voyager) + session polyline.
-/// No commercial map SDK and no third-party map API key.
+import '../../core/theme/app_theme.dart';
+
+/// OSM basemap (Carto) + session path.
 class RouteMap extends StatelessWidget {
   const RouteMap({
     super.key,
     required this.points,
     this.height = 220,
-    /// When true, skips network tiles (widget/unit tests).
     this.offlinePreview = false,
   });
 
@@ -17,7 +17,6 @@ class RouteMap extends StatelessWidget {
   final double height;
   final bool offlinePreview;
 
-  /// Public OSM data via CartoCDN. Free for moderate app use; no API key.
   static const tileUrlTemplate =
       'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
 
@@ -61,7 +60,7 @@ class RouteMap extends StatelessWidget {
                       Polyline(
                         points: latLngs,
                         color: theme.colorScheme.primary,
-                        strokeWidth: 4,
+                        strokeWidth: 3.5,
                       ),
                     ],
                   ),
@@ -70,23 +69,37 @@ class RouteMap extends StatelessWidget {
                     markers: [
                       Marker(
                         point: latLngs.first,
-                        width: 28,
-                        height: 28,
-                        child: Icon(
-                          Icons.circle,
-                          size: 16,
-                          color: Colors.green.shade700,
+                        width: 22,
+                        height: 22,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: AppTheme.brandTeal,
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.white, width: 2),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.15),
+                                blurRadius: 4,
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       if (latLngs.length > 1)
                         Marker(
                           point: latLngs.last,
-                          width: 28,
-                          height: 28,
+                          width: 26,
+                          height: 26,
                           child: Icon(
-                            Icons.location_on,
-                            size: 28,
-                            color: Colors.red.shade700,
+                            Icons.location_on_rounded,
+                            size: 26,
+                            color: AppTheme.brandCoral,
+                            shadows: [
+                              Shadow(
+                                color: Colors.black.withValues(alpha: 0.2),
+                                blurRadius: 3,
+                              ),
+                            ],
                           ),
                         ),
                     ],
@@ -94,15 +107,26 @@ class RouteMap extends StatelessWidget {
               ],
             ),
             Positioned(
-              left: 8,
-              bottom: 6,
-              right: 8,
+              left: 10,
+              bottom: 8,
               child: IgnorePointer(
-                child: Text(
-                  attribution,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.black87,
-                    backgroundColor: Colors.white70,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.88),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      attribution,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: const Color(0xFF3A4548),
+                        fontSize: 10,
+                      ),
+                    ),
                   ),
                 ),
               ),
@@ -114,12 +138,13 @@ class RouteMap extends StatelessWidget {
   }
 }
 
-/// Neutral background when tiles are disabled (tests / offline).
 class ColoredMapBackground extends StatelessWidget {
   const ColoredMapBackground({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return const ColoredBox(color: Color(0xFFE8EEF0));
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+    );
   }
 }

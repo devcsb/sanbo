@@ -8,9 +8,9 @@ Future<bool> confirmDiscardIncompleteWalk(BuildContext context) async {
     builder: (ctx) {
       final scheme = Theme.of(ctx).colorScheme;
       return AlertDialog(
-        title: const Text('미완료 기록 삭제'),
+        title: const Text('기록 지우기'),
         content: const Text(
-          '저장하지 않은 미완료 산책을 삭제합니다. 되돌릴 수 없습니다.',
+          '저장하지 않은 산책을 지웁니다. 되돌릴 수 없어요.',
         ),
         actions: [
           TextButton(

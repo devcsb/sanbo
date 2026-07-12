@@ -21,11 +21,11 @@ void main() {
       evidence: const ['speed_band:1.2 m/s', 'stationary_ratio:0.05'],
     );
     final s = timelineWindowSubtitle(w);
-    expect(s, contains('추정'));
     expect(s, contains('km/h'));
     expect(s, isNot(contains('speed_band')));
     expect(s, isNot(contains('high')));
     expect(s, isNot(contains('0.75')));
+    expect(s, isNot(contains('추정')));
   });
 
   test('gap window uses friendly empty copy', () {
@@ -43,7 +43,7 @@ void main() {
       gapReason: 'no_samples',
     );
     final s = timelineWindowSubtitle(w);
-    expect(s, contains('비어'));
+    expect(s, contains('위치 기록 없음'));
     expect(s, isNot(contains('no_samples')));
   });
 }

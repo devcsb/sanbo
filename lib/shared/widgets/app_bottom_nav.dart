@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
-/// 3-tab shell (PRD D-UX-01): 홈 · 기록 · 설정
+/// 3-tab shell: 홈 · 기록 · 설정
 class ScaffoldWithNavBar extends StatelessWidget {
   const ScaffoldWithNavBar(this.navigationShell, {super.key});
 
@@ -12,23 +12,14 @@ class ScaffoldWithNavBar extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
-      body: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 200),
-        switchInCurve: Curves.easeOut,
-        switchOutCurve: Curves.easeIn,
-        transitionBuilder: (child, animation) {
-          return FadeTransition(opacity: animation, child: child);
-        },
-        child: KeyedSubtree(
-          key: ValueKey(navigationShell.currentIndex),
-          child: navigationShell,
-        ),
-      ),
-      bottomNavigationBar: Container(
+      body: navigationShell,
+      bottomNavigationBar: DecoratedBox(
         decoration: BoxDecoration(
+          color: theme.navigationBarTheme.backgroundColor ??
+              theme.colorScheme.surface,
           border: Border(
             top: BorderSide(
-              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.3),
+              color: theme.colorScheme.outlineVariant.withValues(alpha: 0.55),
             ),
           ),
         ),

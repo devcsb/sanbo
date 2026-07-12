@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../platform/location/location_engine.dart';
+import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
 import '../settings/settings_screen.dart';
 import 'discard_confirm.dart';
@@ -24,53 +25,36 @@ class HomeScreen extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.asset(
-                'assets/branding/sanbo-icon.png',
-                width: 28,
-                height: 28,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => const Icon(Icons.layers, size: 24),
-              ),
-            ),
-            const SizedBox(width: 10),
-            const Text('산보'),
-          ],
-        ),
+        title: const AppBarTitle('산보', showBrand: true),
       ),
       body: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
                 tracking
-                    ? '산책 기록 중'
+                    ? '기록 중'
                     : recovery
-                        ? '이어갈 산책이 있어요'
-                        : '오늘의 산책을 남겨 볼까요?',
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+                        ? '이어갈 산책'
+                        : '산책을 시작할까요?',
+                style: theme.textTheme.headlineSmall,
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               Text(
                 tracking
                     ? (live.statusMessage ?? '위치를 기록하고 있어요')
                     : recovery
                         ? (live.statusMessage ??
-                            '이전에 끝내지 못한 산책입니다. 이어서 기록하거나 저장·삭제할 수 있어요.')
-                        : '작은 기록, 큰 흐름\n걸은 길과 멈춘 순간을 분 단위로 남깁니다.',
+                            '끝내지 못한 기록이 있어요. 이어서 걷거나 저장할 수 있습니다.')
+                        : '걸은 길과 멈춘 순간을 분 단위로 남깁니다.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
               ),
               if (live.errorMessage != null) ...[
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 _ErrorBanner(
                   message: live.errorMessage!,
                   onDismiss: () =>
@@ -116,10 +100,8 @@ class HomeScreen extends ConsumerWidget {
                 distanceM: live.liveDistanceM,
                 speedMps: live.liveSpeedMps,
                 active: tracking,
-                sampleCount: live.sampleCount,
               ),
               const Spacer(),
-              // Primary CTA hierarchy (AST-H1): one dominant action.
               if (tracking)
                 FilledButton(
                   onPressed: busy
@@ -135,7 +117,6 @@ class HomeScreen extends ConsumerWidget {
                           }
                         },
                   style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
                     backgroundColor: theme.colorScheme.error,
                     foregroundColor: theme.colorScheme.onError,
                   ),
@@ -144,7 +125,7 @@ class HomeScreen extends ConsumerWidget {
                           height: 22,
                           width: 22,
                           child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
+                            strokeWidth: 2.4,
                             color: theme.colorScheme.onError,
                           ),
                         )
@@ -161,15 +142,12 @@ class HomeScreen extends ConsumerWidget {
                                 .start(mode: mode),
                           );
                         },
-                  style: FilledButton.styleFrom(
-                    minimumSize: const Size.fromHeight(56),
-                  ),
                   child: busy
                       ? SizedBox(
                           height: 22,
                           width: 22,
                           child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
+                            strokeWidth: 2.4,
                             color: theme.colorScheme.onPrimary,
                           ),
                         )
@@ -184,8 +162,8 @@ class HomeScreen extends ConsumerWidget {
                     color: theme.colorScheme.outline,
                   ),
                 ),
-              ],
-              const SizedBox(height: 8),
+              ] else
+                const SizedBox(height: 4),
             ],
           ),
         ),
@@ -208,7 +186,7 @@ class HomeScreen extends ConsumerWidget {
   String _permissionHint(LocationPermissionState p) {
     return switch (p) {
       LocationPermissionState.granted => '',
-      LocationPermissionState.denied => '시작을 누르면 위치 권한을 요청합니다',
+      LocationPermissionState.denied => '시작 시 위치 권한을 요청합니다',
       LocationPermissionState.deniedForever => '설정에서 위치 권한을 허용해 주세요',
       LocationPermissionState.serviceDisabled => '기기의 위치 서비스를 켜 주세요',
       LocationPermissionState.unknown => '',
@@ -230,11 +208,13 @@ class _ErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.errorContainer,
-      borderRadius: BorderRadius.circular(12),
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(14),
+      ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 12, 4, 8),
+        padding: const EdgeInsets.fromLTRB(14, 12, 4, 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -242,24 +222,26 @@ class _ErrorBanner extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
-                  Icons.info_outline,
+                  Icons.error_outline_rounded,
                   size: 20,
                   color: theme.colorScheme.onErrorContainer,
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Text(
                     message,
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.onErrorContainer,
+                      height: 1.4,
                     ),
                   ),
                 ),
                 IconButton(
                   tooltip: '닫기',
+                  visualDensity: VisualDensity.compact,
                   onPressed: onDismiss,
                   icon: Icon(
-                    Icons.close,
+                    Icons.close_rounded,
                     size: 20,
                     color: theme.colorScheme.onErrorContainer,
                   ),
@@ -273,7 +255,10 @@ class _ErrorBanner extends StatelessWidget {
                   onPressed: onRetry,
                   child: Text(
                     '다시 시도',
-                    style: TextStyle(color: theme.colorScheme.onErrorContainer),
+                    style: TextStyle(
+                      color: theme.colorScheme.onErrorContainer,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ),
@@ -300,60 +285,50 @@ class _RecoveryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              '미완료 산책',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+    return SoftPanel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '미완료 기록',
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '이어서 걷거나, 지금까지를 저장하세요.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
             ),
-            const SizedBox(height: 4),
-            Text(
-              '이어서 걸을지, 지금까지를 저장할지 선택하세요.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+          ),
+          const SizedBox(height: 14),
+          FilledButton(
+            onPressed: busy ? null : onContinue,
+            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            child: busy
+                ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('이어서 기록'),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton(
+            onPressed: busy
+                ? null
+                : () {
+                    unawaited(onSaveAndEnd());
+                  },
+            child: const Text('저장하고 종료'),
+          ),
+          TextButton(
+            onPressed: busy ? null : onDiscard,
+            child: Text(
+              '기록 지우기',
+              style: TextStyle(color: theme.colorScheme.error),
             ),
-            const SizedBox(height: 12),
-            FilledButton(
-              onPressed: busy ? null : onContinue,
-              style: FilledButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
-              child: busy
-                  ? const SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Text('이어서 기록'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton(
-              onPressed: busy
-                  ? null
-                  : () {
-                      unawaited(onSaveAndEnd());
-                    },
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size.fromHeight(48),
-              ),
-              child: const Text('저장하고 종료'),
-            ),
-            TextButton(
-              onPressed: busy ? null : onDiscard,
-              child: Text(
-                '이 기록 지우기',
-                style: TextStyle(color: theme.colorScheme.error),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -365,14 +340,12 @@ class _LiveStats extends StatelessWidget {
     required this.distanceM,
     required this.speedMps,
     required this.active,
-    required this.sampleCount,
   });
 
   final Duration elapsed;
   final double distanceM;
   final double speedMps;
   final bool active;
-  final int sampleCount;
 
   @override
   Widget build(BuildContext context) {
@@ -380,55 +353,62 @@ class _LiveStats extends StatelessWidget {
     final km = distanceM / 1000.0;
     final kmh = speedMps * 3.6;
 
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 28, horizontal: 12),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: _Stat(
-                    label: '시간',
-                    value: _formatDuration(elapsed),
-                    emphasize: active,
+    return SoftPanel(
+      padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 8),
+      child: Column(
+        children: [
+          if (active)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.primary,
+                      shape: BoxShape.circle,
+                    ),
                   ),
-                ),
-                Container(
-                  width: 1,
-                  height: 48,
-                  color: theme.colorScheme.outlineVariant,
-                ),
-                Expanded(
-                  child: _Stat(
-                    label: '거리',
-                    value: '${km.toStringAsFixed(2)} km',
+                  const SizedBox(width: 8),
+                  Text(
+                    'LIVE',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.primary,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.2,
+                    ),
                   ),
-                ),
-                Container(
-                  width: 1,
-                  height: 48,
-                  color: theme.colorScheme.outlineVariant,
-                ),
-                Expanded(
-                  child: _Stat(
-                    label: '속도',
-                    value: '${kmh.toStringAsFixed(1)} km/h',
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
-            if (active && sampleCount > 0) ...[
-              const SizedBox(height: 12),
-              Text(
-                '위치 $sampleCount곳 기록됨',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+          Row(
+            children: [
+              Expanded(
+                child: MetricTile(
+                  label: '시간',
+                  value: _formatDuration(elapsed),
+                  emphasize: active,
+                ),
+              ),
+              _VRule(theme: theme),
+              Expanded(
+                child: MetricTile(
+                  label: '거리',
+                  value: '${km.toStringAsFixed(2)} km',
+                ),
+              ),
+              _VRule(theme: theme),
+              Expanded(
+                child: MetricTile(
+                  label: '속도',
+                  value: '${kmh.toStringAsFixed(1)} km/h',
                 ),
               ),
             ],
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -442,38 +422,17 @@ class _LiveStats extends StatelessWidget {
   }
 }
 
-class _Stat extends StatelessWidget {
-  const _Stat({
-    required this.label,
-    required this.value,
-    this.emphasize = false,
-  });
+class _VRule extends StatelessWidget {
+  const _VRule({required this.theme});
 
-  final String label;
-  final String value;
-  final bool emphasize;
+  final ThemeData theme;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      children: [
-        Text(
-          label,
-          style: theme.textTheme.labelMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          style: theme.textTheme.titleLarge?.copyWith(
-            fontWeight: FontWeight.w700,
-            color: emphasize ? theme.colorScheme.primary : null,
-            fontFeatures: const [FontFeature.tabularFigures()],
-          ),
-        ),
-      ],
+    return Container(
+      width: 1,
+      height: 40,
+      color: theme.colorScheme.outlineVariant.withValues(alpha: 0.8),
     );
   }
 }

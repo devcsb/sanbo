@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/app_info.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/tracking_mode.dart';
+import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
 
 final trackingModeSettingProvider = StateProvider<TrackingMode>(
@@ -21,134 +22,169 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('설정')),
       body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
         children: [
-          const _SectionHeader('기록 방식'),
-          ListTile(
-            title: const Text('위치 기록 간격'),
-            subtitle: Text(mode.descriptionKo),
-            trailing: DropdownButton<TrackingMode>(
-              value: mode,
-              underline: const SizedBox.shrink(),
-              onChanged: (v) {
-                if (v != null) {
-                  ref.read(trackingModeSettingProvider.notifier).state = v;
-                }
-              },
-              items: [
-                for (final m in TrackingMode.values)
-                  DropdownMenuItem(
-                    value: m,
-                    child: Text(m.labelKo),
+          SoftPanel(
+            child: Row(
+              children: [
+                const BrandMark(size: 52),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        AppInfo.nameKo,
+                        style: theme.textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        AppInfo.tagline,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        AppInfo.versionLabel,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                    ],
                   ),
+                ),
               ],
             ),
           ),
-          const Divider(height: 1),
-          const _SectionHeader('지도'),
-          ListTile(
-            leading: Icon(Icons.map_outlined, color: theme.colorScheme.primary),
-            title: const Text('OpenStreetMap'),
-            subtitle: const Text(
-              '산책 경로를 공개 지도 위에 표시합니다. 별도 가입이나 키가 필요하지 않습니다.',
-            ),
-            isThreeLine: true,
-          ),
-          const Divider(height: 1),
-          const _SectionHeader('데이터 · 개인정보'),
-          ListTile(
-            leading: Icon(
-              Icons.phone_android,
-              color: theme.colorScheme.primary,
-            ),
-            title: const Text('이 기기에만 저장'),
-            subtitle: const Text(
-              '산책 기록은 휴대폰 안에만 남습니다. 계정 가입이나 서버 업로드가 없습니다.',
-            ),
-            isThreeLine: true,
-          ),
-          ListTile(
-            title: const Text('모든 기록 삭제'),
-            leading: Icon(Icons.delete_outline, color: theme.colorScheme.error),
-            onTap: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('모든 기록 삭제'),
-                  content: const Text(
-                    '이 기기에 저장된 산책 기록을 모두 지웁니다. 되돌릴 수 없습니다.',
+          const SizedBox(height: 24),
+          const SectionLabel('기록'),
+          SoftPanel(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  '위치 간격',
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  mode.descriptionKo,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('취소'),
-                    ),
-                    FilledButton(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Theme.of(ctx).colorScheme.error,
-                        foregroundColor: Theme.of(ctx).colorScheme.onError,
+                ),
+                const SizedBox(height: 14),
+                SegmentedButton<TrackingMode>(
+                  segments: [
+                    for (final m in TrackingMode.values)
+                      ButtonSegment(
+                        value: m,
+                        label: Text(m.labelKo),
                       ),
-                      onPressed: () => Navigator.pop(ctx, true),
-                      child: const Text('삭제'),
-                    ),
                   ],
+                  selected: {mode},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (set) {
+                    ref.read(trackingModeSettingProvider.notifier).state =
+                        set.first;
+                  },
+                  style: ButtonStyle(
+                    visualDensity: VisualDensity.comfortable,
+                    textStyle: WidgetStateProperty.all(
+                      const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 ),
-              );
-              if (ok == true) {
-                await ref.read(walkRepositoryProvider).deleteAll();
-                ref.read(historyTickProvider.notifier).state++;
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('모든 기록을 삭제했습니다')),
-                  );
-                }
-              }
-            },
-          ),
-          const Divider(height: 1),
-          const _SectionHeader('앱 정보'),
-          ListTile(
-            leading: ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.asset(
-                AppInfo.brandIconAsset,
-                width: 48,
-                height: 48,
-                fit: BoxFit.cover,
-                errorBuilder: (_, _, _) => Icon(
-                  Icons.layers,
-                  color: theme.colorScheme.primary,
-                ),
-              ),
+              ],
             ),
-            title: const Text(AppInfo.nameKo),
-            subtitle: const Text(
-              '${AppInfo.tagline}\n${AppInfo.versionLabel}',
-            ),
-            isThreeLine: true,
           ),
           const SizedBox(height: 24),
+          const SectionLabel('지도 · 데이터'),
+          SoftPanel(
+            padding: EdgeInsets.zero,
+            child: Column(
+              children: [
+                ListTile(
+                  leading: Icon(
+                    Icons.map_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: const Text('OpenStreetMap'),
+                  subtitle: const Text('공개 지도 · 별도 키 없음'),
+                ),
+                Divider(
+                  height: 1,
+                  indent: 16,
+                  endIndent: 16,
+                  color: theme.colorScheme.outlineVariant.withValues(alpha: 0.6),
+                ),
+                ListTile(
+                  leading: Icon(
+                    Icons.phone_iphone_rounded,
+                    color: theme.colorScheme.primary,
+                  ),
+                  title: const Text('이 기기에만 저장'),
+                  subtitle: const Text('서버 업로드 · 계정 없음'),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          const SectionLabel('관리'),
+          SoftPanel(
+            padding: EdgeInsets.zero,
+            child: ListTile(
+              leading: Icon(
+                Icons.delete_outline_rounded,
+                color: theme.colorScheme.error,
+              ),
+              title: Text(
+                '모든 기록 삭제',
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+              onTap: () => _deleteAll(context, ref),
+            ),
+          ),
         ],
       ),
     );
   }
-}
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader(this.title);
-
-  final String title;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 20, 16, 8),
-      child: Text(
-        title,
-        style: Theme.of(context).textTheme.labelLarge?.copyWith(
-              color: Theme.of(context).colorScheme.primary,
-              fontWeight: FontWeight.w700,
+  Future<void> _deleteAll(BuildContext context, WidgetRef ref) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('모든 기록 삭제'),
+        content: const Text('이 기기의 산책 기록을 모두 지웁니다. 되돌릴 수 없어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
             ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('삭제'),
+          ),
+        ],
       ),
     );
+    if (ok == true) {
+      await ref.read(walkRepositoryProvider).deleteAll();
+      ref.read(historyTickProvider.notifier).state++;
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('모든 기록을 삭제했습니다')),
+        );
+      }
+    }
   }
 }

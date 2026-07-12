@@ -24,7 +24,8 @@ void main() {
       evidence: const ['speed_band:1.1'],
     );
     final s = timelineWindowSubtitle(w);
-    expect(s.contains('추정'), isTrue);
+    expect(s.contains('km/h'), isTrue);
     expect(s.contains('speed_band'), isFalse);
+    expect(s.contains('추정'), isFalse); // chip on row title, not subtitle
   });
 }

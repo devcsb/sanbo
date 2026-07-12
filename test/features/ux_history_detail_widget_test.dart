@@ -77,7 +77,7 @@ void main() {
     await settle(tester);
 
     expect(find.byType(HistoryScreen), findsOneWidget);
-    expect(find.textContaining('아직 산책 기록이 없습니다'), findsOneWidget);
+    expect(find.textContaining('아직 기록이 없어요'), findsOneWidget);
     expect(find.text('산책 시작하기'), findsOneWidget);
 
     await tester.tap(find.text('산책 시작하기'));

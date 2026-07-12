@@ -74,6 +74,6 @@ void main() {
     expect(home, contains('needsRecovery'));
     expect(home, contains('다시 시도'));
     expect(home, contains('else if (!recovery)'));
-    expect(confirm, contains('미완료 기록 삭제'));
+    expect(confirm, contains('기록 지우기'));
   });
 }
