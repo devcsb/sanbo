@@ -9,9 +9,11 @@ import 'package:intl/date_symbol_data_local.dart';
 import '../app.dart';
 import '../data/walk_repository.dart';
 import '../features/home/session_controller.dart';
+import '../features/intro/intro_providers.dart';
 import '../platform/location/geolocator_location_engine.dart';
 import '../platform/location/location_engine.dart';
 import '../platform/location/synthetic_location_engine.dart';
+import '../platform/prefs/app_flags.dart';
 
 const appLogName = 'sanbo';
 
@@ -32,11 +34,16 @@ Future<void> bootstrapAndRun({
               permission: LocationPermissionState.granted,
             ));
 
+  final flagsStore = AppFlagsStore();
+  final flags = await flagsStore.load();
+
   final container = ProviderContainer(
     observers: const [AppProviderObserver()],
     overrides: [
       walkRepositoryProvider.overrideWithValue(repo),
       locationEngineProvider.overrideWithValue(engine),
+      appFlagsStoreProvider.overrideWithValue(flagsStore),
+      introSeenProvider.overrideWith((ref) => flags.hasSeenIntro),
     ],
   );
 

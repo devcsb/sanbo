@@ -27,6 +27,12 @@ migrate_working_dir/
 *.apk
 *.aab
 
+# Source brand drops at repo root (canonical copies live in assets/branding/)
+/sanbo-icon.jpg
+/sanbo-main.jpg
+/sanbo-icon.png
+/sanbo-main.png
+
 # Flutter/Dart/Pub related
 **/doc/api/
 **/ios/Flutter/.last_build_id

@@ -1,17 +1,25 @@
 <div align="center">
 
+<img src="assets/branding/sanbo-main.jpg" alt="sanbo — 작은 기록, 큰 흐름" width="720" />
+
+<br/>
+
 <img src="https://img.shields.io/badge/Flutter-3.44-02569B?style=flat-square&logo=flutter&logoColor=white" />
 <img src="https://img.shields.io/badge/Dart-3.12-0175C2?style=flat-square&logo=dart&logoColor=white" />
 <img src="https://img.shields.io/badge/Android-API%2024+-3DDC84?style=flat-square&logo=android&logoColor=white" />
 <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" />
 
-# 산보 (Sanbo)
+# 산보 (sanbo)
 
-**산책의 ‘그때 그 1분’을 남기는 위치 기반 개인 로그**
+**작은 기록, 큰 흐름**
+
+산책의 ‘그때 그 1분’을 남기는 위치 기반 개인 로그
 
 *러닝 워치가 아니라, 동선 · 속도 · 장소 · 활동 추정으로 회상하는 가벼운 산책 앱*
 
 [**기능 소개**](#주요-기능) · [설치](#설치) · [버그 리포트](../../issues)
+
+<img src="assets/branding/sanbo-icon.png" alt="sanbo app icon" width="96" />
 
 </div>
 

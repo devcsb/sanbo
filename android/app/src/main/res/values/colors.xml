@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Matches sanbo brand navy from sanbo-icon / sanbo-main -->
+    <color name="ic_launcher_background">#0B1B33</color>
+    <color name="splash_background">#0B1B33</color>
+</resources>

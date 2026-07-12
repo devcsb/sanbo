@@ -106,10 +106,23 @@ class SettingsScreen extends ConsumerWidget {
           ),
           const Divider(height: 1),
           const _SectionHeader('앱 정보'),
-          const ListTile(
-            title: Text(AppInfo.nameKo),
-            subtitle: Text(
-              '${AppInfo.versionLabel}\n산책의 그때 그 순간을 분 단위로 남기는 개인 로그',
+          ListTile(
+            leading: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Image.asset(
+                AppInfo.brandIconAsset,
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Icon(
+                  Icons.layers,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            ),
+            title: const Text(AppInfo.nameKo),
+            subtitle: const Text(
+              '${AppInfo.tagline}\n${AppInfo.versionLabel}',
             ),
             isThreeLine: true,
           ),

@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
 
-/// Outdoor / walk-oriented palette (calm teal-green, not fitness neon).
+/// Brand palette from sanbo-icon / sanbo-main (layers + navy field).
 class AppTheme {
-  static const _seed = Color(0xFF2F6F6A);
+  static const brandNavy = Color(0xFF0B1B33);
+  static const brandTeal = Color(0xFF2EC4B6);
+  static const brandCoral = Color(0xFFFF6B5B);
+  static const brandIndigo = Color(0xFF4A4E8C);
+
+  /// Primary accent — teal layer of the logo stack.
+  static const _seed = brandTeal;
 
   static ThemeData light() {
     final scheme = ColorScheme.fromSeed(
       seedColor: _seed,
       brightness: Brightness.light,
+      primary: const Color(0xFF1A9E92),
+      secondary: brandIndigo,
+      tertiary: brandCoral,
     );
     return _build(scheme);
   }
@@ -16,6 +25,10 @@ class AppTheme {
     final scheme = ColorScheme.fromSeed(
       seedColor: _seed,
       brightness: Brightness.dark,
+      primary: brandTeal,
+      secondary: brandIndigo,
+      tertiary: brandCoral,
+      surface: brandNavy,
     );
     return _build(scheme);
   }

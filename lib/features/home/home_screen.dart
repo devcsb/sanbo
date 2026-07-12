@@ -23,7 +23,24 @@ class HomeScreen extends ConsumerWidget {
     final mode = ref.watch(trackingModeSettingProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('산보')),
+      appBar: AppBar(
+        title: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: Image.asset(
+                'assets/branding/sanbo-icon.png',
+                width: 28,
+                height: 28,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const Icon(Icons.layers, size: 24),
+              ),
+            ),
+            const SizedBox(width: 10),
+            const Text('산보'),
+          ],
+        ),
+      ),
       body: SafeArea(
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -47,7 +64,7 @@ class HomeScreen extends ConsumerWidget {
                     : recovery
                         ? (live.statusMessage ??
                             '이전에 끝내지 못한 산책입니다. 이어서 기록하거나 저장·삭제할 수 있어요.')
-                        : '걸은 길, 멈춘 순간, 분 단위 활동을\n지도와 함께 이 기기에만 저장합니다.',
+                        : '작은 기록, 큰 흐름\n걸은 길과 멈춘 순간을 분 단위로 남깁니다.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                 ),
