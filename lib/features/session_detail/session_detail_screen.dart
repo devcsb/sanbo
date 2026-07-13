@@ -66,16 +66,21 @@ class SessionDetailScreen extends ConsumerWidget {
       ),
       body: async.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (_, _) => const EmptyStateView(
+        error: (_, _) => EmptyStateView(
           icon: Icons.error_outline_rounded,
           title: '요약을 불러오지 못했어요',
           message: '잠시 후 다시 시도해 주세요.',
+          actionLabel: '기록으로',
+          onAction: () => context.go('/history'),
         ),
         data: (data) {
           if (data == null) {
-            return const EmptyStateView(
+            return EmptyStateView(
               icon: Icons.search_off_rounded,
               title: '기록을 찾을 수 없어요',
+              message: '삭제되었거나 잘못된 주소일 수 있어요.',
+              actionLabel: '기록으로',
+              onAction: () => context.go('/history'),
             );
           }
 
@@ -289,81 +294,88 @@ class _TimelineRow extends StatelessWidget {
     final confirmed = window.userConfirmed;
     final label = window.displayLabel.labelKo;
 
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 48,
-              child: Text(
-                time,
-                style: theme.textTheme.titleSmall?.copyWith(
-                  fontFeatures: const [FontFeature.tabularFigures()],
-                ),
-              ),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          label,
-                          style: theme.textTheme.titleSmall,
-                        ),
-                      ),
-                      if (!confirmed) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 6,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.primary
-                                .withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            '추정',
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: theme.colorScheme.primary,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ] else ...[
-                        const SizedBox(width: 8),
-                        Text(
-                          '확정',
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    timelineWindowSubtitle(window),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
+    return Semantics(
+      button: true,
+      label: '$time $label${confirmed ? ' 확정' : ' 추정'}. 탭하여 수정',
+      child: InkWell(
+        onTap: onTap,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 52),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: 48,
+                  child: Text(
+                    time,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                   ),
-                ],
-              ),
+                ),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              label,
+                              style: theme.textTheme.titleSmall,
+                            ),
+                          ),
+                          if (!confirmed) ...[
+                            const SizedBox(width: 8),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 6,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.primary
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '추정',
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                          ] else ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              '확정',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        timelineWindowSubtitle(window),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.edit_outlined,
+                  size: 20,
+                  color: theme.colorScheme.outline,
+                ),
+              ],
             ),
-            Icon(
-              Icons.edit_outlined,
-              size: 18,
-              color: theme.colorScheme.outline,
-            ),
-          ],
+          ),
         ),
       ),
     );

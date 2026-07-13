@@ -23,4 +23,20 @@ void main() {
     expect(find.byType(RouteMap), findsOneWidget);
     expect(find.textContaining('OpenStreetMap'), findsOneWidget);
   });
+
+  testWidgets('RouteMap empty points shows friendly overlay', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: RouteMap(
+            offlinePreview: true,
+            points: [],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('경로 포인트가 없어요'), findsOneWidget);
+    expect(find.textContaining('OpenStreetMap'), findsOneWidget);
+  });
 }

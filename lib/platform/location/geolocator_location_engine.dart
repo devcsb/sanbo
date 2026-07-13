@@ -43,6 +43,15 @@ class GeolocatorLocationEngine implements LocationEngine {
     return _mapPermission(p);
   }
 
+  @override
+  Future<bool> openSystemSettings() async {
+    final service = await Geolocator.isLocationServiceEnabled();
+    if (!service) {
+      return Geolocator.openLocationSettings();
+    }
+    return Geolocator.openAppSettings();
+  }
+
   LocationPermissionState _mapPermission(LocationPermission p) {
     return switch (p) {
       LocationPermission.always || LocationPermission.whileInUse =>

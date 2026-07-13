@@ -52,39 +52,50 @@ class HistoryScreen extends ConsumerWidget {
               final s = sessions[index];
               final km = (s.totalDistanceM ?? 0) / 1000.0;
               final dur = Duration(seconds: s.durationS ?? 0);
-              return Material(
-                color: theme.cardTheme.color ?? theme.colorScheme.surface,
-                shape: theme.cardTheme.shape,
-                clipBehavior: Clip.antiAlias,
-                child: InkWell(
-                  onTap: () => context.go('/history/${s.id}'),
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                dateFmt.format(s.startedAt),
-                                style: theme.textTheme.titleSmall,
+              final title = dateFmt.format(s.startedAt);
+              final subtitle =
+                  '${km.toStringAsFixed(2)} km  ·  ${_fmt(dur)}';
+              return Semantics(
+                button: true,
+                label: '$title, $subtitle. 상세 보기',
+                child: Material(
+                  color: theme.cardTheme.color ?? theme.colorScheme.surface,
+                  shape: theme.cardTheme.shape,
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    onTap: () => context.go('/history/${s.id}'),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(minHeight: 64),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: theme.textTheme.titleSmall,
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    subtitle,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                '${km.toStringAsFixed(2)} km  ·  ${_fmt(dur)}',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
-                              ),
-                            ],
-                          ),
+                            ),
+                            Icon(
+                              Icons.chevron_right_rounded,
+                              color: theme.colorScheme.outline,
+                            ),
+                          ],
                         ),
-                        Icon(
-                          Icons.chevron_right_rounded,
-                          color: theme.colorScheme.outline,
-                        ),
-                      ],
+                      ),
                     ),
                   ),
                 ),

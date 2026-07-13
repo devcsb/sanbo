@@ -54,6 +54,15 @@ class SyntheticLocationEngine implements LocationEngine {
   @override
   Future<LocationPermissionState> requestPermission() async => permission;
 
+  /// Test spy: increments when UI asks to open system settings.
+  int openSystemSettingsCalls = 0;
+
+  @override
+  Future<bool> openSystemSettings() async {
+    openSystemSettingsCalls++;
+    return true;
+  }
+
   @override
   Future<void> start() async {
     await stop();

@@ -73,7 +73,10 @@ void main() {
     expect(home, contains('isBusy'));
     expect(home, contains('needsRecovery'));
     expect(home, contains('다시 시도'));
+    expect(home, contains('설정 열기'));
+    expect(home, contains('openSystemSettings'));
     expect(home, contains('else if (!recovery)'));
+    expect(home, isNot(contains("'LIVE'")));
     expect(confirm, contains('기록 지우기'));
   });
 }

@@ -22,6 +22,9 @@ class HomeScreen extends ConsumerWidget {
     final busy = live.isBusy;
     final recovery = live.needsRecovery && live.session != null && !tracking;
     final mode = ref.watch(trackingModeSettingProvider);
+    final needsSystemSettings =
+        live.permissionState == LocationPermissionState.deniedForever ||
+            live.permissionState == LocationPermissionState.serviceDisabled;
 
     return Scaffold(
       appBar: AppBar(
@@ -68,6 +71,13 @@ class HomeScreen extends ConsumerWidget {
                                 .start(mode: mode),
                           );
                         },
+                  onOpenSettings: needsSystemSettings && !busy
+                      ? () {
+                          unawaited(
+                            ref.read(locationEngineProvider).openSystemSettings(),
+                          );
+                        }
+                      : null,
                 ),
               ],
               if (recovery) ...[
@@ -103,55 +113,67 @@ class HomeScreen extends ConsumerWidget {
               ),
               const Spacer(),
               if (tracking)
-                FilledButton(
-                  onPressed: busy
-                      ? null
-                      : () async {
-                          final ended = await ref
-                              .read(sessionControllerProvider.notifier)
-                              .stop();
-                          if (!context.mounted) return;
-                          ref.read(historyTickProvider.notifier).state++;
-                          if (ended != null) {
-                            context.go('/history/${ended.id}');
-                          }
-                        },
-                  style: FilledButton.styleFrom(
-                    backgroundColor: theme.colorScheme.error,
-                    foregroundColor: theme.colorScheme.onError,
+                Semantics(
+                  button: true,
+                  label: '산책 종료',
+                  child: FilledButton(
+                    onPressed: busy
+                        ? null
+                        : () async {
+                            final ended = await ref
+                                .read(sessionControllerProvider.notifier)
+                                .stop();
+                            if (!context.mounted) return;
+                            ref.read(historyTickProvider.notifier).state++;
+                            if (ended != null) {
+                              context.go('/history/${ended.id}');
+                            }
+                          },
+                    style: FilledButton.styleFrom(
+                      backgroundColor: theme.colorScheme.error,
+                      foregroundColor: theme.colorScheme.onError,
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    child: busy
+                        ? SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: theme.colorScheme.onError,
+                            ),
+                          )
+                        : const Text('산책 종료'),
                   ),
-                  child: busy
-                      ? SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.4,
-                            color: theme.colorScheme.onError,
-                          ),
-                        )
-                      : const Text('산책 종료'),
                 )
               else if (!recovery)
-                FilledButton(
-                  onPressed: busy
-                      ? null
-                      : () {
-                          unawaited(
-                            ref
-                                .read(sessionControllerProvider.notifier)
-                                .start(mode: mode),
-                          );
-                        },
-                  child: busy
-                      ? SizedBox(
-                          height: 22,
-                          width: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.4,
-                            color: theme.colorScheme.onPrimary,
-                          ),
-                        )
-                      : const Text('산책 시작'),
+                Semantics(
+                  button: true,
+                  label: '산책 시작',
+                  child: FilledButton(
+                    onPressed: busy
+                        ? null
+                        : () {
+                            unawaited(
+                              ref
+                                  .read(sessionControllerProvider.notifier)
+                                  .start(mode: mode),
+                            );
+                          },
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(52),
+                    ),
+                    child: busy
+                        ? SizedBox(
+                            height: 22,
+                            width: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.4,
+                              color: theme.colorScheme.onPrimary,
+                            ),
+                          )
+                        : const Text('산책 시작'),
+                  ),
                 ),
               if (_shouldShowPermissionHint(live.permissionState)) ...[
                 const SizedBox(height: 12),
@@ -199,70 +221,92 @@ class _ErrorBanner extends StatelessWidget {
     required this.message,
     required this.onDismiss,
     this.onRetry,
+    this.onOpenSettings,
   });
 
   final String message;
   final VoidCallback onDismiss;
   final VoidCallback? onRetry;
+  final VoidCallback? onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.errorContainer.withValues(alpha: 0.9),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(14, 12, 4, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.error_outline_rounded,
-                  size: 20,
-                  color: theme.colorScheme.onErrorContainer,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    message,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onErrorContainer,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: '닫기',
-                  visualDensity: VisualDensity.compact,
-                  onPressed: onDismiss,
-                  icon: Icon(
-                    Icons.close_rounded,
+    return Semantics(
+      liveRegion: true,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: theme.colorScheme.errorContainer.withValues(alpha: 0.9),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 12, 4, 8),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.error_outline_rounded,
                     size: 20,
                     color: theme.colorScheme.onErrorContainer,
                   ),
-                ),
-              ],
-            ),
-            if (onRetry != null)
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: onRetry,
-                  child: Text(
-                    '다시 시도',
-                    style: TextStyle(
-                      color: theme.colorScheme.onErrorContainer,
-                      fontWeight: FontWeight.w600,
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      message,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onErrorContainer,
+                        height: 1.4,
+                      ),
                     ),
                   ),
-                ),
+                  IconButton(
+                    tooltip: '닫기',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onDismiss,
+                    icon: Icon(
+                      Icons.close_rounded,
+                      size: 20,
+                      color: theme.colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ],
               ),
-          ],
+              if (onRetry != null || onOpenSettings != null)
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    spacing: 4,
+                    children: [
+                      if (onOpenSettings != null)
+                        TextButton(
+                          onPressed: onOpenSettings,
+                          child: Text(
+                            '설정 열기',
+                            style: TextStyle(
+                              color: theme.colorScheme.onErrorContainer,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      if (onRetry != null)
+                        TextButton(
+                          onPressed: onRetry,
+                          child: Text(
+                            '다시 시도',
+                            style: TextStyle(
+                              color: theme.colorScheme.onErrorContainer,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -303,7 +347,9 @@ class _RecoveryCard extends StatelessWidget {
           const SizedBox(height: 14),
           FilledButton(
             onPressed: busy ? null : onContinue,
-            style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
             child: busy
                 ? const SizedBox(
                     height: 20,
@@ -319,10 +365,25 @@ class _RecoveryCard extends StatelessWidget {
                 : () {
                     unawaited(onSaveAndEnd());
                   },
-            child: const Text('저장하고 종료'),
+            style: OutlinedButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
+            child: busy
+                ? SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: theme.colorScheme.primary,
+                    ),
+                  )
+                : const Text('저장하고 종료'),
           ),
           TextButton(
             onPressed: busy ? null : onDiscard,
+            style: TextButton.styleFrom(
+              minimumSize: const Size.fromHeight(44),
+            ),
             child: Text(
               '기록 지우기',
               style: TextStyle(color: theme.colorScheme.error),
@@ -373,40 +434,44 @@ class _LiveStats extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'LIVE',
+                    '기록 중',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: theme.colorScheme.primary,
                       fontWeight: FontWeight.w700,
-                      letterSpacing: 1.2,
+                      letterSpacing: 0.2,
                     ),
                   ),
                 ],
               ),
             ),
-          Row(
-            children: [
-              Expanded(
-                child: MetricTile(
-                  label: '시간',
-                  value: _formatDuration(elapsed),
-                  emphasize: active,
+          Semantics(
+            label:
+                '시간 ${_formatDuration(elapsed)}, 거리 ${km.toStringAsFixed(2)} 킬로미터, 속도 ${kmh.toStringAsFixed(1)} 시속',
+            child: Row(
+              children: [
+                Expanded(
+                  child: MetricTile(
+                    label: '시간',
+                    value: _formatDuration(elapsed),
+                    emphasize: active,
+                  ),
                 ),
-              ),
-              _VRule(theme: theme),
-              Expanded(
-                child: MetricTile(
-                  label: '거리',
-                  value: '${km.toStringAsFixed(2)} km',
+                _VRule(theme: theme),
+                Expanded(
+                  child: MetricTile(
+                    label: '거리',
+                    value: '${km.toStringAsFixed(2)} km',
+                  ),
                 ),
-              ),
-              _VRule(theme: theme),
-              Expanded(
-                child: MetricTile(
-                  label: '속도',
-                  value: '${kmh.toStringAsFixed(1)} km/h',
+                _VRule(theme: theme),
+                Expanded(
+                  child: MetricTile(
+                    label: '속도',
+                    value: '${kmh.toStringAsFixed(1)} km/h',
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

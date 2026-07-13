@@ -21,6 +21,7 @@ Future<bool> confirmDiscardIncompleteWalk(BuildContext context) async {
             style: FilledButton.styleFrom(
               backgroundColor: scheme.error,
               foregroundColor: scheme.onError,
+              minimumSize: const Size(72, 44),
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('삭제'),

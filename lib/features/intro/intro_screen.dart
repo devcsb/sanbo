@@ -66,14 +66,18 @@ class IntroScreen extends ConsumerWidget {
                     ),
                   ),
                   const Spacer(flex: 1),
-                  FilledButton(
-                    onPressed: () => _continue(context, ref),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(52),
-                      backgroundColor: AppTheme.brandTeal,
-                      foregroundColor: AppTheme.brandNavy,
+                  Semantics(
+                    button: true,
+                    label: '산보 시작하기',
+                    child: FilledButton(
+                      onPressed: () => _continue(context, ref),
+                      style: FilledButton.styleFrom(
+                        minimumSize: const Size.fromHeight(52),
+                        backgroundColor: AppTheme.brandTeal,
+                        foregroundColor: AppTheme.brandNavy,
+                      ),
+                      child: const Text('시작하기'),
                     ),
-                    child: const Text('시작하기'),
                   ),
                 ],
               ),

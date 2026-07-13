@@ -16,6 +16,10 @@ abstract class LocationEngine {
   Future<void> setMode(TrackingMode mode);
   Future<LocationPermissionState> checkPermission();
   Future<LocationPermissionState> requestPermission();
+
+  /// Opens OS app/location settings when permission is permanently denied.
+  Future<bool> openSystemSettings() async => false;
+
   Future<void> start();
   Future<void> stop();
   Future<void> dispose() async {}

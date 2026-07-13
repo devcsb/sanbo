@@ -76,26 +76,33 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ),
                 const SizedBox(height: 14),
-                SegmentedButton<TrackingMode>(
-                  segments: [
-                    for (final m in TrackingMode.values)
-                      ButtonSegment(
-                        value: m,
-                        label: Text(m.labelKo),
+                Semantics(
+                  label: '위치 기록 간격 ${mode.labelKo}',
+                  child: SegmentedButton<TrackingMode>(
+                    segments: [
+                      for (final m in TrackingMode.values)
+                        ButtonSegment(
+                          value: m,
+                          label: Text(m.labelKo),
+                          tooltip: m.descriptionKo,
+                        ),
+                    ],
+                    selected: {mode},
+                    showSelectedIcon: false,
+                    onSelectionChanged: (set) {
+                      ref.read(trackingModeSettingProvider.notifier).state =
+                          set.first;
+                    },
+                    style: ButtonStyle(
+                      visualDensity: VisualDensity.comfortable,
+                      minimumSize: WidgetStateProperty.all(
+                        const Size(0, 44),
                       ),
-                  ],
-                  selected: {mode},
-                  showSelectedIcon: false,
-                  onSelectionChanged: (set) {
-                    ref.read(trackingModeSettingProvider.notifier).state =
-                        set.first;
-                  },
-                  style: ButtonStyle(
-                    visualDensity: VisualDensity.comfortable,
-                    textStyle: WidgetStateProperty.all(
-                      const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                      textStyle: WidgetStateProperty.all(
+                        const TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
                   ),

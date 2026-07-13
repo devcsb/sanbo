@@ -71,17 +71,21 @@ class RouteMap extends StatelessWidget {
                         point: latLngs.first,
                         width: 22,
                         height: 22,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: AppTheme.brandTeal,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 2),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.15),
-                                blurRadius: 4,
-                              ),
-                            ],
+                        child: Semantics(
+                          label: '시작 지점',
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: AppTheme.brandTeal,
+                              shape: BoxShape.circle,
+                              border:
+                                  Border.all(color: Colors.white, width: 2),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 4,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
@@ -90,22 +94,51 @@ class RouteMap extends StatelessWidget {
                           point: latLngs.last,
                           width: 26,
                           height: 26,
-                          child: Icon(
-                            Icons.location_on_rounded,
-                            size: 26,
-                            color: AppTheme.brandCoral,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black.withValues(alpha: 0.2),
-                                blurRadius: 3,
-                              ),
-                            ],
+                          child: Semantics(
+                            label: '종료 지점',
+                            child: Icon(
+                              Icons.location_on_rounded,
+                              size: 26,
+                              color: AppTheme.brandCoral,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                  blurRadius: 3,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                     ],
                   ),
               ],
             ),
+            if (latLngs.isEmpty)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.92),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        child: Text(
+                          '경로 포인트가 없어요',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF3A4548),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
             Positioned(
               left: 10,
               bottom: 8,
