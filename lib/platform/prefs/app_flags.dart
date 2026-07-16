@@ -4,20 +4,33 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-/// Lightweight local flags (intro seen, etc.).
+/// Lightweight local preferences needed before the widget tree starts.
 class AppFlags {
-  AppFlags({this.hasSeenIntro = false});
+  AppFlags({this.hasSeenIntro = false, this.trackingModeName = 'balanced'});
 
   final bool hasSeenIntro;
+  final String trackingModeName;
 
-  AppFlags copyWith({bool? hasSeenIntro}) {
-    return AppFlags(hasSeenIntro: hasSeenIntro ?? this.hasSeenIntro);
+  AppFlags copyWith({bool? hasSeenIntro, String? trackingModeName}) {
+    return AppFlags(
+      hasSeenIntro: hasSeenIntro ?? this.hasSeenIntro,
+      trackingModeName: trackingModeName ?? this.trackingModeName,
+    );
   }
 
-  Map<String, Object?> toJson() => {'hasSeenIntro': hasSeenIntro};
+  Map<String, Object?> toJson() => {
+    'hasSeenIntro': hasSeenIntro,
+    'trackingMode': trackingModeName,
+  };
 
   static AppFlags fromJson(Map<String, Object?> json) {
-    return AppFlags(hasSeenIntro: json['hasSeenIntro'] == true);
+    final trackingMode = json['trackingMode'];
+    return AppFlags(
+      hasSeenIntro: json['hasSeenIntro'] == true,
+      trackingModeName: trackingMode is String && trackingMode.isNotEmpty
+          ? trackingMode
+          : 'balanced',
+    );
   }
 }
 
@@ -56,5 +69,10 @@ class AppFlagsStore {
   Future<void> setHasSeenIntro(bool value) async {
     final current = await load();
     await save(current.copyWith(hasSeenIntro: value));
+  }
+
+  Future<void> setTrackingModeName(String value) async {
+    final current = await load();
+    await save(current.copyWith(trackingModeName: value));
   }
 }

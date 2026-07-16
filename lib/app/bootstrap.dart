@@ -10,6 +10,7 @@ import '../app.dart';
 import '../data/walk_repository.dart';
 import '../features/home/session_controller.dart';
 import '../features/intro/intro_providers.dart';
+import '../features/settings/tracking_mode_setting.dart';
 import '../platform/location/geolocator_location_engine.dart';
 import '../platform/location/location_engine.dart';
 import '../platform/location/synthetic_location_engine.dart';
@@ -27,7 +28,8 @@ Future<void> bootstrapAndRun({
   await initializeDateFormatting('ko', null);
 
   final repo = repository ?? await WalkRepository.open();
-  final engine = locationEngine ??
+  final engine =
+      locationEngine ??
       (Platform.isAndroid || Platform.isIOS
           ? GeolocatorLocationEngine()
           : SyntheticLocationEngine(
@@ -44,6 +46,9 @@ Future<void> bootstrapAndRun({
       locationEngineProvider.overrideWithValue(engine),
       appFlagsStoreProvider.overrideWithValue(flagsStore),
       introSeenProvider.overrideWith((ref) => flags.hasSeenIntro),
+      trackingModeSettingProvider.overrideWith(
+        (ref) => trackingModeFromStoredName(flags.trackingModeName),
+      ),
     ],
   );
 
@@ -55,10 +60,7 @@ Future<void> bootstrapAndRun({
   });
 
   runApp(
-    UncontrolledProviderScope(
-      container: container,
-      child: const SanboApp(),
-    ),
+    UncontrolledProviderScope(container: container, child: const SanboApp()),
   );
 }
 

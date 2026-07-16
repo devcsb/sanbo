@@ -2,11 +2,11 @@
 
 | 항목 | 내용 |
 |------|------|
-| 문서 ID | `UX-REVIEW-SANBO-v2.0` |
+| 문서 ID | `UX-REVIEW-SANBO-v3.0` |
 | 관점 | 독립 비판 검토자 (제품 구현자와 분리) |
 | 대상 | 홈 · 복구 · 기록(빈/목록) · 세션 상세 · 설정 · 인트로 · 하단 내비 · 지도 |
 | 축 | 시각 계층/IA · 상태 피드백 · 파괴 동작 안전 · 카피/jargon · 터치/a11y 기초 |
-| 참조 | Material 3 patterns · empty/error/loading · destructive confirm · calm mobile IA |
+| 참조 | Material 3 patterns · Astryx Design System · UI UX Pro Max Flutter/a11y 지침 · calm mobile IA |
 | 기준선 | `{SCRATCH}/ux_tests.log`, `{SCRATCH}/ux_analyze.log` |
 
 ---
@@ -135,7 +135,7 @@
 | 필드 | 내용 |
 |------|------|
 | 심각도 | **minor** |
-| 상태 | **fixed** — `SegmentedButton` (min 44) + tooltip 설명 |
+| 상태 | **fixed** — 폭/글자 크기에 따라 `SegmentedButton` 또는 세로형 48dp 선택지 |
 
 ### UX-M01 — 포인트 없는 지도가 조용히 서울만 표시
 | 필드 | 내용 |
@@ -180,7 +180,21 @@
 
 ---
 
-## 4. 회귀 게이트
+## 4. v3 디자인 시스템·반응형 개선
+
+| 축 | 적용 |
+|----|------|
+| 디자인 토큰 | 브랜드 원색 → `ColorScheme` 의미 역할 → 버튼·카드·내비·칩 컴포넌트 테마로 단일화 |
+| 화면 계층 | `PageFrame`, `PageIntro`, `SoftPanel`, `MetricStrip`, `StatusPill`, `TonalIcon` 공용화 |
+| 반응형 | 홈·인트로 스크롤 안전화, 지표·타임라인·설정 선택지를 폭과 글자 크기에 맞게 재배치 |
+| 접근성 | 전역 글자 확대 제한 제거, 48dp 터치 타깃, 대비 회귀 검사, 중복 Semantics 정리 |
+| 상태 안전 | 처리 중 버튼 라벨 유지, 상세 수정/삭제 실패 피드백, 진행·복구 중 전체 삭제 차단 |
+| 설정 신뢰성 | 위치 기록 간격을 로컬에 보존하고 복구 산책은 세션에 저장된 간격으로 재개 |
+| 시각 검수 | 390×844에서 인트로·홈·빈 기록·상세·설정 대표 상태 렌더링 확인 |
+
+---
+
+## 5. 회귀 게이트
 
 | 경로 | 테스트 |
 |------|--------|
@@ -193,12 +207,16 @@
 | intro CTA | `test/features/intro_screen_test.dart` |
 | open settings spy | `test/features/ux_open_settings_test.dart` |
 | map empty overlay | `test/widget/route_map_test.dart` |
+| design token 대비 · 큰 글자 · 좁은 화면 | `test/features/ux_design_system_test.dart` |
+| 진행/복구 중 설정 안전 | `test/features/ux_settings_safety_test.dart` |
+| 설정 영속성/이전 데이터 호환 | `test/platform/app_flags_test.dart` |
 
 ---
 
-## 5. 변경 이력
+## 6. 변경 이력
 
 | 버전 | 일자 | 내용 |
 |------|------|------|
 | 1.0 | 2026-07-12 | 초안 검토 + 1차 수정 표 |
 | 2.0 | 2026-07-13 | 전 화면 재검토; H06/H07/D04 등 major 추가 수정; multi-axis 문서화 |
+| 3.0 | 2026-07-16 | 전 화면 디자인 시스템 통합, 반응형·큰 글자 대응, 설정 영속성·삭제 안전성·시각 검수 추가 |
