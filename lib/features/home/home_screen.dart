@@ -1,13 +1,18 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../platform/location/location_engine.dart';
+import '../../data/walk_repository.dart';
+import '../../domain/models/walk_session.dart';
+import '../../domain/services/walk_stats.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
+import '../intro/intro_providers.dart';
 import '../settings/tracking_mode_setting.dart';
 import 'discard_confirm.dart';
 import 'session_controller.dart';
@@ -26,7 +31,11 @@ class HomeScreen extends ConsumerWidget {
     final startMode = recovery ? live.session!.trackingMode : mode;
     final needsSystemSettings =
         live.permissionState == LocationPermissionState.deniedForever ||
-        live.permissionState == LocationPermissionState.serviceDisabled;
+        live.permissionState == LocationPermissionState.serviceDisabled ||
+        (live.errorMessage != null &&
+            (live.errorMessage!.contains('설정') ||
+                live.errorMessage!.contains('알림') ||
+                live.errorMessage!.contains('권한')));
     final km = live.liveDistanceM / 1000.0;
     final kmh = live.liveSpeedMps * 3.6;
 
@@ -38,9 +47,9 @@ class HomeScreen extends ConsumerWidget {
             return SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(
                 AppTheme.pagePadding,
-                8,
+                10,
                 AppTheme.pagePadding,
-                32,
+                36,
               ),
               child: Center(
                 child: ConstrainedBox(
@@ -61,11 +70,11 @@ class HomeScreen extends ConsumerWidget {
                             ? '이어갈 산책'
                             : '산책을 시작할까요?',
                         description: tracking
-                            ? (live.statusMessage ?? '위치를 기록하고 있어요')
+                            ? _trackingDescription(live)
                             : recovery
                             ? (live.statusMessage ??
                                   '끝내지 못한 기록이 있어요. 이어서 걷거나 저장할 수 있습니다.')
-                            : '걸은 길과 멈춘 순간을 분 단위로 남깁니다.',
+                            : '걸은 길과 멈춘 순간을 시간 흐름으로 남깁니다.',
                       ),
                       if (live.errorMessage != null) ...[
                         const SizedBox(height: 14),
@@ -101,6 +110,7 @@ class HomeScreen extends ConsumerWidget {
                         _RecoveryCard(
                           busy: busy,
                           onContinue: () {
+                            unawaited(HapticFeedback.selectionClick());
                             unawaited(
                               ref
                                   .read(sessionControllerProvider.notifier)
@@ -114,6 +124,8 @@ class HomeScreen extends ConsumerWidget {
                             if (!context.mounted) return;
                             ref.read(historyTickProvider.notifier).state++;
                             if (ended != null) {
+                              await _celebrateMilestones(context, ref, ended);
+                              if (!context.mounted) return;
                               context.go('/history/${ended.id}');
                             }
                           },
@@ -123,14 +135,16 @@ class HomeScreen extends ConsumerWidget {
                       const SizedBox(height: 24),
                       Semantics(
                         label:
-                            '시간 ${_formatDuration(live.elapsed)}, 거리 ${km.toStringAsFixed(2)} 킬로미터, 속도 ${kmh.toStringAsFixed(1)} 시속',
+                            '시간 ${_formatDuration(live.elapsed)}, 거리 ${km.toStringAsFixed(2)} 킬로미터, 속도 ${kmh.toStringAsFixed(1)} 시속, 위치 ${live.sampleCount}개',
                         excludeSemantics: true,
                         child: MetricStrip(
                           header: tracking
                               ? Align(
                                   alignment: Alignment.center,
                                   child: StatusPill(
-                                    label: '기록 중',
+                                    label: live.sampleCount == 0
+                                        ? 'GPS 잡는 중'
+                                        : '기록 중 · 위치 ${live.sampleCount}',
                                     icon: Icons.fiber_manual_record_rounded,
                                     color: theme.colorScheme.tertiary,
                                   ),
@@ -162,6 +176,7 @@ class HomeScreen extends ConsumerWidget {
                             onPressed: busy
                                 ? null
                                 : () async {
+                                    unawaited(HapticFeedback.mediumImpact());
                                     final ended = await ref
                                         .read(
                                           sessionControllerProvider.notifier,
@@ -172,8 +187,12 @@ class HomeScreen extends ConsumerWidget {
                                         .read(historyTickProvider.notifier)
                                         .state++;
                                     if (ended != null) {
+                                      await _celebrateMilestones(context, ref, ended);
+                                      if (!context.mounted) return;
                                       context.go('/history/${ended.id}');
                                     }
+                                    // ended == null: empty GPS walk discarded;
+                                    // error banner stays on home.
                                   },
                             style: FilledButton.styleFrom(
                               backgroundColor: theme.colorScheme.tertiary,
@@ -195,6 +214,7 @@ class HomeScreen extends ConsumerWidget {
                             onPressed: busy
                                 ? null
                                 : () {
+                                    unawaited(HapticFeedback.mediumImpact());
                                     unawaited(
                                       ref
                                           .read(
@@ -242,6 +262,24 @@ class HomeScreen extends ConsumerWidget {
     }
   }
 
+  String _trackingDescription(LiveSessionState live) {
+    if (live.sampleCount == 0) {
+      final elapsed = live.elapsed.inSeconds;
+      if (elapsed >= 15) {
+        return '아직 GPS가 안 잡히고 있어요. 알림·위치 권한을 허용했는지, 야외인지 확인해 주세요.';
+      }
+      return 'GPS를 잡는 중이에요. 첫 신호까지 수 초~1분 걸릴 수 있어요.';
+    }
+    if (live.validSampleCount == 0) {
+      final acc = live.lastAccuracyM;
+      if (acc != null) {
+        return '위치를 받는 중이에요 (정확도 ±${acc.toStringAsFixed(0)} m). 야외에서 더 잘 잡힙니다.';
+      }
+      return '위치를 받는 중이에요. 야외에서 더 잘 잡힙니다.';
+    }
+    return live.statusMessage ?? '위치를 기록하고 있어요';
+  }
+
   bool _shouldShowPermissionHint(LocationPermissionState p) {
     return p != LocationPermissionState.granted &&
         p != LocationPermissionState.unknown;
@@ -255,6 +293,37 @@ class HomeScreen extends ConsumerWidget {
       LocationPermissionState.serviceDisabled => '기기의 위치 서비스를 켜 주세요',
       LocationPermissionState.unknown => '',
     };
+  }
+}
+
+
+Future<void> _celebrateMilestones(
+  BuildContext context,
+  WidgetRef ref,
+  WalkSession ended,
+) async {
+  try {
+    final sessions = await ref.read(walkRepositoryProvider).listCompleted();
+    final stats = WalkStats.fromSessions(sessions);
+    final flagsStore = ref.read(appFlagsStoreProvider);
+    final flags = await flagsStore.load();
+    final newly = stats.newlyUnlocked(
+      flags.unlockedMilestones,
+      latest: ended,
+    );
+    if (newly.isEmpty) return;
+    await flagsStore.unlockMilestones(newly.map((m) => m.id));
+    if (!context.mounted) return;
+    final first = newly.first;
+    final more = newly.length > 1 ? ' 외 ${newly.length - 1}개' : '';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${first.title}$more'),
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  } on Object {
+    // Quiet: milestones are optional delight, never block navigation.
   }
 }
 
@@ -276,81 +345,77 @@ class _ErrorBanner extends StatelessWidget {
     final theme = Theme.of(context);
     return Semantics(
       liveRegion: true,
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: theme.colorScheme.errorContainer.withValues(alpha: 0.9),
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 4, 8),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.error_outline_rounded,
+      child: SoftPanel(
+        elevated: false,
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.92),
+        padding: const EdgeInsets.fromLTRB(14, 12, 4, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.error_outline_rounded,
+                  size: 20,
+                  color: theme.colorScheme.onErrorContainer,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onErrorContainer,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: '닫기',
+                  onPressed: onDismiss,
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size.square(48),
+                  ),
+                  icon: Icon(
+                    Icons.close_rounded,
                     size: 20,
                     color: theme.colorScheme.onErrorContainer,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      message,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onErrorContainer,
-                        height: 1.4,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '닫기',
-                    onPressed: onDismiss,
-                    style: IconButton.styleFrom(
-                      minimumSize: const Size.square(48),
-                    ),
-                    icon: Icon(
-                      Icons.close_rounded,
-                      size: 20,
-                      color: theme.colorScheme.onErrorContainer,
-                    ),
-                  ),
-                ],
-              ),
-              if (onRetry != null || onOpenSettings != null)
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Wrap(
-                    spacing: 4,
-                    children: [
-                      if (onOpenSettings != null)
-                        TextButton(
-                          onPressed: onOpenSettings,
-                          child: Text(
-                            '설정 열기',
-                            style: TextStyle(
-                              color: theme.colorScheme.onErrorContainer,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      if (onRetry != null)
-                        TextButton(
-                          onPressed: onRetry,
-                          child: Text(
-                            '다시 시도',
-                            style: TextStyle(
-                              color: theme.colorScheme.onErrorContainer,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                    ],
-                  ),
                 ),
-            ],
-          ),
+              ],
+            ),
+            if (onRetry != null || onOpenSettings != null)
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  spacing: 4,
+                  children: [
+                    if (onOpenSettings != null)
+                      TextButton(
+                        onPressed: onOpenSettings,
+                        child: Text(
+                          '설정 열기',
+                          style: TextStyle(
+                            color: theme.colorScheme.onErrorContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    if (onRetry != null)
+                      TextButton(
+                        onPressed: onRetry,
+                        child: Text(
+                          '다시 시도',
+                          style: TextStyle(
+                            color: theme.colorScheme.onErrorContainer,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -389,7 +454,7 @@ class _RecoveryCard extends StatelessWidget {
           FilledButton(
             onPressed: busy ? null : onContinue,
             style: FilledButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
+              minimumSize: const Size.fromHeight(52),
             ),
             child: _BusyButtonContent(
               label: '이어서 기록',
@@ -405,7 +470,7 @@ class _RecoveryCard extends StatelessWidget {
                     unawaited(onSaveAndEnd());
                   },
             style: OutlinedButton.styleFrom(
-              minimumSize: const Size.fromHeight(48),
+              minimumSize: const Size.fromHeight(52),
             ),
             child: _BusyButtonContent(
               label: '저장하고 종료',
@@ -415,7 +480,7 @@ class _RecoveryCard extends StatelessWidget {
           ),
           TextButton(
             onPressed: busy ? null : onDiscard,
-            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+            style: TextButton.styleFrom(minimumSize: const Size.fromHeight(52)),
             child: Text(
               '기록 지우기',
               style: TextStyle(color: theme.colorScheme.error),

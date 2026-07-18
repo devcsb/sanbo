@@ -35,16 +35,31 @@ class RouteMap extends StatelessWidget {
       label: latLngs.isEmpty
           ? '산책 경로 지도, 경로 기록 없음'
           : '산책 경로 지도, 위치 기록 ${latLngs.length}개',
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-        child: SizedBox(
-          height: height,
-          child: Stack(
-            children: [
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          border: Border.all(
+            color: SanboSurfaces.of(context).panelBorder,
+          ),
+          boxShadow: SanboSurfaces.of(context).panelShadow,
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+          child: SizedBox(
+            height: height,
+            child: Stack(
+              children: [
               FlutterMap(
                 options: MapOptions(
                   initialCenter: center,
                   initialZoom: latLngs.length < 2 ? 13 : 15,
+                  initialCameraFit: latLngs.length >= 2
+                      ? CameraFit.coordinates(
+                          coordinates: latLngs,
+                          padding: const EdgeInsets.all(36),
+                          maxZoom: 17,
+                        )
+                      : null,
                   interactionOptions: const InteractionOptions(
                     flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
                   ),
@@ -168,6 +183,7 @@ class RouteMap extends StatelessWidget {
           ),
         ),
       ),
+    ),
     );
   }
 }

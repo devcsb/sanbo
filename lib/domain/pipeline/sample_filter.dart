@@ -3,17 +3,28 @@ import 'geo.dart';
 
 class SampleFilterConfig {
   const SampleFilterConfig({
-    this.maxAccuracyM = 80,
+    /// Horizontal accuracy soft ceiling. Galaxy/urban cold fixes often land
+    /// between 80–150 m; hard-dropping them zeroed entire walks.
+    this.maxAccuracyM = 150,
+    /// Absolute ceiling — beyond this, the fix is useless for a walk path.
+    this.hardMaxAccuracyM = 500,
     this.maxJumpSpeedMps = 40,
     this.minTimeDeltaMs = 500,
+    /// Below this displacement, treat as GPS jitter (not real movement).
+    this.minSegmentDistanceM = 1.5,
   });
 
   final double maxAccuracyM;
+  final double hardMaxAccuracyM;
   final double maxJumpSpeedMps;
   final int minTimeDeltaMs;
+  final double minSegmentDistanceM;
 }
 
 /// Marks outliers; keeps originals with [LocationSample.isFilteredOut].
+///
+/// Distance uses only non-filtered samples. Soft accuracy threshold demotes
+/// fixes but still allows them when no better anchor exists yet (cold start).
 class SampleFilter {
   SampleFilter({this.config = const SampleFilterConfig()});
 
@@ -29,7 +40,12 @@ class SampleFilter {
       var filtered = false;
 
       final acc = s.accuracyM;
-      if (acc != null && acc > config.maxAccuracyM) {
+      if (acc != null && acc > config.hardMaxAccuracyM) {
+        filtered = true;
+      } else if (acc != null &&
+          acc > config.maxAccuracyM &&
+          lastValid != null) {
+        // Soft reject only once we already have a usable path anchor.
         filtered = true;
       }
 
@@ -49,6 +65,20 @@ class SampleFilter {
             filtered = true;
           }
         }
+      }
+
+      // Reject exact duplicate coordinates that add no path value when we
+      // already have a point (still keep the first fix as the anchor).
+      if (!filtered && lastValid != null) {
+        final dist = haversineMeters(
+          lat1: lastValid.latitude,
+          lon1: lastValid.longitude,
+          lat2: s.latitude,
+          lon2: s.longitude,
+        );
+        // Keep the sample for map density, but tiny jitter is handled in
+        // distance via pathDistanceMeters itself; no filter here.
+        if (dist.isNaN) filtered = true;
       }
 
       final marked = s.copyWith(isFilteredOut: filtered);

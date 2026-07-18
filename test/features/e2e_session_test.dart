@@ -4,6 +4,7 @@ import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
+import 'package:sanbo/domain/pipeline/segment_merger.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/features/history/history_providers.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
@@ -74,9 +75,16 @@ void main() {
 
     final samples = await repo.getSamples(ended.id);
     expect(samples.length, greaterThan(20));
+    // Filter flags must be persisted (not all raw).
+    expect(samples.any((s) => !s.isFilteredOut), isTrue);
 
     final windows = await repo.getWindows(ended.id);
     expect(windows, isNotEmpty);
+
+    // Segments collapse mechanical minute rows.
+    final segments = SegmentMerger().merge(windows);
+    expect(segments, isNotEmpty);
+    expect(segments.length, lessThanOrEqualTo(windows.length));
 
     final target = windows.firstWhere((w) => w.sampleCount > 0);
     await repo.updateWindowUserLabel(

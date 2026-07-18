@@ -38,43 +38,64 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
               return Stack(
                 children: [
                   Positioned(
-                    top: -56,
-                    right: -48,
+                    top: -80,
+                    right: -60,
                     child: IgnorePointer(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: AppTheme.brandTeal.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              AppTheme.brandTeal.withValues(alpha: 0.28),
+                              AppTheme.brandTeal.withValues(alpha: 0.0),
+                            ],
+                          ),
                         ),
-                        child: const SizedBox(width: 196, height: 196),
+                        child: const SizedBox(width: 280, height: 280),
                       ),
                     ),
                   ),
                   Positioned(
-                    left: -64,
-                    bottom: 104,
+                    left: -90,
+                    bottom: 80,
                     child: IgnorePointer(
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.05),
+                          gradient: RadialGradient(
+                            colors: [
+                              AppTheme.brandCoral.withValues(alpha: 0.14),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                        child: const SizedBox(width: 240, height: 240),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    left: 40,
+                    top: 120,
+                    child: IgnorePointer(
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.04),
                           shape: BoxShape.circle,
                         ),
-                        child: const SizedBox(width: 148, height: 148),
+                        child: const SizedBox(width: 90, height: 90),
                       ),
                     ),
                   ),
                   SingleChildScrollView(
                     padding: const EdgeInsets.fromLTRB(
                       AppTheme.pagePadding,
-                      24,
+                      28,
                       AppTheme.pagePadding,
-                      20,
+                      24,
                     ),
                     child: Center(
                       child: ConstrainedBox(
                         constraints: BoxConstraints(
-                          minHeight: constraints.maxHeight > 44
-                              ? constraints.maxHeight - 44
+                          minHeight: constraints.maxHeight > 52
+                              ? constraints.maxHeight - 52
                               : 0,
                           maxWidth: AppTheme.pageMaxWidth,
                         ),
@@ -86,11 +107,24 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
                               Semantics(
                                 image: true,
                                 label: '산보 로고',
-                                child: const Center(
-                                  child: BrandMark(size: 112),
+                                child: Center(
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(36),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: AppTheme.brandTeal
+                                              .withValues(alpha: 0.28),
+                                          blurRadius: 36,
+                                          offset: const Offset(0, 14),
+                                        ),
+                                      ],
+                                    ),
+                                    child: const BrandMark(size: 118),
+                                  ),
                                 ),
                               ),
-                              const SizedBox(height: 28),
+                              const SizedBox(height: 32),
                               Semantics(
                                 header: true,
                                 child: Text(
@@ -99,17 +133,18 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
                                   style: theme.textTheme.displaySmall?.copyWith(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w700,
-                                    letterSpacing: -0.8,
+                                    letterSpacing: -1.0,
                                   ),
                                 ),
                               ),
-                              const SizedBox(height: 10),
+                              const SizedBox(height: 12),
                               Text(
                                 AppInfo.tagline,
                                 textAlign: TextAlign.center,
                                 style: theme.textTheme.titleLarge?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.9),
+                                  color: Colors.white.withValues(alpha: 0.92),
                                   fontWeight: FontWeight.w600,
+                                  letterSpacing: -0.2,
                                 ),
                               ),
                               const SizedBox(height: 16),
@@ -117,11 +152,12 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
                                 '걸음을 기록하고, 하루의 흐름을 돌아보세요.',
                                 textAlign: TextAlign.center,
                                 style: theme.textTheme.bodyLarge?.copyWith(
-                                  color: Colors.white.withValues(alpha: 0.76),
+                                  color: Colors.white.withValues(alpha: 0.72),
+                                  height: 1.55,
                                 ),
                               ),
                               if (_saveFailed) ...[
-                                const SizedBox(height: 16),
+                                const SizedBox(height: 18),
                                 Semantics(
                                   liveRegion: true,
                                   child: Text(
@@ -144,9 +180,13 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
                                 child: FilledButton(
                                   onPressed: _isContinuing ? null : _continue,
                                   style: FilledButton.styleFrom(
-                                    minimumSize: const Size.fromHeight(54),
+                                    minimumSize: const Size.fromHeight(56),
                                     backgroundColor: AppTheme.brandTeal,
                                     foregroundColor: AppTheme.brandNavy,
+                                    disabledBackgroundColor: AppTheme.brandTeal
+                                        .withValues(alpha: 0.55),
+                                    disabledForegroundColor: AppTheme.brandNavy
+                                        .withValues(alpha: 0.7),
                                   ),
                                   child: _isContinuing
                                       ? const Row(

@@ -10,6 +10,7 @@ void main() {
 
     expect(flags.hasSeenIntro, isTrue);
     expect(flags.trackingModeName, 'balanced');
+    expect(flags.unlockedMilestones, isEmpty);
     expect(trackingModeFromStoredName('not-a-mode').name, 'balanced');
   });
 
@@ -30,5 +31,22 @@ void main() {
       trackingModeFromStoredName(restored.trackingModeName).name,
       'batterySaver',
     );
+  });
+
+  test('milestones unlock accumulates without wiping intro', () async {
+    final directory = await Directory.systemTemp.createTemp('sanbo_flags_ms_');
+    addTearDown(() => directory.delete(recursive: true));
+    final store = AppFlagsStore(
+      pathOverride: '${directory.path}/app_flags.json',
+    );
+
+    await store.setHasSeenIntro(true);
+    final first = await store.unlockMilestones(['first_walk']);
+    expect(first, {'first_walk'});
+    final again = await store.unlockMilestones(['first_walk', 'walks_5']);
+    expect(again, {'walks_5'});
+    final restored = await store.load();
+    expect(restored.hasSeenIntro, isTrue);
+    expect(restored.unlockedMilestones, containsAll(['first_walk', 'walks_5']));
   });
 }

@@ -82,6 +82,30 @@ void main() {
     expect(await repo.getWindows(session.id), isEmpty);
   });
 
+  test('session notes can be updated', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final session = await repo.startSession(
+      startedAt: DateTime(2026, 7, 18, 12, 0),
+    );
+    await repo.completeSession(
+      sessionId: session.id,
+      endedAt: DateTime(2026, 7, 18, 12, 20),
+      totalDistanceM: 1000,
+      durationS: 1200,
+      movingTimeS: 1000,
+      stationaryTimeS: 200,
+      avgSpeedMps: 1.0,
+      validSampleCount: 10,
+    );
+    await repo.updateSessionNotes(session.id, '  공원 한 바퀴  ');
+    final loaded = await repo.getSession(session.id);
+    expect(loaded?.notes, '공원 한 바퀴');
+    await repo.updateSessionNotes(session.id, '   ');
+    final cleared = await repo.getSession(session.id);
+    expect(cleared?.notes, isNull);
+  });
+
   test('gap window quality is stored', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

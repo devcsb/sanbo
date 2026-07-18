@@ -1,7 +1,9 @@
-import 'dart:io' show Platform;
+import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -11,6 +13,9 @@ import '../../domain/models/activity_label.dart';
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/minute_window.dart';
 import '../../domain/models/walk_session.dart';
+import '../../domain/pipeline/segment_merger.dart';
+import '../../domain/services/session_export.dart';
+import '../../domain/services/walk_stats.dart';
 import '../../shared/widgets/route_map.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
@@ -24,10 +29,12 @@ final sessionDetailProvider = FutureProvider.autoDispose
       if (session == null) return null;
       final samples = await repo.getSamples(id);
       final windows = await repo.getWindows(id);
+      final segments = SegmentMerger().merge(windows);
       return SessionDetailData(
         session: session,
         samples: samples,
         windows: windows,
+        segments: segments,
       );
     });
 
@@ -39,11 +46,13 @@ class SessionDetailData {
     required this.session,
     required this.samples,
     required this.windows,
+    this.segments = const [],
   });
 
   final WalkSession session;
   final List<LocationSample> samples;
   final List<MinuteWindow> windows;
+  final List<ActivitySegment> segments;
 }
 
 class SessionDetailScreen extends ConsumerWidget {
@@ -62,7 +71,21 @@ class SessionDetailScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const AppBarTitle('산책 요약'),
         actions: [
-          if (hasLoadedData)
+          if (hasLoadedData) ...[
+            IconButton(
+              tooltip: '요약 복사',
+              icon: const Icon(Icons.copy_all_outlined),
+              onPressed: commandBusy
+                  ? null
+                  : () => _copySummary(context, ref),
+            ),
+            IconButton(
+              tooltip: '내보내기',
+              icon: const Icon(Icons.ios_share_rounded),
+              onPressed: commandBusy
+                  ? null
+                  : () => _exportSession(context, ref),
+            ),
             IconButton(
               tooltip: '삭제',
               icon: const Icon(Icons.delete_outline_rounded),
@@ -70,6 +93,7 @@ class SessionDetailScreen extends ConsumerWidget {
                   ? null
                   : () => _confirmDelete(context, ref),
             ),
+          ],
         ],
       ),
       body: async.when(
@@ -101,6 +125,11 @@ class SessionDetailScreen extends ConsumerWidget {
               .where((s) => !s.isFilteredOut)
               .map((s) => (lat: s.latitude, lon: s.longitude))
               .toList();
+          final segments = data.segments.isNotEmpty
+              ? data.segments
+              : SegmentMerger().merge(data.windows);
+          final collapsedCount = segments.length;
+          final rawCount = data.windows.length;
 
           return PageFrame(
             child: ListView(
@@ -162,18 +191,78 @@ class SessionDetailScreen extends ConsumerWidget {
                     ),
                   ],
                 ),
+                const SizedBox(height: 24),
+                const SectionLabel('메모'),
+                _SessionNotesCard(
+                  sessionId: sessionId,
+                  initialNotes: session.notes,
+                  enabled: !commandBusy,
+                ),
+                if (pacePerKmLabel(session.avgSpeedMps) != null) ...[
+                  const SizedBox(height: 16),
+                  SoftPanel(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
+                    child: Row(
+                      children: [
+                        const TonalIcon(
+                          icon: Icons.speed_rounded,
+                          size: 40,
+                          iconSize: 20,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '평균 페이스',
+                                style: theme.textTheme.labelMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                pacePerKmLabel(session.avgSpeedMps)!,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 28),
-                const SectionLabel('시간대별 활동'),
+                const SectionLabel('활동 흐름'),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const StatusPill(
-                      label: '탭하여 수정',
-                      icon: Icons.edit_outlined,
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        const StatusPill(
+                          label: '구간 탭하여 수정',
+                          icon: Icons.edit_outlined,
+                        ),
+                        if (rawCount > 0)
+                          StatusPill(
+                            label: rawCount == collapsedCount
+                                ? '$collapsedCount개 구간'
+                                : '$rawCount분 → $collapsedCount개 구간',
+                            icon: Icons.timeline_rounded,
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      '탭하면 활동을 수정할 수 있어요',
+                      '같은 활동은 묶어서 보여 드려요. 구간을 탭하면 한 번에 수정됩니다.',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.onSurfaceVariant,
                       ),
@@ -181,7 +270,7 @@ class SessionDetailScreen extends ConsumerWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                if (data.windows.isEmpty)
+                if (segments.isEmpty)
                   SoftPanel(
                     child: Text(
                       '구간이 없어요. 짧은 산책이거나 위치 기록이 부족했을 수 있습니다.',
@@ -195,7 +284,7 @@ class SessionDetailScreen extends ConsumerWidget {
                     padding: EdgeInsets.zero,
                     child: Column(
                       children: [
-                        for (var i = 0; i < data.windows.length; i++) ...[
+                        for (var i = 0; i < segments.length; i++) ...[
                           if (i > 0)
                             Divider(
                               height: 1,
@@ -204,15 +293,15 @@ class SessionDetailScreen extends ConsumerWidget {
                               color: theme.colorScheme.outlineVariant
                                   .withValues(alpha: 0.6),
                             ),
-                          _TimelineRow(
-                            window: data.windows[i],
+                          _SegmentRow(
+                            segment: segments[i],
                             onTap: commandBusy
                                 ? null
-                                : () => _editLabel(
+                                : () => _editSegment(
                                     context,
                                     ref,
                                     sessionId,
-                                    data.windows[i],
+                                    segments[i],
                                   ),
                           ),
                         ],
@@ -225,6 +314,63 @@ class SessionDetailScreen extends ConsumerWidget {
         },
       ),
     );
+  }
+
+
+  Future<void> _copySummary(BuildContext context, WidgetRef ref) async {
+    final data = ref.read(sessionDetailProvider(sessionId)).valueOrNull;
+    if (data == null) return;
+    final summary = const SessionExport().humanSummary(
+      session: data.session,
+      windows: data.windows,
+    );
+    await Clipboard.setData(ClipboardData(text: summary));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('산책 요약을 복사했어요.')),
+    );
+  }
+
+  Future<void> _exportSession(BuildContext context, WidgetRef ref) async {
+    final data = ref.read(sessionDetailProvider(sessionId)).valueOrNull;
+    if (data == null) return;
+    ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
+    try {
+      const exporter = SessionExport();
+      final ndjson = exporter.toNdjson(
+        session: data.session,
+        windows: data.windows,
+        samples: data.samples,
+      );
+      final dir = await Directory.systemTemp.createTemp('sanbo_export_');
+      final stamp = DateTime.now().toIso8601String().replaceAll(':', '');
+      final shortId = data.session.id.length >= 8
+          ? data.session.id.substring(0, 8)
+          : data.session.id;
+      final file = File('${dir.path}/sanbo-$shortId-$stamp.ndjson');
+      await file.writeAsString(ndjson);
+      await Clipboard.setData(ClipboardData(text: file.path));
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('NDJSON을 저장하고 경로를 복사했어요.'),
+          action: SnackBarAction(
+            label: '요약 복사',
+            onPressed: () {
+              unawaited(_copySummary(context, ref));
+            },
+          ),
+        ),
+      );
+    } on Object {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('내보내기에 실패했어요. 다시 시도해 주세요.')),
+        );
+      }
+    } finally {
+      ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
+    }
   }
 
   Future<void> _confirmDelete(BuildContext context, WidgetRef ref) async {
@@ -270,29 +416,41 @@ class SessionDetailScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _editLabel(
+  Future<void> _editSegment(
     BuildContext context,
     WidgetRef ref,
     String sessionId,
-    MinuteWindow w,
+    ActivitySegment segment,
   ) async {
     final selected = await showModalBottomSheet<ActivityLabel>(
       context: context,
       showDragHandle: true,
       builder: (ctx) {
         final theme = Theme.of(ctx);
+        final range = _formatSegmentRange(segment);
         return SafeArea(
           child: ListView(
             shrinkWrap: true,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 4),
                 child: Text('활동 선택', style: theme.textTheme.titleMedium),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  segment.isMultiMinute
+                      ? '$range · ${segment.minuteCount}분 구간에 한 번에 적용'
+                      : '$range 구간에 적용',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
               for (final label in ActivityLabel.values)
                 ListTile(
                   title: Text(label.labelKo),
-                  trailing: w.displayLabel == label
+                  trailing: segment.label == label
                       ? Icon(
                           Icons.check_rounded,
                           color: theme.colorScheme.primary,
@@ -309,11 +467,10 @@ class SessionDetailScreen extends ConsumerWidget {
     if (selected == null) return;
     ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
     try {
-      await ref
-          .read(walkRepositoryProvider)
-          .updateWindowUserLabel(
+      final starts = segment.windows.map((w) => w.windowStart).toList();
+      await ref.read(walkRepositoryProvider).updateWindowsUserLabel(
             sessionId: sessionId,
-            windowStart: w.windowStart,
+            windowStarts: starts,
             userLabel: selected,
           );
       ref.read(historyTickProvider.notifier).state++;
@@ -339,6 +496,13 @@ class SessionDetailScreen extends ConsumerWidget {
     if (seconds == null) return '측정되지 않음';
     return _fmt(Duration(seconds: seconds));
   }
+}
+
+String _formatSegmentRange(ActivitySegment segment) {
+  final start = DateFormat('HH:mm').format(segment.start);
+  if (!segment.isMultiMinute) return start;
+  final end = DateFormat('HH:mm').format(segment.endExclusive);
+  return '$start–$end';
 }
 
 class _SecondaryMetricStrip extends StatelessWidget {
@@ -397,18 +561,18 @@ class _SecondaryMetricStrip extends StatelessWidget {
   }
 }
 
-class _TimelineRow extends StatelessWidget {
-  const _TimelineRow({required this.window, required this.onTap});
+class _SegmentRow extends StatelessWidget {
+  const _SegmentRow({required this.segment, required this.onTap});
 
-  final MinuteWindow window;
+  final ActivitySegment segment;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final time = DateFormat('HH:mm').format(window.windowStart);
-    final confirmed = window.userConfirmed;
-    final label = window.displayLabel.labelKo;
+    final range = _formatSegmentRange(segment);
+    final confirmed = segment.userConfirmed;
+    final label = segment.label.labelKo;
     final status = StatusPill(
       label: confirmed ? '확정' : '추정',
       color: confirmed
@@ -421,7 +585,7 @@ class _TimelineRow extends StatelessWidget {
         Text(label, style: theme.textTheme.titleSmall),
         const SizedBox(height: 2),
         Text(
-          timelineWindowSubtitle(window),
+          timelineSegmentSubtitle(segment),
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -431,7 +595,7 @@ class _TimelineRow extends StatelessWidget {
 
     return Semantics(
       button: true,
-      label: '$time $label${confirmed ? ' 확정' : ' 추정'}. 탭하여 수정',
+      label: '$range $label${confirmed ? ' 확정' : ' 추정'}. 탭하여 수정',
       enabled: onTap != null,
       excludeSemantics: true,
       child: InkWell(
@@ -455,7 +619,7 @@ class _TimelineRow extends StatelessWidget {
                         crossAxisAlignment: WrapCrossAlignment.center,
                         children: [
                           Text(
-                            time,
+                            range,
                             style: theme.textTheme.titleSmall?.copyWith(
                               fontFeatures: const [
                                 FontFeature.tabularFigures(),
@@ -486,9 +650,9 @@ class _TimelineRow extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     SizedBox(
-                      width: 48,
+                      width: segment.isMultiMinute ? 92 : 48,
                       child: Text(
-                        time,
+                        range,
                         style: theme.textTheme.titleSmall?.copyWith(
                           fontFeatures: const [FontFeature.tabularFigures()],
                         ),
@@ -512,7 +676,7 @@ class _TimelineRow extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            timelineWindowSubtitle(window),
+                            timelineSegmentSubtitle(segment),
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -532,6 +696,123 @@ class _TimelineRow extends StatelessWidget {
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _SessionNotesCard extends ConsumerStatefulWidget {
+  const _SessionNotesCard({
+    required this.sessionId,
+    required this.initialNotes,
+    required this.enabled,
+  });
+
+  final String sessionId;
+  final String? initialNotes;
+  final bool enabled;
+
+  @override
+  ConsumerState<_SessionNotesCard> createState() => _SessionNotesCardState();
+}
+
+class _SessionNotesCardState extends ConsumerState<_SessionNotesCard> {
+  late final TextEditingController _controller;
+  var _saving = false;
+  var _dirty = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialNotes ?? '');
+  }
+
+  @override
+  void didUpdateWidget(covariant _SessionNotesCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_dirty && oldWidget.initialNotes != widget.initialNotes) {
+      _controller.text = widget.initialNotes ?? '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (_saving || !widget.enabled) return;
+    setState(() => _saving = true);
+    try {
+      await ref.read(walkRepositoryProvider).updateSessionNotes(
+            widget.sessionId,
+            _controller.text,
+          );
+      ref.read(historyTickProvider.notifier).state++;
+      _dirty = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('메모를 저장했어요.')),
+        );
+      }
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('메모를 저장하지 못했어요.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return SoftPanel(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            '그날의 한마디',
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            '일기처럼 짧게 남겨 두세요. 이 기기에만 저장됩니다.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _controller,
+            enabled: widget.enabled && !_saving,
+            minLines: 2,
+            maxLines: 5,
+            maxLength: 280,
+            textInputAction: TextInputAction.newline,
+            onChanged: (_) => _dirty = true,
+            decoration: const InputDecoration(
+              hintText: '예: 강변 바람이 시원했다',
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: FilledButton.tonal(
+              onPressed: widget.enabled && !_saving ? () => unawaited(_save()) : null,
+              child: _saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('메모 저장'),
+            ),
+          ),
+        ],
       ),
     );
   }

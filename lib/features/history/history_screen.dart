@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../core/theme/app_theme.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/walk_session.dart';
+import '../../domain/services/walk_stats.dart';
 import '../../shared/widgets/ui_bits.dart';
 import 'history_providers.dart';
 
@@ -54,6 +56,8 @@ class HistoryScreen extends ConsumerWidget {
                   SizedBox(height: index == 0 ? 20 : 10),
               itemBuilder: (context, index) {
                 if (index == 0) {
+                  final stats = WalkStats.fromSessions(sessions);
+                  final milestones = stats.satisfied().take(3).toList();
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -61,7 +65,88 @@ class HistoryScreen extends ConsumerWidget {
                         title: '산책 기록',
                         description: '걸었던 길과 시간을 차분히 돌아보세요.',
                       ),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 16),
+                      SoftPanel(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 16,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              '나의 흐름',
+                              style: theme.textTheme.titleSmall,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              stats.summaryLine(),
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                            const SizedBox(height: 14),
+                            LayoutBuilder(
+                              builder: (context, constraints) {
+                                final stack =
+                                    constraints.maxWidth < 300 ||
+                                    MediaQuery.textScalerOf(context).scale(14) >
+                                        18;
+                                final tiles = [
+                                  _StatChip(
+                                    label: '산책',
+                                    value: '${stats.walkCount}',
+                                  ),
+                                  _StatChip(
+                                    label: '누적',
+                                    value:
+                                        '${stats.totalDistanceKm.toStringAsFixed(stats.totalDistanceKm >= 10 ? 0 : 1)} km',
+                                  ),
+                                  _StatChip(
+                                    label: '최장',
+                                    value: formatDurationCompact(
+                                      stats.longestDuration,
+                                    ),
+                                  ),
+                                ];
+                                if (stack) {
+                                  return Column(
+                                    children: [
+                                      for (var i = 0; i < tiles.length; i++) ...[
+                                        if (i > 0) const SizedBox(height: 8),
+                                        tiles[i],
+                                      ],
+                                    ],
+                                  );
+                                }
+                                return Row(
+                                  children: [
+                                    for (var i = 0; i < tiles.length; i++) ...[
+                                      if (i > 0) const SizedBox(width: 8),
+                                      Expanded(child: tiles[i]),
+                                    ],
+                                  ],
+                                );
+                              },
+                            ),
+                            if (milestones.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: [
+                                  for (final m in milestones)
+                                    StatusPill(
+                                      label: m.title,
+                                      icon: Icons.auto_awesome_rounded,
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
                       Wrap(
                         spacing: 8,
                         runSpacing: 4,
@@ -91,10 +176,12 @@ class HistoryScreen extends ConsumerWidget {
                     padding: EdgeInsets.zero,
                     child: InkWell(
                       onTap: () => context.go('/history/${s.id}'),
+                      borderRadius:
+                          BorderRadius.circular(AppTheme.radiusMedium),
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(minHeight: 72),
+                        constraints: const BoxConstraints(minHeight: 76),
                         child: Padding(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
+                          padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
                           child: Row(
                             children: [
                               const TonalIcon(
@@ -114,12 +201,16 @@ class HistoryScreen extends ConsumerWidget {
                                                 .onSurfaceVariant,
                                           ),
                                     ),
-                                    const SizedBox(height: 3),
+                                    const SizedBox(height: 4),
                                     Text(
                                       '${km.toStringAsFixed(2)} km',
-                                      style: theme.textTheme.titleMedium,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: -0.3,
+                                          ),
                                     ),
-                                    const SizedBox(height: 2),
+                                    const SizedBox(height: 3),
                                     Text(
                                       '소요 시간 ${_fmt(dur)}',
                                       style: theme.textTheme.bodySmall
@@ -153,8 +244,52 @@ class HistoryScreen extends ConsumerWidget {
   }
 
   String _fmt(Duration d) {
-    final m = d.inMinutes;
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    if (h > 0) return '$h:$m:$s';
     return '$m:$s';
   }
 }
+
+class _StatChip extends StatelessWidget {
+  const _StatChip({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              value,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

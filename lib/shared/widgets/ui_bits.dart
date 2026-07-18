@@ -12,20 +12,34 @@ class BrandMark extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cacheSize = (size * MediaQuery.devicePixelRatioOf(context)).round();
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(size * 0.28),
-      child: Image.asset(
-        AppInfo.brandIconAsset,
-        width: size,
-        height: size,
-        fit: BoxFit.cover,
-        cacheWidth: cacheSize,
-        cacheHeight: cacheSize,
-        excludeFromSemantics: true,
-        errorBuilder: (_, _, _) => Icon(
-          Icons.layers_rounded,
-          size: size * 0.85,
-          color: Theme.of(context).colorScheme.primary,
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(size * 0.3),
+        boxShadow: AppTheme.elevationLow(Theme.of(context).brightness)
+            .map(
+              (s) => BoxShadow(
+                color: s.color.withValues(alpha: s.color.a * 0.55),
+                offset: s.offset,
+                blurRadius: s.blurRadius,
+              ),
+            )
+            .toList(),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size * 0.3),
+        child: Image.asset(
+          AppInfo.brandIconAsset,
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          cacheWidth: cacheSize,
+          cacheHeight: cacheSize,
+          excludeFromSemantics: true,
+          errorBuilder: (_, _, _) => Icon(
+            Icons.layers_rounded,
+            size: size * 0.85,
+            color: Theme.of(context).colorScheme.primary,
+          ),
         ),
       ),
     );
@@ -59,9 +73,9 @@ class PageFrame extends StatelessWidget {
     required this.child,
     this.padding = const EdgeInsets.fromLTRB(
       AppTheme.pagePadding,
-      8,
+      10,
       AppTheme.pagePadding,
-      32,
+      36,
     ),
     this.maxWidth = AppTheme.pageMaxWidth,
   });
@@ -105,24 +119,33 @@ class PageIntro extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (eyebrow != null) ...[
-          Text(
-            eyebrow!,
-            style: theme.textTheme.labelLarge?.copyWith(
-              color: theme.colorScheme.primary,
-              fontWeight: FontWeight.w700,
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(AppTheme.radiusPill),
+            ),
+            child: Text(
+              eyebrow!,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.15,
+              ),
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 12),
         ],
         Semantics(
           header: true,
           child: Text(title, style: theme.textTheme.headlineSmall),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 10),
         Text(
           description,
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
+            height: 1.55,
           ),
         ),
       ],
@@ -140,7 +163,7 @@ class SectionLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.fromLTRB(2, 4, 2, 10),
+      padding: const EdgeInsets.fromLTRB(4, 6, 4, 12),
       child: Semantics(
         header: true,
         child: Text(
@@ -148,7 +171,7 @@ class SectionLabel extends StatelessWidget {
           style: theme.textTheme.labelLarge?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
             fontWeight: FontWeight.w700,
-            letterSpacing: 0.1,
+            letterSpacing: 0.2,
           ),
         ),
       ),
@@ -162,7 +185,7 @@ class TonalIcon extends StatelessWidget {
     super.key,
     required this.icon,
     this.color,
-    this.size = 44,
+    this.size = 46,
     this.iconSize = 22,
   });
 
@@ -180,7 +203,7 @@ class TonalIcon extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         color: colors.background,
-        borderRadius: BorderRadius.circular(AppTheme.radiusSmall),
+        borderRadius: BorderRadius.circular(AppTheme.radiusSmall + 2),
       ),
       alignment: Alignment.center,
       child: Icon(icon, size: iconSize, color: colors.foreground),
@@ -203,10 +226,13 @@ class StatusPill extends StatelessWidget {
     return DecoratedBox(
       decoration: BoxDecoration(
         color: colors.background,
-        borderRadius: BorderRadius.circular(999),
+        borderRadius: BorderRadius.circular(AppTheme.radiusPill),
+        border: Border.all(
+          color: colors.foreground.withValues(alpha: 0.08),
+        ),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -297,8 +323,8 @@ class EmptyStateView extends StatelessWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    TonalIcon(icon: icon, size: 76, iconSize: 34),
-                    const SizedBox(height: 20),
+                    TonalIcon(icon: icon, size: 80, iconSize: 36),
+                    const SizedBox(height: 22),
                     Semantics(
                       header: true,
                       child: Text(
@@ -308,17 +334,18 @@ class EmptyStateView extends StatelessWidget {
                       ),
                     ),
                     if (message != null) ...[
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 10),
                       Text(
                         message!,
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
+                          height: 1.55,
                         ),
                       ),
                     ],
                     if (actionLabel != null && onAction != null) ...[
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 26),
                       FilledButton(
                         onPressed: onAction,
                         style: FilledButton.styleFrom(
@@ -338,24 +365,44 @@ class EmptyStateView extends StatelessWidget {
   }
 }
 
-/// Soft surface used to group settings, summaries, and related actions.
+/// Soft elevated surface used to group settings, summaries, and related actions.
 class SoftPanel extends StatelessWidget {
   const SoftPanel({
     super.key,
     required this.child,
     this.padding = const EdgeInsets.all(18),
     this.color,
+    this.elevated = true,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
   final Color? color;
+  final bool elevated;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      color: color,
-      child: Padding(padding: padding, child: child),
+    final theme = Theme.of(context);
+    final surfaces = SanboSurfaces.of(context);
+    final bg = color ??
+        (theme.brightness == Brightness.dark
+            ? theme.colorScheme.surfaceContainerLow
+            : theme.colorScheme.surfaceContainerLowest);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        border: Border.all(color: surfaces.panelBorder),
+        boxShadow: elevated ? surfaces.panelShadow : const [],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+        child: Material(
+          type: MaterialType.transparency,
+          child: Padding(padding: padding, child: child),
+        ),
+      ),
     );
   }
 }
@@ -378,7 +425,7 @@ class MetricStrip extends StatelessWidget {
     super.key,
     required this.metrics,
     this.header,
-    this.padding = const EdgeInsets.symmetric(vertical: 22, horizontal: 10),
+    this.padding = const EdgeInsets.symmetric(vertical: 22, horizontal: 12),
   });
 
   final List<MetricData> metrics;
@@ -492,7 +539,7 @@ class MetricTile extends StatelessWidget {
       textAlign: horizontal ? TextAlign.end : TextAlign.center,
       style: theme.textTheme.titleLarge?.copyWith(
         fontWeight: FontWeight.w700,
-        letterSpacing: -0.45,
+        letterSpacing: -0.5,
         color: emphasize ? theme.colorScheme.primary : null,
         fontFeatures: const [FontFeature.tabularFigures()],
       ),
@@ -515,7 +562,7 @@ class MetricTile extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 labelWidget,
-                const SizedBox(height: 7),
+                const SizedBox(height: 8),
                 FittedBox(fit: BoxFit.scaleDown, child: valueWidget),
               ],
             ),

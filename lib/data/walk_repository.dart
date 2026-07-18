@@ -97,6 +97,19 @@ class WalkRepository {
     await batch.commit(noResult: true);
   }
 
+  /// Replace all samples for a session (after filter flags are known).
+  Future<void> replaceSamples(
+    String sessionId,
+    List<LocationSample> samples,
+  ) async {
+    await _db.delete(
+      'location_samples',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+    );
+    await insertSamples(sessionId, samples);
+  }
+
   Future<List<LocationSample>> getSamples(String sessionId) async {
     final rows = await _db.query(
       'location_samples',
@@ -172,15 +185,104 @@ class WalkRepository {
     String? note,
     bool confirmed = true,
   }) async {
-    await _db.update(
+    final payload = <String, Object?>{
+      'user_label': userLabel.storageKey,
+      'user_note': note,
+      'user_confirmed': confirmed ? 1 : 0,
+    };
+    final keys = _windowStartKeys(windowStart);
+    var updated = 0;
+    for (final key in keys) {
+      updated = await _db.update(
+        'minute_windows',
+        payload,
+        where: 'session_id = ? AND window_start = ?',
+        whereArgs: [sessionId, key],
+      );
+      if (updated > 0) return;
+    }
+    // Last resort: match any row whose parsed window_start equals target minute.
+    final rows = await _db.query(
       'minute_windows',
-      {
-        'user_label': userLabel.storageKey,
-        'user_note': note,
-        'user_confirmed': confirmed ? 1 : 0,
-      },
-      where: 'session_id = ? AND window_start = ?',
-      whereArgs: [sessionId, windowStart.toIso8601String()],
+      columns: ['window_start'],
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+    );
+    final targetLocal = DateTime(
+      windowStart.year,
+      windowStart.month,
+      windowStart.day,
+      windowStart.hour,
+      windowStart.minute,
+    );
+    for (final row in rows) {
+      final raw = row['window_start'] as String?;
+      if (raw == null) continue;
+      final parsed = DateTime.tryParse(raw);
+      if (parsed == null) continue;
+      final local = parsed.isUtc ? parsed.toLocal() : parsed;
+      final minute = DateTime(
+        local.year,
+        local.month,
+        local.day,
+        local.hour,
+        local.minute,
+      );
+      if (minute != targetLocal) continue;
+      await _db.update(
+        'minute_windows',
+        payload,
+        where: 'session_id = ? AND window_start = ?',
+        whereArgs: [sessionId, raw],
+      );
+      return;
+    }
+  }
+  /// Apply the same user label to every minute in [windowStarts] (segment edit).
+  Future<void> updateWindowsUserLabel({
+    required String sessionId,
+    required List<DateTime> windowStarts,
+    required ActivityLabel userLabel,
+    String? note,
+    bool confirmed = true,
+  }) async {
+    if (windowStarts.isEmpty) return;
+    for (final start in windowStarts) {
+      await updateWindowUserLabel(
+        sessionId: sessionId,
+        windowStart: start,
+        userLabel: userLabel,
+        note: note,
+        confirmed: confirmed,
+      );
+    }
+  }
+
+  /// Candidate ISO forms for a wall-clock minute key.
+  List<String> _windowStartKeys(DateTime windowStart) {
+    final local = windowStart.isUtc ? windowStart.toLocal() : windowStart;
+    final floored = DateTime(
+      local.year,
+      local.month,
+      local.day,
+      local.hour,
+      local.minute,
+    );
+    final keys = <String>{
+      floored.toIso8601String(),
+      windowStart.toIso8601String(),
+      floored.toUtc().toIso8601String(),
+    };
+    return keys.toList();
+  }
+
+  Future<void> updateSessionNotes(String sessionId, String? notes) async {
+    final trimmed = notes?.trim();
+    await _db.update(
+      'sessions',
+      {'notes': (trimmed == null || trimmed.isEmpty) ? null : trimmed},
+      where: 'id = ?',
+      whereArgs: [sessionId],
     );
   }
 
@@ -192,6 +294,18 @@ class WalkRepository {
     await _db.delete('minute_windows');
     await _db.delete('location_samples');
     await _db.delete('sessions');
+  }
+
+  String _stableWindowStart(DateTime ts) {
+    final local = ts.isUtc ? ts.toLocal() : ts;
+    final floored = DateTime(
+      local.year,
+      local.month,
+      local.day,
+      local.hour,
+      local.minute,
+    );
+    return floored.toIso8601String();
   }
 
   // ── mapping ────────────────────────────────────────────────────
@@ -248,7 +362,7 @@ class WalkRepository {
 
   Map<String, Object?> _windowToRow(String sessionId, MinuteWindow w) => {
         'session_id': sessionId,
-        'window_start': w.windowStart.toIso8601String(),
+        'window_start': _stableWindowStart(w.windowStart),
         'duration_s': w.durationS,
         'partial': w.partial ? 1 : 0,
         'sample_count': w.sampleCount,

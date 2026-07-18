@@ -192,6 +192,17 @@
 | 설정 신뢰성 | 위치 기록 간격을 로컬에 보존하고 복구 산책은 세션에 저장된 간격으로 재개 |
 | 시각 검수 | 390×844에서 인트로·홈·빈 기록·상세·설정 대표 상태 렌더링 확인 |
 
+### v3.1 — Astryx-inspired polish (2026-07-18)
+
+| 축 | 적용 |
+|----|------|
+| 서피스 | warm paper background `#F6F3ED`, elevated `SoftPanel` with Astryx-like dual soft shadows (`SanboSurfaces`) |
+| 모서리 | medium 20 / large 28 / pill CTAs & chips / nav indicator |
+| 타이포 | tighter tracking, stronger hierarchy, eyebrow chip on `PageIntro` |
+| 인트로 | radial brand glows, logo glow, taller pill CTA |
+| 내비 | floating top-border + soft upward shadow shell |
+| 지도 | bordered elevated clip frame matching panels |
+
 ---
 
 ## 5. 회귀 게이트
@@ -220,3 +231,5 @@
 | 1.0 | 2026-07-12 | 초안 검토 + 1차 수정 표 |
 | 2.0 | 2026-07-13 | 전 화면 재검토; H06/H07/D04 등 major 추가 수정; multi-axis 문서화 |
 | 3.0 | 2026-07-16 | 전 화면 디자인 시스템 통합, 반응형·큰 글자 대응, 설정 영속성·삭제 안전성·시각 검수 추가 |
+| 3.1 | 2026-07-18 | Astryx 톤 적용: warm paper surface, soft elevation, pill CTA, nav/map polish |
+| 3.2 | 2026-07-18 | 사용성: 개인 이정표, 세션 메모, 요약 복사, NDJSON export, 햅틱 |

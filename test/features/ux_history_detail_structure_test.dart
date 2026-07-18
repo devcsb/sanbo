@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
@@ -6,6 +7,24 @@ import 'package:sanbo/features/session_detail/timeline_copy.dart';
 void main() {
   // Empty history CTA + delete routing: see ux_history_detail_widget_test.dart
   // (real HistoryScreen / SessionDetailScreen + go_router).
+
+  test('history and detail ship stats notes export helpers', () {
+    final history = File('lib/features/history/history_screen.dart').readAsStringSync();
+    expect(history.contains('나의 흐름'), isTrue);
+    expect(history.contains('WalkStats.fromSessions'), isTrue);
+
+    final detail =
+        File('lib/features/session_detail/session_detail_screen.dart')
+            .readAsStringSync();
+    expect(detail.contains('메모 저장'), isTrue);
+    expect(detail.contains('_copySummary'), isTrue);
+    expect(detail.contains('_exportSession'), isTrue);
+    expect(detail.contains('SessionExport'), isTrue);
+
+    final home = File('lib/features/home/home_screen.dart').readAsStringSync();
+    expect(home.contains('_celebrateMilestones'), isTrue);
+    expect(home.contains('HapticFeedback'), isTrue);
+  });
 
   test('timeline copy uses shipped helper without tech dump', () {
     final w = MinuteWindow(

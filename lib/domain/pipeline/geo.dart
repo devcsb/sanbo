@@ -20,17 +20,27 @@ double haversineMeters({
   return earthRadiusM * c;
 }
 
-double pathDistanceMeters(Iterable<({double lat, double lon})> points) {
+/// Path length with optional micro-jitter suppression.
+///
+/// Segments shorter than [minSegmentM] are ignored so stationary GPS noise
+/// does not inflate distance, while real walking steps still accumulate.
+double pathDistanceMeters(
+  Iterable<({double lat, double lon})> points, {
+  double minSegmentM = 1.5,
+}) {
   final list = points.toList();
   if (list.length < 2) return 0;
   var total = 0.0;
   for (var i = 1; i < list.length; i++) {
-    total += haversineMeters(
+    final d = haversineMeters(
       lat1: list[i - 1].lat,
       lon1: list[i - 1].lon,
       lat2: list[i].lat,
       lon2: list[i].lon,
     );
+    if (d >= minSegmentM) {
+      total += d;
+    }
   }
   return total;
 }

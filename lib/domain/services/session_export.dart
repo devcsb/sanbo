@@ -1,0 +1,160 @@
+import 'dart:convert';
+
+import '../models/activity_label.dart';
+import '../models/location_sample.dart';
+import '../models/minute_window.dart';
+import '../models/walk_session.dart';
+import '../pipeline/segment_merger.dart';
+import 'walk_stats.dart';
+
+/// Local export helpers (FR-16). Pure Dart — no Flutter/IO.
+class SessionExport {
+  const SessionExport();
+
+  /// Short human summary for clipboard share (no GPS dump).
+  String humanSummary({
+    required WalkSession session,
+    List<MinuteWindow> windows = const [],
+  }) {
+    final date = session.startedAt.toIso8601String().replaceFirst('T', ' ');
+    final km = ((session.totalDistanceM ?? 0) / 1000).toStringAsFixed(2);
+    final dur = formatDurationCompact(
+      Duration(seconds: session.durationS ?? 0),
+    );
+    final kmh = ((session.avgSpeedMps ?? 0) * 3.6).toStringAsFixed(1);
+    final pace = pacePerKmLabel(session.avgSpeedMps);
+    final segments = SegmentMerger().merge(windows);
+    final buf = StringBuffer()
+      ..writeln('산보 산책 요약')
+      ..writeln('시작: $date')
+      ..writeln('거리: $km km')
+      ..writeln('시간: $dur')
+      ..writeln('평균 속도: $kmh km/h');
+    if (pace != null) buf.writeln('페이스: $pace');
+    if (session.movingTimeS != null) {
+      buf.writeln(
+        '이동 시간: ${formatDurationCompact(Duration(seconds: session.movingTimeS!))}',
+      );
+    }
+    if (session.stationaryTimeS != null) {
+      buf.writeln(
+        '정지 시간: ${formatDurationCompact(Duration(seconds: session.stationaryTimeS!))}',
+      );
+    }
+    if (session.notes != null && session.notes!.trim().isNotEmpty) {
+      buf.writeln('메모: ${session.notes!.trim()}');
+    }
+    if (segments.isNotEmpty) {
+      buf.writeln('활동 구간:');
+      for (final seg in segments.take(12)) {
+        final start = _hhmm(seg.start);
+        final end = _hhmm(seg.endExclusive);
+        final range = seg.isMultiMinute ? '$start–$end' : start;
+        buf.writeln('· $range ${seg.label.labelKo}');
+      }
+      if (segments.length > 12) {
+        buf.writeln('· …외 ${segments.length - 12}개 구간');
+      }
+    }
+    buf.writeln('— 산보 (로컬 기록)');
+    return buf.toString().trimRight();
+  }
+
+  /// JSON object for one session (meta + windows; samples optional).
+  Map<String, Object?> toJsonDocument({
+    required WalkSession session,
+    required List<MinuteWindow> windows,
+    List<LocationSample> samples = const [],
+    bool includeSamples = false,
+  }) {
+    return {
+      'schema_version': 1,
+      'export_kind': 'sanbo_session',
+      'session': {
+        'id': session.id,
+        'started_at': session.startedAt.toIso8601String(),
+        'ended_at': session.endedAt?.toIso8601String(),
+        'status': session.status.name,
+        'tracking_mode': session.trackingMode.name,
+        'timezone': session.timezone,
+        'total_distance_m': session.totalDistanceM,
+        'duration_s': session.durationS,
+        'moving_time_s': session.movingTimeS,
+        'stationary_time_s': session.stationaryTimeS,
+        'avg_speed_mps': session.avgSpeedMps,
+        'valid_sample_count': session.validSampleCount,
+        'median_accuracy_m': session.medianAccuracyM,
+        'notes': session.notes,
+      },
+      'windows': windows.map(_windowJson).toList(),
+      if (includeSamples)
+        'samples': samples.map(_sampleJson).toList(),
+    };
+  }
+
+  /// NDJSON: meta line + one sample per line (reference log spirit).
+  String toNdjson({
+    required WalkSession session,
+    required List<MinuteWindow> windows,
+    required List<LocationSample> samples,
+  }) {
+    final meta = {
+      'type': 'session',
+      'schema_version': 1,
+      'session': toJsonDocument(
+        session: session,
+        windows: windows,
+      )['session'],
+      'window_count': windows.length,
+      'sample_count': samples.length,
+    };
+    final buf = StringBuffer()..writeln(jsonEncode(meta));
+    for (final s in samples) {
+      buf.writeln(
+        jsonEncode({
+          'type': 'sample',
+          ..._sampleJson(s),
+        }),
+      );
+    }
+    for (final w in windows) {
+      buf.writeln(
+        jsonEncode({
+          'type': 'window',
+          ..._windowJson(w),
+        }),
+      );
+    }
+    return buf.toString();
+  }
+
+  Map<String, Object?> _windowJson(MinuteWindow w) => {
+        'window_start': w.windowStart.toIso8601String(),
+        'duration_s': w.durationS,
+        'partial': w.partial,
+        'distance_m': w.distanceM,
+        'avg_speed_mps': w.avgSpeedMps,
+        'stationary_ratio': w.stationaryRatio,
+        'quality': w.quality.name,
+        'hypothesis_label': w.hypothesisLabel.storageKey,
+        'hypothesis_confidence': w.hypothesisConfidence,
+        'user_label': w.userLabel?.storageKey,
+        'user_confirmed': w.userConfirmed,
+        'user_note': w.userNote,
+      };
+
+  Map<String, Object?> _sampleJson(LocationSample s) => {
+        'ts': s.timestamp.toIso8601String(),
+        'lat': s.latitude,
+        'lon': s.longitude,
+        'accuracy_m': s.accuracyM,
+        'speed_mps': s.speedMps,
+        'is_filtered_out': s.isFilteredOut,
+      };
+
+  String _hhmm(DateTime t) {
+    final h = t.hour.toString().padLeft(2, '0');
+    final m = t.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+}

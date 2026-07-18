@@ -11,6 +11,7 @@ enum LocationPermissionState {
 
 /// Platform location adapter (TRD LocationEngine).
 abstract class LocationEngine {
+  /// Live sample stream. Must be listenable **before** [start] so no fix is lost.
   Stream<LocationSample> get samples;
   TrackingMode get mode;
   Future<void> setMode(TrackingMode mode);
