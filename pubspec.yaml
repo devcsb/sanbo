@@ -1,7 +1,7 @@
 name: sanbo
 description: 산책 분 단위 동선·속도·장소·활동 추정 개인 로그 (공개 지도 기반)
 publish_to: "none"
-version: 0.3.1+4
+version: 0.3.2+5
 
 environment:
   sdk: ^3.12.2
