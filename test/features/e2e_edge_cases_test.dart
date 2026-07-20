@@ -41,8 +41,10 @@ void main() {
 
     final state = container.read(sessionControllerProvider);
     expect(state.isTracking, isFalse);
-    expect(state.errorMessage, isNotNull);
-    expect(state.errorMessage, contains('GPS'));
+    // Benign outcome: shown as a calm neutral notice, not a red error banner.
+    expect(state.errorMessage, isNull);
+    expect(state.notice, isNotNull);
+    expect(state.notice, contains('GPS'));
   });
 
   test('double start while tracking is ignored', () async {
@@ -298,8 +300,9 @@ void main() {
     expect(ended, isNull);
     expect(await repo.listCompleted(), isEmpty);
     final state = container.read(sessionControllerProvider);
-    expect(state.errorMessage, isNotNull);
-    expect(state.errorMessage, contains('짧'));
+    // Benign outcome: shown as a calm neutral notice, not a red error banner.
+    expect(state.errorMessage, isNull);
+    expect(state.notice, contains('짧'));
   });
 
   test('history duration format includes hours when needed', () {

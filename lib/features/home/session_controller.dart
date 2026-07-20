@@ -25,6 +25,7 @@ class LiveSessionState {
     this.permissionState = LocationPermissionState.unknown,
     this.errorMessage,
     this.statusMessage,
+    this.notice,
     this.needsRecovery = false,
   });
 
@@ -42,6 +43,9 @@ class LiveSessionState {
   final LocationPermissionState permissionState;
   final String? errorMessage;
   final String? statusMessage;
+  /// Calm neutral note shown on the idle home (e.g. a benign "walk not saved"
+  /// outcome). Distinct from [errorMessage], which renders as a red banner.
+  final String? notice;
   /// Incomplete session recovered from disk (UX-H04).
   final bool needsRecovery;
 
@@ -58,9 +62,11 @@ class LiveSessionState {
     LocationPermissionState? permissionState,
     String? errorMessage,
     String? statusMessage,
+    String? notice,
     bool? needsRecovery,
     bool clearError = false,
     bool clearSession = false,
+    bool clearNotice = false,
   }) {
     return LiveSessionState(
       session: clearSession ? null : (session ?? this.session),
@@ -75,6 +81,7 @@ class LiveSessionState {
       permissionState: permissionState ?? this.permissionState,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       statusMessage: statusMessage,
+      notice: clearNotice ? null : (notice ?? this.notice),
       needsRecovery: needsRecovery ?? this.needsRecovery,
     );
   }
@@ -169,6 +176,10 @@ class SessionController extends Notifier<LiveSessionState> {
     state = state.copyWith(clearError: true, statusMessage: state.statusMessage);
   }
 
+  void clearNotice() {
+    state = state.copyWith(clearNotice: true, statusMessage: state.statusMessage);
+  }
+
   void _startTicker(DateTime startedAt) {
     _ticker?.cancel();
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -205,6 +216,7 @@ class SessionController extends Notifier<LiveSessionState> {
     state = state.copyWith(
       isBusy: true,
       clearError: true,
+      clearNotice: true,
       statusMessage: state.needsRecovery ? state.statusMessage : null,
     );
     final perm = await _engine.requestPermission();
@@ -306,10 +318,16 @@ class SessionController extends Notifier<LiveSessionState> {
 
     // Incremental filter vs last accepted sample (avoids O(n^2) on long walks).
     final prev = _lastValidSample;
+    // Guard against out-of-order fixes (clock adjust / provider reordering):
+    // the filter sorts ascending, so an older-than-prev sample would otherwise
+    // re-accept `prev`, spuriously bumping the valid count and rewinding
+    // _lastValidSample. Skip the incremental step; stop() reprocesses the full
+    // sorted set anyway.
+    final ordered = prev == null || sample.timestamp.isAfter(prev.timestamp);
     final probe = prev == null ? [sample] : [prev, sample];
     final marked = _liveFilter.apply(probe).last;
     double? segmentSpeed;
-    if (!marked.isFilteredOut) {
+    if (ordered && !marked.isFilteredOut) {
       if (prev != null) {
         final dtMs =
             marked.timestamp.difference(prev.timestamp).inMilliseconds;
@@ -428,14 +446,24 @@ class SessionController extends Notifier<LiveSessionState> {
         }
       }
 
-      final endedAt = DateTime.now();
+      final now = DateTime.now();
       final lastTs = raw.isEmpty
-          ? endedAt
+          ? now
           : raw.map((s) => s.timestamp).reduce((a, b) => a.isAfter(b) ? a : b);
-      // Compare on absolute timeline (handles UTC GPS vs local wall clock).
-      final effectiveEnd = lastTs.toUtc().isAfter(endedAt.toUtc())
-          ? lastTs.toLocal().add(const Duration(seconds: 1))
-          : endedAt;
+      // On recovery (not actively tracking) the app was killed for an unknown
+      // gap, so `now` is far past the real end. Cap at the last real sample —
+      // otherwise duration/moving-time absorb the dead gap (pace goes wild) and
+      // the aggregator emits a gap-window for every dead minute.
+      final DateTime effectiveEnd;
+      if (!state.isTracking) {
+        effectiveEnd = raw.isEmpty ? now : lastTs.toLocal();
+      } else {
+        // Live stop: keep the future-date guard for GPS clocks running ahead
+        // (compare on the absolute timeline, UTC GPS vs local wall clock).
+        effectiveEnd = lastTs.toUtc().isAfter(now.toUtc())
+            ? lastTs.toLocal().add(const Duration(seconds: 1))
+            : now;
+      }
 
       // Empty walk: discard quietly instead of saving a 0 km ghost session.
       if (raw.isEmpty) {
@@ -446,9 +474,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _liveDistanceM = 0;
         _validSampleCount = 0;
         state = const LiveSessionState(
-          statusMessage: '위치 기록이 없어 산책을 저장하지 않았어요',
-          errorMessage:
-              'GPS를 받지 못해 저장할 경로가 없어요. 야외에서 다시 시작해 주세요.',
+          notice: 'GPS를 받지 못해 저장할 경로가 없어요. 야외에서 다시 시작해 주세요.',
         );
         return null;
       }
@@ -471,17 +497,17 @@ class SessionController extends Notifier<LiveSessionState> {
         _liveDistanceM = 0;
         _validSampleCount = 0;
         state = const LiveSessionState(
-          statusMessage: '너무 짧아 산책을 저장하지 않았어요',
-          errorMessage: '조금 더 걸은 뒤 종료해 주세요. 짧은 기록은 남기지 않아요.',
+          notice: '너무 짧아 산책을 저장하지 않았어요. 조금 더 걸은 뒤 종료해 주세요.',
         );
         return null;
       }
 
-      // Persist filter flags so map/detail omit GPS jumps.
-      await _repo.replaceSamples(session.id, result.filteredSamples);
-      await _repo.replaceWindows(session.id, result.windows);
-      final ended = await _repo.completeSession(
-        sessionId: session.id,
+      // Persist filter flags (map/detail omit GPS jumps) + windows + completion
+      // atomically so a crash mid-finalize can't leave inconsistent state.
+      final ended = await _repo.finalizeSession(
+        session: session,
+        samples: result.filteredSamples,
+        windows: result.windows,
         endedAt: effectiveEnd,
         totalDistanceM: result.metrics.totalDistanceM,
         durationS: result.metrics.durationS,
@@ -503,7 +529,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = LiveSessionState(
         statusMessage: weakGps
             ? '기록은 저장됐지만 GPS가 약했어요'
-            : '기록이 저장되었습니다',
+            : '기록을 저장했어요',
       );
       return ended;
     } catch (e) {

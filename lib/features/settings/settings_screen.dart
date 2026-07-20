@@ -308,7 +308,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       if (context.mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('모든 기록을 삭제했습니다')));
+        ).showSnackBar(const SnackBar(content: Text('모든 기록을 지웠어요')));
       }
     } on Object {
       if (context.mounted) {

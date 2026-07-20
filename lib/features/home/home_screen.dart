@@ -105,6 +105,18 @@ class HomeScreen extends ConsumerWidget {
                               : null,
                         ),
                       ],
+                      if (!tracking &&
+                          !recovery &&
+                          live.errorMessage == null &&
+                          live.notice != null) ...[
+                        const SizedBox(height: 14),
+                        _NoticeBanner(
+                          message: live.notice!,
+                          onDismiss: () => ref
+                              .read(sessionControllerProvider.notifier)
+                              .clearNotice(),
+                        ),
+                      ],
                       if (recovery) ...[
                         const SizedBox(height: 16),
                         _RecoveryCard(
@@ -134,9 +146,13 @@ class HomeScreen extends ConsumerWidget {
                       ],
                       const SizedBox(height: 24),
                       Semantics(
-                        label:
-                            '시간 ${_formatDuration(live.elapsed)}, 거리 ${km.toStringAsFixed(2)} 킬로미터, 속도 ${kmh.toStringAsFixed(1)} 시속, 위치 ${live.sampleCount}개',
-                        excludeSemantics: true,
+                        // Idle metrics are all zeros — skip the concatenated
+                        // announcement so a screen reader isn't read a wall of
+                        // meaningless "0" before reaching the start button.
+                        label: (tracking || recovery)
+                            ? '시간 ${_formatDuration(live.elapsed)}, 거리 ${km.toStringAsFixed(2)} 킬로미터, 속도 ${kmh.toStringAsFixed(1)} 시속, 위치 ${live.sampleCount}개'
+                            : null,
+                        excludeSemantics: tracking || recovery,
                         child: MetricStrip(
                           header: tracking
                               ? Align(
@@ -415,6 +431,60 @@ class _ErrorBanner extends StatelessWidget {
                   ],
                 ),
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Calm neutral note for benign outcomes (e.g. "walk too short, not saved").
+/// Deliberately not the red [_ErrorBanner] — the outcome is expected, not a fault.
+class _NoticeBanner extends StatelessWidget {
+  const _NoticeBanner({required this.message, required this.onDismiss});
+
+  final String message;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      liveRegion: true,
+      child: SoftPanel(
+        elevated: false,
+        color: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.9),
+        padding: const EdgeInsets.fromLTRB(14, 12, 4, 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.info_outline_rounded,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurface,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            IconButton(
+              tooltip: '닫기',
+              onPressed: onDismiss,
+              style: IconButton.styleFrom(
+                minimumSize: const Size.square(48),
+              ),
+              icon: Icon(
+                Icons.close_rounded,
+                size: 20,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           ],
         ),
       ),

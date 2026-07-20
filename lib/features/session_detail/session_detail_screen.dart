@@ -80,8 +80,8 @@ class SessionDetailScreen extends ConsumerWidget {
                   : () => _copySummary(context, ref),
             ),
             IconButton(
-              tooltip: '내보내기',
-              icon: const Icon(Icons.ios_share_rounded),
+              tooltip: '데이터 복사 (NDJSON)',
+              icon: const Icon(Icons.data_object_rounded),
               onPressed: commandBusy
                   ? null
                   : () => _exportSession(context, ref),
@@ -342,25 +342,13 @@ class SessionDetailScreen extends ConsumerWidget {
         windows: data.windows,
         samples: data.samples,
       );
-      final dir = await Directory.systemTemp.createTemp('sanbo_export_');
-      final stamp = DateTime.now().toIso8601String().replaceAll(':', '');
-      final shortId = data.session.id.length >= 8
-          ? data.session.id.substring(0, 8)
-          : data.session.id;
-      final file = File('${dir.path}/sanbo-$shortId-$stamp.ndjson');
-      await file.writeAsString(ndjson);
-      await Clipboard.setData(ClipboardData(text: file.path));
+      // Copy the data itself, not a temp-file path: an app-private systemTemp
+      // path is unreachable to the user on mobile. Clipboard NDJSON is a real,
+      // pasteable export until a system share-sheet lands.
+      await Clipboard.setData(ClipboardData(text: ndjson));
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('NDJSON을 저장하고 경로를 복사했어요.'),
-          action: SnackBarAction(
-            label: '요약 복사',
-            onPressed: () {
-              unawaited(_copySummary(context, ref));
-            },
-          ),
-        ),
+        const SnackBar(content: Text('산책 데이터(NDJSON)를 클립보드에 복사했어요.')),
       );
     } on Object {
       if (context.mounted) {
@@ -743,7 +731,9 @@ class _SessionNotesCardState extends ConsumerState<_SessionNotesCard> {
 
   Future<void> _save() async {
     if (_saving || !widget.enabled) return;
-    setState(() => _saving = true);
+    // May be triggered by focus loss during teardown — guard setState.
+    _saving = true;
+    if (mounted) setState(() {});
     try {
       await ref.read(walkRepositoryProvider).updateSessionNotes(
             widget.sessionId,
@@ -763,7 +753,8 @@ class _SessionNotesCardState extends ConsumerState<_SessionNotesCard> {
         );
       }
     } finally {
-      if (mounted) setState(() => _saving = false);
+      _saving = false;
+      if (mounted) setState(() {});
     }
   }
 
@@ -787,16 +778,23 @@ class _SessionNotesCardState extends ConsumerState<_SessionNotesCard> {
             ),
           ),
           const SizedBox(height: 12),
-          TextField(
-            controller: _controller,
-            enabled: widget.enabled && !_saving,
-            minLines: 2,
-            maxLines: 5,
-            maxLength: 280,
-            textInputAction: TextInputAction.newline,
-            onChanged: (_) => _dirty = true,
-            decoration: const InputDecoration(
-              hintText: '예: 강변 바람이 시원했다',
+          // Autosave on focus loss so typed-but-not-tapped-save text isn't lost
+          // when the user navigates back. The explicit button stays too.
+          Focus(
+            onFocusChange: (hasFocus) {
+              if (!hasFocus && _dirty && !_saving) unawaited(_save());
+            },
+            child: TextField(
+              controller: _controller,
+              enabled: widget.enabled && !_saving,
+              minLines: 2,
+              maxLines: 5,
+              maxLength: 280,
+              textInputAction: TextInputAction.newline,
+              onChanged: (_) => _dirty = true,
+              decoration: const InputDecoration(
+                hintText: '예: 강변 바람이 시원했다',
+              ),
             ),
           ),
           Align(

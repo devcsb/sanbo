@@ -19,7 +19,6 @@ class IntroScreen extends ConsumerStatefulWidget {
 
 class _IntroScreenState extends ConsumerState<IntroScreen> {
   var _isContinuing = false;
-  var _saveFailed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -156,22 +155,6 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
                                   height: 1.55,
                                 ),
                               ),
-                              if (_saveFailed) ...[
-                                const SizedBox(height: 18),
-                                Semantics(
-                                  liveRegion: true,
-                                  child: Text(
-                                    '저장하지 못했어요. 다시 시도해 주세요.',
-                                    textAlign: TextAlign.center,
-                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                      color: Colors.white.withValues(
-                                        alpha: 0.9,
-                                      ),
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
                               const Spacer(flex: 2),
                               Semantics(
                                 button: true,
@@ -227,7 +210,6 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
 
     setState(() {
       _isContinuing = true;
-      _saveFailed = false;
     });
     try {
       await ref.read(appFlagsStoreProvider).setHasSeenIntro(true);
@@ -238,7 +220,6 @@ class _IntroScreenState extends ConsumerState<IntroScreen> {
       if (!mounted) return;
       setState(() {
         _isContinuing = false;
-        _saveFailed = true;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

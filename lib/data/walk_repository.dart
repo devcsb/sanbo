@@ -83,7 +83,12 @@ class WalkRepository {
     if (samples.isEmpty) return;
     final batch = _db.batch();
     for (final s in samples) {
-      batch.insert('location_samples', {
+      batch.insert('location_samples', _sampleToRow(sessionId, s));
+    }
+    await batch.commit(noResult: true);
+  }
+
+  Map<String, Object?> _sampleToRow(String sessionId, LocationSample s) => {
         'session_id': sessionId,
         'ts': s.timestamp.toIso8601String(),
         'lat': s.latitude,
@@ -92,9 +97,67 @@ class WalkRepository {
         'speed_mps': s.speedMps,
         'altitude_m': s.altitudeM,
         'is_filtered_out': s.isFilteredOut ? 1 : 0,
-      });
-    }
-    await batch.commit(noResult: true);
+      };
+
+  /// Atomically persist a finalized walk: replace samples, replace windows,
+  /// and mark the session completed in a single transaction. Prevents a crash
+  /// mid-finalize from leaving samples deleted-but-not-reinserted or the
+  /// session stuck `active` with already-rewritten data.
+  Future<WalkSession> finalizeSession({
+    required WalkSession session,
+    required List<LocationSample> samples,
+    required List<MinuteWindow> windows,
+    required DateTime endedAt,
+    required double totalDistanceM,
+    required int durationS,
+    required int movingTimeS,
+    required int stationaryTimeS,
+    required double avgSpeedMps,
+    required int validSampleCount,
+    double? medianAccuracyM,
+  }) async {
+    final ended = session.copyWith(
+      endedAt: endedAt,
+      status: SessionStatus.completed,
+      totalDistanceM: totalDistanceM,
+      durationS: durationS,
+      movingTimeS: movingTimeS,
+      stationaryTimeS: stationaryTimeS,
+      avgSpeedMps: avgSpeedMps,
+      validSampleCount: validSampleCount,
+      medianAccuracyM: medianAccuracyM,
+    );
+    await _db.transaction((txn) async {
+      await txn.delete(
+        'location_samples',
+        where: 'session_id = ?',
+        whereArgs: [session.id],
+      );
+      final sampleBatch = txn.batch();
+      for (final s in samples) {
+        sampleBatch.insert('location_samples', _sampleToRow(session.id, s));
+      }
+      await sampleBatch.commit(noResult: true);
+
+      await txn.delete(
+        'minute_windows',
+        where: 'session_id = ?',
+        whereArgs: [session.id],
+      );
+      final windowBatch = txn.batch();
+      for (final w in windows) {
+        windowBatch.insert('minute_windows', _windowToRow(session.id, w));
+      }
+      await windowBatch.commit(noResult: true);
+
+      await txn.update(
+        'sessions',
+        _sessionToRow(ended),
+        where: 'id = ?',
+        whereArgs: [session.id],
+      );
+    });
+    return ended;
   }
 
   /// Replace all samples for a session (after filter flags are known).

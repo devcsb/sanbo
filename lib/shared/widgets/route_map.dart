@@ -60,8 +60,11 @@ class RouteMap extends StatelessWidget {
                           maxZoom: 17,
                         )
                       : null,
+                  // Inline glance-preview inside a scrolling page: no drag, or
+                  // a vertical swipe starting on the map pans the map instead of
+                  // scrolling to the timeline below (scroll dead-zone).
                   interactionOptions: const InteractionOptions(
-                    flags: InteractiveFlag.pinchZoom | InteractiveFlag.drag,
+                    flags: InteractiveFlag.pinchZoom,
                   ),
                 ),
                 children: [
