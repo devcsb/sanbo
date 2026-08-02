@@ -2,7 +2,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-const schemaVersion = 1;
+const schemaVersion = 2;
 
 /// Opens the on-device SQLite DB (TRD §3).
 Future<Database> openAppDatabase({String? path}) async {
@@ -10,8 +10,45 @@ Future<Database> openAppDatabase({String? path}) async {
   return openDatabase(
     dbPath,
     version: schemaVersion,
+    onConfigure: (db) async {
+      await db.execute('PRAGMA foreign_keys = ON');
+    },
     onCreate: (db, version) async {
-      await db.execute('''
+      await _createSchema(db);
+    },
+    onUpgrade: (db, oldVersion, newVersion) async {
+      if (oldVersion < 2) {
+        await db.execute('''
+CREATE TABLE places (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lat REAL NOT NULL,
+  lon REAL NOT NULL,
+  name TEXT NOT NULL,
+  address TEXT,
+  updated_at TEXT NOT NULL
+)''');
+        await db.execute(
+          'CREATE INDEX idx_places_coordinate ON places(lat, lon)',
+        );
+        await db.execute(
+          'ALTER TABLE minute_windows ADD COLUMN place_id INTEGER REFERENCES places(id) ON DELETE SET NULL',
+        );
+        await db.execute(
+          'CREATE INDEX idx_windows_place ON minute_windows(place_id)',
+        );
+      }
+    },
+    onOpen: (db) async {
+      final check = await db.rawQuery('PRAGMA quick_check(1)');
+      if (check.isEmpty || check.first.values.first != 'ok') {
+        throw StateError('산보 데이터베이스 무결성 확인에 실패했습니다');
+      }
+    },
+  );
+}
+
+Future<void> _createSchema(Database db) async {
+  await db.execute('''
 CREATE TABLE sessions (
   id TEXT PRIMARY KEY NOT NULL,
   started_at TEXT NOT NULL,
@@ -28,7 +65,17 @@ CREATE TABLE sessions (
   median_accuracy_m REAL,
   notes TEXT
 )''');
-      await db.execute('''
+  await db.execute('''
+CREATE TABLE places (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  lat REAL NOT NULL,
+  lon REAL NOT NULL,
+  name TEXT NOT NULL,
+  address TEXT,
+  updated_at TEXT NOT NULL
+)''');
+  await db.execute('CREATE INDEX idx_places_coordinate ON places(lat, lon)');
+  await db.execute('''
 CREATE TABLE location_samples (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
@@ -41,10 +88,10 @@ CREATE TABLE location_samples (
   is_filtered_out INTEGER NOT NULL DEFAULT 0,
   FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
 )''');
-      await db.execute(
-        'CREATE INDEX idx_samples_session ON location_samples(session_id, ts)',
-      );
-      await db.execute('''
+  await db.execute(
+    'CREATE INDEX idx_samples_session ON location_samples(session_id, ts)',
+  );
+  await db.execute('''
 CREATE TABLE minute_windows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
@@ -71,13 +118,16 @@ CREATE TABLE minute_windows (
   user_label TEXT,
   user_note TEXT,
   user_confirmed INTEGER NOT NULL DEFAULT 0,
+  place_id INTEGER,
   UNIQUE(session_id, window_start),
-  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+  FOREIGN KEY(place_id) REFERENCES places(id) ON DELETE SET NULL
 )''');
-      await db.execute(
-        'CREATE INDEX idx_windows_session ON minute_windows(session_id, window_start)',
-      );
-    },
+  await db.execute(
+    'CREATE INDEX idx_windows_session ON minute_windows(session_id, window_start)',
+  );
+  await db.execute(
+    'CREATE INDEX idx_windows_place ON minute_windows(place_id)',
   );
 }
 

@@ -5,6 +5,7 @@ import '../models/location_sample.dart';
 import '../models/minute_window.dart';
 import '../models/walk_session.dart';
 import '../pipeline/segment_merger.dart';
+import 'place_memory.dart';
 import 'walk_stats.dart';
 
 /// Local export helpers (FR-16). Pure Dart — no Flutter/IO.
@@ -50,7 +51,11 @@ class SessionExport {
         final start = _hhmm(seg.start);
         final end = _hhmm(seg.endExclusive);
         final range = seg.isMultiMinute ? '$start–$end' : start;
-        buf.writeln('· $range ${seg.label.labelKo}');
+        final placeName = segmentPlaceName(seg);
+        buf.writeln(
+          '· $range ${seg.label.labelKo}'
+          '${placeName == null ? '' : ' · $placeName'}',
+        );
       }
       if (segments.length > 12) {
         buf.writeln('· …외 ${segments.length - 12}개 구간');
@@ -87,8 +92,7 @@ class SessionExport {
         'notes': session.notes,
       },
       'windows': windows.map(_windowJson).toList(),
-      if (includeSamples)
-        'samples': samples.map(_sampleJson).toList(),
+      if (includeSamples) 'samples': samples.map(_sampleJson).toList(),
     };
   }
 
@@ -101,56 +105,45 @@ class SessionExport {
     final meta = {
       'type': 'session',
       'schema_version': 1,
-      'session': toJsonDocument(
-        session: session,
-        windows: windows,
-      )['session'],
+      'session': toJsonDocument(session: session, windows: windows)['session'],
       'window_count': windows.length,
       'sample_count': samples.length,
     };
     final buf = StringBuffer()..writeln(jsonEncode(meta));
     for (final s in samples) {
-      buf.writeln(
-        jsonEncode({
-          'type': 'sample',
-          ..._sampleJson(s),
-        }),
-      );
+      buf.writeln(jsonEncode({'type': 'sample', ..._sampleJson(s)}));
     }
     for (final w in windows) {
-      buf.writeln(
-        jsonEncode({
-          'type': 'window',
-          ..._windowJson(w),
-        }),
-      );
+      buf.writeln(jsonEncode({'type': 'window', ..._windowJson(w)}));
     }
     return buf.toString();
   }
 
   Map<String, Object?> _windowJson(MinuteWindow w) => {
-        'window_start': w.windowStart.toIso8601String(),
-        'duration_s': w.durationS,
-        'partial': w.partial,
-        'distance_m': w.distanceM,
-        'avg_speed_mps': w.avgSpeedMps,
-        'stationary_ratio': w.stationaryRatio,
-        'quality': w.quality.name,
-        'hypothesis_label': w.hypothesisLabel.storageKey,
-        'hypothesis_confidence': w.hypothesisConfidence,
-        'user_label': w.userLabel?.storageKey,
-        'user_confirmed': w.userConfirmed,
-        'user_note': w.userNote,
-      };
+    'window_start': w.windowStart.toIso8601String(),
+    'duration_s': w.durationS,
+    'partial': w.partial,
+    'distance_m': w.distanceM,
+    'avg_speed_mps': w.avgSpeedMps,
+    'stationary_ratio': w.stationaryRatio,
+    'quality': w.quality.name,
+    'hypothesis_label': w.hypothesisLabel.storageKey,
+    'hypothesis_confidence': w.hypothesisConfidence,
+    'user_label': w.userLabel?.storageKey,
+    'user_confirmed': w.userConfirmed,
+    'user_note': w.userNote,
+    'place_name': w.placeName,
+    'place_address': w.placeAddress,
+  };
 
   Map<String, Object?> _sampleJson(LocationSample s) => {
-        'ts': s.timestamp.toIso8601String(),
-        'lat': s.latitude,
-        'lon': s.longitude,
-        'accuracy_m': s.accuracyM,
-        'speed_mps': s.speedMps,
-        'is_filtered_out': s.isFilteredOut,
-      };
+    'ts': s.timestamp.toIso8601String(),
+    'lat': s.latitude,
+    'lon': s.longitude,
+    'accuracy_m': s.accuracyM,
+    'speed_mps': s.speedMps,
+    'is_filtered_out': s.isFilteredOut,
+  };
 
   String _hhmm(DateTime t) {
     final h = t.hour.toString().padLeft(2, '0');

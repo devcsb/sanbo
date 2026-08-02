@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |------|------|
-| 문서 ID | `TRD-SANBO-v1.2` |
-| 버전 | 1.2 (Flutter · Android · 한국 공개 지도 고정) |
+| 문서 ID | `TRD-SANBO-v1.5` |
+| 버전 | 1.5 (Flutter · Android · 한국 공개 지도 고정) |
 | 상태 | 구현 가능 수준 스펙 / 앱 코드 미포함 |
 | 상위 문서 | [PRD](./PRD.md) (`PRD-SANBO-v1.2`), [PLATFORM_AND_MAPS](./PLATFORM_AND_MAPS.md) |
 | 추적 | §12 PRD↔TRD 매핑 표 |
@@ -80,7 +80,8 @@ lib/
 
 ## 3. 데이터 모델 (스키마 수준)
 
-버전 필드: `schema_version = 1`.
+DB 스키마 버전은 `2`(장소 기억 추가), NDJSON export의
+`schema_version`은 호환 가능한 기존 형식 `1`을 유지한다.
 
 ### 3.1 `sessions`
 
@@ -141,7 +142,7 @@ lib/
 | `centroid_lat/lon` | double? | 산술 평균(소구간) |
 | `quality` | enum | `high` \| `medium` \| `low` \| `gap` |
 | `gap_reason` | string? | `no_samples` \| `permission` \| `provider_off` \| … |
-| `place_id` | integer? | FK places |
+| `place_id` | integer? | FK places; 장소 삭제 시 null |
 | `hypothesis_label` | string | FR-12 라벨 |
 | `hypothesis_confidence` | float | 0–1 |
 | `hypothesis_evidence_json` | text | JSON array of {code, detail} |
@@ -156,13 +157,11 @@ lib/
 | 필드 | 타입 | 설명 |
 |------|------|------|
 | `id` | integer | PK |
-| `lat` | double | 질의 좌표(반올림 가능) |
+| `lat` | double | 사용자가 확인한 체류 대표 좌표 |
 | `lon` | double | |
-| `name` | string? | |
-| `category` | string? | `cafe` \| `park` \| `shop` \| `residential` \| `unknown` \| … |
-| `provider` | string? | `nominatim` \| `apple` \| `google` \| `cache` \| `none` |
-| `fetched_at` | datetime? | |
-| `raw_json` | text? | 디버그; 설정으로 비활성 가능 |
+| `name` | string | 사용자 확인 장소 이름 |
+| `address` | string? | 사용자가 요청·확인한 OS 주소 제안 |
+| `updated_at` | datetime | 이름·좌표 갱신 시각 |
 
 ### 3.5 `segments` (P1)
 
@@ -228,26 +227,40 @@ LocationSample 수집
 
 ### 4.1 Location 수집 — `LocationEngine` (Flutter · Android MVP)
 
-| 모드 `tracking_mode` | 목표 주기 | 정확도 힌트 | 배터리 | 사용 |
-|----------------------|-----------|-------------|--------|------|
-| `battery_saver` | 10–15 s | 수백 m 허용 | 최저 | 장시간·저중요 |
-| `balanced` (**default**) | **3–5 s** | ≤ 20–50 m 목표 | 중 | 산책 MVP |
-| `high_accuracy` | **1–2 s** | 최고 (레퍼런스 2–3s 근접) | 고 | 사용자 선택 |
+| 모드 `tracking_mode` | 목표 주기 | 정확도 힌트 | 거리 필터 | CPU WakeLock | 사용 |
+|----------------------|-----------|-------------|-----------|--------------|------|
+| `battery_saver` | **20 s** | medium | 10 m | 끔 | 배터리 우선 |
+| `balanced` (**default**) | **8 s** | high | 5 m | 끔 | 일반 산책 |
+| `high_accuracy` | **4 s** | best for navigation | 2 m | 켬 | 경로 정밀도 우선 |
+
+목표 주기는 OS에 전달하는 요청값이며 절전 정책·신호 상태에 따라 실제 전달 간격은 더 길어질 수 있다. 샘플 DB 체크포인트는 30초 배치로 수행한다.
 
 #### Android (MVP 필수)
 
 | 항목 | 구현 요구 |
 |------|-----------|
-| 권한 | `ACCESS_FINE_LOCATION`; 백그라운드 필요 시 `ACCESS_BACKGROUND_LOCATION`은 **단계적 요청**(한 번에 몰아주기 금지) |
+| 권한 | 화면에서 시작하는 location FGS는 `ACCESS_FINE_LOCATION`만 요청한다. 현재 흐름에 불필요한 `ACCESS_BACKGROUND_LOCATION`은 선언하지 않는다. |
 | 서비스 | `foregroundServiceType=location` + 진행 중 **고정 알림** (“산보: 산책 기록 중”) — FR-22 |
-| 알림 채널 | 낮은 방해 우선순위 가능, 스와이프 종료 시 정책 명시(기록 중단 여부) |
+| 알림 채널 | Android 13+ 알림 권한 거부는 FGS 시작을 막지 않지만 알림 서랍 노출을 제한한다. 안전 안내 가시성을 위해 시작 시 권한을 요청한다. |
 | 배터리 | 최적화 예외 **강요 금지**; 설정 화면 딥링크 안내만 |
 | 플러그인 가이드 | `geolocator` 등 + 네이티브 FGS 설정 문서화; 프로세스 킬 대비 체크포인트 |
 
-#### iOS (Later)
+#### 세션 안전 종료
+
+| 조건 | 사전 안내 | 종료 |
+|------|-----------|------|
+| 한 장소 장기 정지 | 20분에 앱 내 + OS 알림, `계속 기록` 선택 가능 | 30분에 자동 저장·종료 |
+| 전체 기록 시간 | 2시간 45분에 앱 내 + OS 알림 | 3시간에 자동 저장·종료 |
+
+정지는 정확도 인지 반경(기본 35m, 현재·기준 샘플 각각의 `accuracy × 1.5` 중 큰 값) 안의 유효 샘플로 판단한다. 반경을 벗어나거나 신뢰 가능한 보행 속도(기본 0.9m/s 이상)가 관측되면 정지 타이머를 초기화한다. 정확도 80m 초과 샘플은 정지 판단에서 제외한다.
+
+안전 조건은 30초 타이머와 모드별 샘플 묶음(약 30초)을 한 유지보수 경로에서 평가한다. OS 절전으로 타이머가 지연되어도 새 샘플 묶음과 앱 포그라운드 복귀 시 즉시 따라잡는다. 강제 종료로 프로세스가 사라진 경우에는 다음 실행 시 미완료 기록 복구 흐름으로 이어진다.
+
+#### iOS (실험 지원)
 
 - When In Use → Always 교육, `UIBackgroundModes: location`, 파란 상태바 기대 관리.  
-- MVP 빌드에서 iOS 타깃 미포함 허용.
+- `AppleSettings(activityType=fitness)`와 백그라운드 위치 표시를 사용한다.
+- 출시 전 실제 잠금 화면·권한 승격·App Store 설명을 별도 검증한다.
 
 - 레퍼런스(2–3s, ±3.8m)는 **high_accuracy** 벤치마크.  
 - 권한 부족 시 샘플 중단 + `gap_reason=permission` 윈도우.
@@ -297,12 +310,18 @@ LocationSample 수집
 - 연속 N분(default **3**) 체류 후보 → `place_stay` 입력 강화.  
 - 클러스터 중심 = centroid 또는 medoid.
 
-**역지오코딩**:
+**장소 기억 · 주소 제안**:
 
-- 트리거: 체류 확정 시 또는 세션 종료 배치(배터리·프라이버시 유리).  
-- 캐시 키: `round(lat,4), round(lon,4)` (~11m).  
-- 실패/오프라인: `place=null`, category=`unknown`, 좌표는 윈도우에 유지.  
-- P1: POI 카테고리 맵핑 테이블 (`cafe`, `restaurant` → `cafe_or_shop` 입력).
+- 체류형 세그먼트(`place_stay`, `cafe_or_shop`, `park_linger`, 2분 이상
+  `stationary`)에만 장소 이름 편집을 제공한다.
+- 주소 제안은 사용자가 버튼을 누를 때 대표 좌표 1건을 OS 기기
+  지오코더에 전달한다. 자동·배치·공용 Nominatim 호출은 하지 않는다.
+- 제안 결과는 사용자가 확인·수정한 뒤에만 `places`에 저장한다.
+- 기존 장소는 대표 좌표 반경 35m 안의 새 체류 구간에 로컬 재사용한다.
+- 실패/오프라인에서도 직접 이름 저장과 GPS 기록·활동 추정은 유지한다.
+- 세션 삭제 후 연결이 없는 장소 행은 제거하고, 전체 삭제는 장소 캐시도
+  함께 삭제한다.
+- P1: 명시적 동의를 전제로 POI 카테고리 맵핑 테이블 검토.
 
 **매핑**: FR-08, FR-09, FR-20, NFR-05.
 
@@ -375,6 +394,25 @@ LocationSample 수집
 
 **매핑**: FR-13.
 
+### 4.9 RoutePlayback · 지도–타임라인 연동
+
+- 필터 제외 샘플을 시간순으로 정렬하고 슬라이더 인덱스의 현재 좌표를
+  지도 마커와 현재 활동·장소 카피에 함께 사용한다.
+- 전체 경로, 현재 인덱스까지의 진행 경로, 선택 세그먼트 경로를 서로
+  다른 색·두께로 그린다. 체류처럼 경로 길이가 0에 가까운 구간도
+  중심 강조 링을 표시한다.
+- 재생은 400ms tick, 최대 약 50 tick이 되도록 긴 기록의 샘플을
+  건너뛴다. 사용자 슬라이더 조작·구간 선택·화면 dispose 시 timer를
+  즉시 취소한다.
+- 구간 시작 시각과 가장 가까운 샘플은 이진 탐색으로 찾고,
+  `[segment.start, segment.endExclusive)` 샘플만 강조한다.
+- 타임라인 구간 탭은 지도 보기, 별도 48dp 편집 버튼은 활동·장소
+  수정으로 분리한다.
+- 긴 상세 리스트에서 상단 지도가 dispose된 경우 리스트를 먼저
+  상단으로 복귀시킨 뒤 `ensureVisible`로 지도에 맞춘다.
+
+**매핑**: FR-06, FR-13, FR-14, NFR-06.
+
 ---
 
 ## 5. 속도·거리 정의 (모호성 제거)
@@ -403,7 +441,7 @@ UI는 세션 카드에 **세션 거리**를 1차 표시 (레퍼런스와 동일 
 | 지오코딩 실패 | HTTP/timeout | place null, 추측은 속도만 |
 | 저장소 full | IO error | 세션 안전 종료 시도, 에러 노출 |
 
-체크포인트: 60s마다 또는 분 확정 시 WAL 커밋.
+체크포인트: 30초마다 또는 모드별 약 30초 분량(절전 2·균형 4·정밀 8개) 샘플이 쌓일 때 커밋. 백그라운드에서는 네이티브 위치 수집을 유지하되 1초 경과 타이머와 매 샘플 UI 상태 발행은 중단하고 복귀 시 한 번에 동기화한다.
 
 **매핑**: S3, S5, NFR-01, NFR-05.
 
@@ -423,7 +461,7 @@ UI는 세션 카드에 **세션 거리**를 1차 표시 (레퍼런스와 동일 
 | 플랫폼 | 최소 | 백그라운드 산책 | UX |
 |--------|------|-----------------|-----|
 | **Android (MVP)** | FINE/COARSE | `FOREGROUND_SERVICE` + `FOREGROUND_SERVICE_LOCATION` + 알림; 필요 시 BACKGROUND 단계적 | 목적: “산책 동선을 분 단위로 기록합니다”; 배터리 예외 **강요 금지** |
-| iOS (Later) | When In Use | Always + Background Modes location | 동일 목적 문자열(한국어/영문 스토어 시) |
+| iOS (실험 지원) | When In Use로 시작, OS 정책에 따라 Always 안내 | `UIBackgroundModes=location` + `AppleSettings` fitness/background indicator | 백그라운드 표시를 숨기지 않음; 출시 전 실기기·스토어 심사 검증 |
 
 ### 7.1.1 지도 · 네트워크 권한
 
@@ -436,11 +474,11 @@ UI는 세션 카드에 **세션 거리**를 1차 표시 (레퍼런스와 동일 
 
 | 모드 | 수집 | 지오코딩 | 맵 라이브 |
 |------|------|----------|-----------|
-| battery_saver | 10–15s | 종료 배치만 | 꺼짐 가능 |
-| balanced | 3–5s | 체류 시 + 종료 | 요약 시 |
-| high_accuracy | 1–2s | 더 잦음 | 옵션 |
+| battery_saver | 20s + 10m 필터, WakeLock 끔 | 종료 배치만 | 꺼짐 가능 |
+| balanced | 8s + 5m 필터, WakeLock 끔 | 체류 시 + 종료 | 요약 시 |
+| high_accuracy | 4s + 2m 필터, WakeLock 켬 | 더 잦음 | 옵션 |
 
-NFR-02: 기본 balanced; 고주기는 토글.
+NFR-02: 기본 balanced; 정밀 모드만 CPU WakeLock을 유지한다. 실기기 배터리 수치는 기종·OS·신호 환경별로 별도 측정한다.
 
 ### 7.3 정확도 vs 배터리
 
@@ -454,15 +492,18 @@ NFR-02: 기본 balanced; 고주기는 토글.
 | 통제 | 구현 |
 |------|------|
 | 저장 위치 | 앱 샌드박스 SQLite; 경로 설정 화면에 표시 (FR-19) |
-| 네트워크 | MVP 기본 무전송. 지오코딩 옵트인 또는 기능 사용 시 최소 좌표 (FR-20) |
+| 네트워크 | 기본 무전송. 사용자가 `주소 제안`을 누를 때만 체류 대표 좌표 1건을 OS 주소 서비스에 전달 (FR-20) |
 | 로그 | lat/lon 크래시 로그 금지; 세션 id만 |
 | 삭제 | session cascade delete samples/windows/places 고아 정리 (FR-18) |
 | Export | 사용자 명시; 파일에 schema_version; 공유 시트는 OS 공유 |
-| 백업 | 플랫폼 백업 제외 플래그 권장(iOS exclude backup / Android auto-backup rules) — 위치 민감 |
+| OS 자동 백업 | Android `allowBackup=false` + Android 11/12+ 백업 규칙으로 앱 데이터 전체 제외. 앱 업데이트 자체는 샌드박스 DB를 유지한다. iOS 출시 전 exclude-backup 별도 적용 — 위치 민감 |
+| 수동 전체 백업 | `.sanbo` JSON, 50MB/테이블 50만 행 상한. 완료 세션·원본 위치·윈도우·수정·메모·참조 장소 포함. 내보내기 전 정밀 위치 경고 |
+| 복원 | 기존 세션 ID는 건너뛰는 병합. 좌표·범위·FK·버전을 검증한 단일 SQLite transaction; 오류 시 전체 rollback |
+| DB 마이그레이션 | 스키마 버전 증가형 `onUpgrade`, FK 활성화, 열기 후 `quick_check`; 미래 버전 downgrade 금지 |
 | 암호화 | 기기 암호화 의존; SQLCipher는 P2 |
 | 벤더 | 지오코딩 ToS·보관 정책 체크리스트 필수 (법무 자문 아님) |
 
-**매핑**: NFR-04, NFR-08, 축 D.
+**매핑**: FR-24, NFR-04, NFR-08, NFR-09, 축 D.
 
 ---
 
@@ -500,6 +541,14 @@ session meta line (JSON)
 one LocationSample per line (NDJSON)  OR  windows-only export option
 ```
 
+### 9.3 전체 백업 포맷
+
+최상위에 `export_kind=sanbo_backup`, `backup_schema_version`,
+`database_schema_version`, `exported_at`을 두고 `sessions`,
+`location_samples`, `minute_windows`, `places` 네 테이블을 담는다. 자동 증가
+샘플/윈도우 ID는 내보내지 않고 복원 시 새로 부여하며, 장소 ID만 백업 내부
+참조로 매핑한다. 진행 중 세션은 복제 복구를 막기 위해 제외한다.
+
 ---
 
 ## 10. API 표면 (앱 내부 서비스)
@@ -514,6 +563,8 @@ SessionService.get(id) -> SessionDetail  // windows, polyline, summary
 SessionService.delete(id)
 HypothesisService.update(windowId, userLabel, note?, confirmed?)
 ExportService.export(sessionId, format: json|ndjson) -> FileUri
+BackupService.exportAll() -> .sanbo FileUri
+BackupService.importMerge(file) -> ImportResult
 LocationEngine.setMode(mode)
 ```
 
@@ -583,7 +634,7 @@ PRD §14와 정합. 기술 결론:
 | FR-03 | UI + engine status | accuracy, mode 표시 | — |
 | FR-04 | §3.3, §4.3 | minute_windows | tz 분 경계 |
 | FR-05 | §3.3, §4.4 | metrics 필드 | quality 플래그 |
-| FR-06 | §4.7, §9.1 MapPort | OSM/VWorld 폴리라인 | 타일 장애 폴백 |
+| FR-06 | §4.7, §4.9, §9.1 RouteMap | OSM 전체/진행/선택 폴리라인 + 현재 위치 | 타일 장애 시에도 경로 오버레이 유지 |
 | FR-21 | §2 features 3탭 | 심플 IA | 탭 추가 금지 |
 | FR-22 | §4.1 Android FGS | 알림+location type | 강요 설정 금지 |
 | FR-07 | §4.4, §5 | speed/stationary | 정의 고정 |
@@ -600,6 +651,7 @@ PRD §14와 정합. 기술 결론:
 | FR-18 | §8 delete cascade | — | — |
 | FR-19 | §1.3, §8 | SQLite only MVP | — |
 | FR-20 | §4.5, §8 | round+cache | P1 |
+| FR-24 | §8, §9.3 | 버전 백업 + transaction 병합 | 파일 자체 암호화는 P2 |
 | NFR-01 | §4.3, §6 gaps | 커버리지/표시 | 조건부 |
 | NFR-02 | §4.1 modes | balanced default | 기기차 |
 | NFR-03 | §4.2 filter | jump/accuracy | — |
@@ -608,6 +660,7 @@ PRD §14와 정합. 기술 결론:
 | NFR-06 | indexes on windows | pagination | P1 목표 |
 | NFR-07 | UI copy | 추정 용어 | i18n later |
 | NFR-08 | §8 backup flags | PIN P2 | — |
+| NFR-09 | §3 migration, §8 integrity/restore | 기존 행 보존 + atomic rollback | 손상 DB는 열기 중단 |
 | G1–G5 | 전 파이프라인 | 메트릭·프라이버시 | — |
 
 **역방향**: TRD의 모든 핵심 모듈은 위 표 PRD ID 중 하나 이상에 연결된다. 고아 기술 결정 없음.
@@ -635,9 +688,9 @@ PRD §14와 정합. 기술 결론:
 4. **MapLibre + OSM 타일** + 폴리라인 + attribution  
 5. 홈 시작/종료 · 라이브 3숫자 · 요약 카드 (러닝앱 심플 골격)  
 6. 타임라인 + 활동 칩 수정  
-7. 설정: 추적 모드 · 데이터 삭제 · (자리) 지도 소스  
+7. 설정: 추적 모드 · 전체 백업/병합 복원 · 데이터 삭제 · 지도 정보
 8. ~~(v1) VWorld 키~~ → **OSM 단일 베이스맵** (연동 제외)  
-9. (later) iOS LocationEngine  
+9. iOS `AppleSettings`·Background Modes 실험 지원; 출시 전 실기기/심사 검증
 
 ---
 
@@ -648,6 +701,9 @@ PRD §14와 정합. 기술 결론:
 | 1.0 | 2026-07-12 | 초안: 스키마, 파이프라인, 규칙 표, 플랫폼, 매핑 |
 | 1.1 | 2026-07-12 | 재검증: 롤업≠합, gap 비보간, conf 강등, 추적 표 보강, 배터리 모드 정렬 |
 | 1.2 | 2026-07-12 | Flutter·Android FGS 고정, MapLibre+OSM/VWorld, 상용 SDK 배제, FR-21/22 매핑, 심플 모듈 경계 |
+| 1.3 | 2026-07-29 | 수집 주기·거리 필터·WakeLock 완화, 장기 정지 및 3시간 자동 저장 종료 |
+| 1.4 | 2026-07-31 | 지도–타임라인 연동, 경로 슬라이더·재생, 선택 구간 강조 및 보기/편집 분리 |
+| 1.5 | 2026-08-01 | 전체 백업·원자적 병합 복원, DB 무결성/마이그레이션, 백그라운드 UI 절전, iOS background location·릴리스 서명 안전장치 |
 
 ---
 

@@ -36,8 +36,14 @@ void main() {
     final t0 = DateTime(2026, 7, 12, 14, 0);
     final windows = [
       _w(start: t0, label: ActivityLabel.walkSteady),
-      _w(start: t0.add(const Duration(minutes: 1)), label: ActivityLabel.walkSteady),
-      _w(start: t0.add(const Duration(minutes: 2)), label: ActivityLabel.walkSteady),
+      _w(
+        start: t0.add(const Duration(minutes: 1)),
+        label: ActivityLabel.walkSteady,
+      ),
+      _w(
+        start: t0.add(const Duration(minutes: 2)),
+        label: ActivityLabel.walkSteady,
+      ),
       _w(
         start: t0.add(const Duration(minutes: 3)),
         label: ActivityLabel.placeStay,
@@ -53,6 +59,33 @@ void main() {
     expect(segments[0].isMultiMinute, isTrue);
     expect(segments[1].label, ActivityLabel.placeStay);
     expect(segments[1].minuteCount, 1);
+  });
+
+  test('same stay label at distant centroids remains separate', () {
+    final start = DateTime(2026, 7, 20, 14);
+    MinuteWindow stay(DateTime time, double latitude) => MinuteWindow(
+      windowStart: time,
+      durationS: 60,
+      partial: false,
+      sampleCount: 8,
+      rawSampleCount: 8,
+      distanceM: 1,
+      avgSpeedMps: 0.05,
+      maxSpeedMps: 0.1,
+      stationaryRatio: 0.95,
+      quality: WindowQuality.high,
+      centroidLat: latitude,
+      centroidLon: 127,
+      hypothesisLabel: ActivityLabel.placeStay,
+      hypothesisConfidence: 0.7,
+    );
+
+    final segments = SegmentMerger().merge([
+      stay(start, 37.5),
+      stay(start.add(const Duration(minutes: 1)), 37.501),
+    ]);
+
+    expect(segments, hasLength(2));
   });
 
   test('does not merge unknown minutes without user confirm', () {

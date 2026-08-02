@@ -8,8 +8,11 @@ import '../../domain/models/tracking_mode.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/geo.dart';
 import '../../domain/pipeline/sample_filter.dart';
+import '../../domain/services/session_guard.dart';
 import '../../domain/services/session_pipeline.dart';
 import '../../platform/location/location_engine.dart';
+import '../../platform/notifications/session_notification_service.dart';
+import '../history/history_providers.dart';
 
 class LiveSessionState {
   const LiveSessionState({
@@ -26,26 +29,38 @@ class LiveSessionState {
     this.errorMessage,
     this.statusMessage,
     this.notice,
+    this.autoStopWarning,
+    this.canContinueAfterWarning = false,
     this.needsRecovery = false,
   });
 
   final WalkSession? session;
   final Duration elapsed;
   final bool isTracking;
+
   /// Prevents double-tap on start/stop (UX-H03).
   final bool isBusy;
   final double liveDistanceM;
   final double liveSpeedMps;
   final int sampleCount;
+
   /// Samples that pass the soft filter (used for path distance).
   final int validSampleCount;
   final double? lastAccuracyM;
   final LocationPermissionState permissionState;
   final String? errorMessage;
   final String? statusMessage;
+
   /// Calm neutral note shown on the idle home (e.g. a benign "walk not saved"
   /// outcome). Distinct from [errorMessage], which renders as a red banner.
   final String? notice;
+
+  /// A time-sensitive warning shown while a walk is still recording.
+  final String? autoStopWarning;
+
+  /// Long-stay warnings can be acknowledged to restart the stationary timer.
+  final bool canContinueAfterWarning;
+
   /// Incomplete session recovered from disk (UX-H04).
   final bool needsRecovery;
 
@@ -63,10 +78,13 @@ class LiveSessionState {
     String? errorMessage,
     String? statusMessage,
     String? notice,
+    String? autoStopWarning,
+    bool? canContinueAfterWarning,
     bool? needsRecovery,
     bool clearError = false,
     bool clearSession = false,
     bool clearNotice = false,
+    bool clearAutoStopWarning = false,
   }) {
     return LiveSessionState(
       session: clearSession ? null : (session ?? this.session),
@@ -82,6 +100,11 @@ class LiveSessionState {
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       statusMessage: statusMessage,
       notice: clearNotice ? null : (notice ?? this.notice),
+      autoStopWarning: clearAutoStopWarning
+          ? null
+          : (autoStopWarning ?? this.autoStopWarning),
+      canContinueAfterWarning:
+          canContinueAfterWarning ?? this.canContinueAfterWarning,
       needsRecovery: needsRecovery ?? this.needsRecovery,
     );
   }
@@ -95,26 +118,53 @@ final sessionPipelineProvider = Provider<SessionPipeline>((ref) {
   return SessionPipeline();
 });
 
+final sessionNotificationServiceProvider = Provider<SessionNotificationService>(
+  (ref) {
+    return PlatformSessionNotificationService();
+  },
+);
+
+final sessionGuardPolicyProvider = Provider<SessionGuardPolicy>((ref) {
+  return const SessionGuardPolicy();
+});
+
+final sessionClockProvider = Provider<DateTime Function()>((ref) {
+  return DateTime.now;
+});
+
 class SessionController extends Notifier<LiveSessionState> {
   Timer? _ticker;
   Timer? _checkpointTimer;
   Timer? _firstFixTimer;
   StreamSubscription<LocationSample>? _sampleSub;
   final List<LocationSample> _sessionSamples = [];
+
   /// Samples not yet flushed to SQLite.
   final List<LocationSample> _pendingPersist = [];
+
   /// Last filter-accepted sample for O(1) live distance updates.
   LocationSample? _lastValidSample;
   double _liveDistanceM = 0;
+  double _liveSpeedMps = 0;
+  double? _lastAccuracyM;
   int _validSampleCount = 0;
 
   final SampleFilter _liveFilter = SampleFilter();
+  late SessionGuard _sessionGuard;
+  late SessionNotificationService _notifications;
+  late DateTime Function() _clock;
   bool _flushing = false;
+  bool _maintenanceRunning = false;
+  bool _autoStopInProgress = false;
+  bool _appForeground = true;
 
-  static const _checkpointEvery = Duration(seconds: 15);
+  static const _checkpointEvery = Duration(seconds: 30);
 
   @override
   LiveSessionState build() {
+    _sessionGuard = SessionGuard(policy: ref.read(sessionGuardPolicyProvider));
+    _notifications = ref.read(sessionNotificationServiceProvider);
+    _clock = ref.read(sessionClockProvider);
     ref.onDispose(() {
       _ticker?.cancel();
       _ticker = null;
@@ -122,6 +172,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _checkpointTimer = null;
       _firstFixTimer?.cancel();
       _firstFixTimer = null;
+      unawaited(_notifications.cancelWarning());
       unawaited(_sampleSub?.cancel() ?? Future<void>.value());
       _sampleSub = null;
     });
@@ -135,12 +186,15 @@ class SessionController extends Notifier<LiveSessionState> {
   LocationEngine get _engine => ref.read(locationEngineProvider);
   SessionPipeline get _pipeline => ref.read(sessionPipelineProvider);
 
-
   void _recomputeLiveMetricsFromBuffer() {
     final filtered = _liveFilter.apply(_sessionSamples);
     final valid = filtered.where((s) => !s.isFilteredOut).toList();
     _lastValidSample = valid.isEmpty ? null : valid.last;
     _validSampleCount = valid.length;
+    _liveSpeedMps = valid.isEmpty ? 0 : (valid.last.speedMps ?? 0);
+    _lastAccuracyM = _sessionSamples.isEmpty
+        ? null
+        : _sessionSamples.last.accuracyM;
     _liveDistanceM = pathDistanceMeters(
       valid.map((s) => (lat: s.latitude, lon: s.longitude)),
     );
@@ -161,7 +215,7 @@ class SessionController extends Notifier<LiveSessionState> {
         session: active,
         isTracking: false,
         needsRecovery: true,
-        elapsed: DateTime.now().difference(active.startedAt),
+        elapsed: _elapsedSince(active.startedAt),
         sampleCount: _sessionSamples.length,
         validSampleCount: _validSampleCount,
         liveDistanceM: _liveDistanceM,
@@ -173,27 +227,60 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   void clearError() {
-    state = state.copyWith(clearError: true, statusMessage: state.statusMessage);
+    state = state.copyWith(
+      clearError: true,
+      statusMessage: state.statusMessage,
+    );
   }
 
   void clearNotice() {
-    state = state.copyWith(clearNotice: true, statusMessage: state.statusMessage);
+    state = state.copyWith(
+      clearNotice: true,
+      statusMessage: state.statusMessage,
+    );
   }
 
   void _startTicker(DateTime startedAt) {
     _ticker?.cancel();
+    if (!_appForeground) return;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (!state.isTracking) return;
-      state = state.copyWith(elapsed: DateTime.now().difference(startedAt));
+      if (!state.isTracking || !_appForeground) return;
+      state = state.copyWith(elapsed: _elapsedSince(startedAt));
     });
   }
 
   void _startCheckpointTimer() {
     _checkpointTimer?.cancel();
     _checkpointTimer = Timer.periodic(_checkpointEvery, (_) {
-      unawaited(_flushPendingSamples());
+      unawaited(_runMaintenance());
     });
   }
+
+  void _startSessionGuard() {
+    unawaited(_evaluateSessionGuard(_clock()));
+  }
+
+  void _cancelSessionGuard() {
+    _sessionGuard.reset();
+    unawaited(_notifications.cancelWarning());
+  }
+
+  Future<void> _runMaintenance() async {
+    if (_maintenanceRunning) return;
+    _maintenanceRunning = true;
+    try {
+      await _flushPendingSamples();
+      await _evaluateSessionGuard(_clock());
+    } finally {
+      _maintenanceRunning = false;
+    }
+  }
+
+  int get _checkpointBatchSize => switch (_engine.mode) {
+    TrackingMode.batterySaver => 2,
+    TrackingMode.balanced => 4,
+    TrackingMode.highAccuracy => 8,
+  };
 
   Future<void> _flushPendingSamples() async {
     final session = state.session;
@@ -219,7 +306,16 @@ class SessionController extends Notifier<LiveSessionState> {
       clearNotice: true,
       statusMessage: state.needsRecovery ? state.statusMessage : null,
     );
-    final perm = await _engine.requestPermission();
+    final LocationPermissionState perm;
+    try {
+      perm = await _engine.requestPermission();
+    } catch (e) {
+      state = state.copyWith(
+        isBusy: false,
+        errorMessage: _locationErrorMessage(e),
+      );
+      return;
+    }
     state = state.copyWith(permissionState: perm);
     if (perm == LocationPermissionState.serviceDisabled) {
       state = state.copyWith(
@@ -238,11 +334,19 @@ class SessionController extends Notifier<LiveSessionState> {
       );
       return;
     }
+    if (perm != LocationPermissionState.granted) {
+      state = state.copyWith(
+        isBusy: false,
+        errorMessage: '위치 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+      );
+      return;
+    }
 
+    WalkSession? session;
     try {
-      var session = await _repo.getActiveSession();
+      session = await _repo.getActiveSession();
       final resuming = session != null;
-      session ??= await _repo.startSession(mode: mode);
+      session ??= await _repo.startSession(mode: mode, startedAt: _clock());
 
       if (resuming) {
         // Reload any samples already checkpointed (recovery continue).
@@ -254,16 +358,17 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _lastValidSample = null;
         _liveDistanceM = 0;
+        _liveSpeedMps = 0;
+        _lastAccuracyM = null;
         _validSampleCount = 0;
       }
       _pendingPersist.clear();
 
       // Rebuild live metrics from memory buffer.
       _recomputeLiveMetricsFromBuffer();
-      final seedDistance = _liveDistanceM;
-      final seedValid = _validSampleCount;
 
       await _engine.setMode(mode);
+      _sessionGuard.reset();
       // Listen BEFORE start so seed/first GPS fixes are not dropped on the
       // broadcast stream (real-device cold start race).
       await _sampleSub?.cancel();
@@ -282,8 +387,16 @@ class SessionController extends Notifier<LiveSessionState> {
       } catch (e) {
         await _sampleSub?.cancel();
         _sampleSub = null;
+        try {
+          await _engine.stop();
+        } catch (_) {
+          // Preserve the actionable start error below.
+        }
         state = state.copyWith(
+          session: session,
           isBusy: false,
+          isTracking: false,
+          needsRecovery: true,
           errorMessage: _locationErrorMessage(e),
         );
         return;
@@ -292,21 +405,37 @@ class SessionController extends Notifier<LiveSessionState> {
       _startCheckpointTimer();
       // Stall detector: if still zero samples after 20s, surface actionable help.
       _armFirstFixWatchdog();
+      // A real engine can synchronously deliver its first fix before start()
+      // returns. Read the live accumulators now rather than using stale values
+      // captured before the engine was started.
+      final liveDistance = _liveDistanceM;
+      final liveValid = _validSampleCount;
       state = LiveSessionState(
         session: session,
         isTracking: true,
         isBusy: false,
         needsRecovery: false,
-        elapsed: DateTime.now().difference(session.startedAt),
+        elapsed: _elapsedSince(session.startedAt),
         sampleCount: _sessionSamples.length,
-        validSampleCount: seedValid,
-        liveDistanceM: seedDistance,
+        validSampleCount: liveValid,
+        liveDistanceM: liveDistance,
         permissionState: perm,
-        statusMessage: seedValid > 0 ? '기록 중' : 'GPS 잡는 중',
+        statusMessage: liveValid > 0 ? '기록 중' : 'GPS 잡는 중',
       );
+      _startSessionGuard();
     } catch (e) {
+      await _sampleSub?.cancel();
+      _sampleSub = null;
+      try {
+        await _engine.stop();
+      } catch (_) {
+        // Preserve the primary start failure.
+      }
       state = state.copyWith(
+        session: session,
         isBusy: false,
+        isTracking: false,
+        needsRecovery: session != null || state.needsRecovery,
         errorMessage: '시작할 수 없습니다. 잠시 후 다시 시도해 주세요.',
       );
     }
@@ -327,10 +456,10 @@ class SessionController extends Notifier<LiveSessionState> {
     final probe = prev == null ? [sample] : [prev, sample];
     final marked = _liveFilter.apply(probe).last;
     double? segmentSpeed;
+    var clearedStayWarning = false;
     if (ordered && !marked.isFilteredOut) {
       if (prev != null) {
-        final dtMs =
-            marked.timestamp.difference(prev.timestamp).inMilliseconds;
+        final dtMs = marked.timestamp.difference(prev.timestamp).inMilliseconds;
         if (dtMs > 0) {
           final d = haversineMeters(
             lat1: prev.latitude,
@@ -347,26 +476,135 @@ class SessionController extends Notifier<LiveSessionState> {
       }
       _lastValidSample = marked;
       _validSampleCount += 1;
+      clearedStayWarning = _sessionGuard.observe(marked, observedAt: _clock());
     }
 
     double? speed = sample.speedMps;
     if (speed == null || speed.isNaN || speed < 0) {
       speed = segmentSpeed;
     }
+    _liveSpeedMps = speed ?? _liveSpeedMps;
+    _lastAccuracyM = sample.accuracyM ?? _lastAccuracyM;
 
     if (_sessionSamples.isNotEmpty) {
       _firstFixTimer?.cancel();
       _firstFixTimer = null;
     }
-    state = state.copyWith(
-      sampleCount: _sessionSamples.length,
-      validSampleCount: _validSampleCount,
-      liveSpeedMps: speed ?? state.liveSpeedMps,
-      liveDistanceM: _liveDistanceM,
-      lastAccuracyM: sample.accuracyM ?? state.lastAccuracyM,
-      statusMessage: _validSampleCount == 0 ? 'GPS 보정 중' : '기록 중',
-      clearError: true,
+    final clearVisibleStayWarning =
+        clearedStayWarning && state.canContinueAfterWarning;
+    // Native location recording continues in the background, but rebuilding
+    // the Riverpod/UI tree for every GPS fix does not. The latest aggregates
+    // are published once when the app returns to the foreground.
+    if (_appForeground || clearVisibleStayWarning) {
+      state = state.copyWith(
+        sampleCount: _sessionSamples.length,
+        validSampleCount: _validSampleCount,
+        liveSpeedMps: _liveSpeedMps,
+        liveDistanceM: _liveDistanceM,
+        lastAccuracyM: _lastAccuracyM,
+        statusMessage: _validSampleCount == 0 ? 'GPS 보정 중' : '기록 중',
+        clearError: true,
+        clearAutoStopWarning: clearVisibleStayWarning,
+        canContinueAfterWarning: clearedStayWarning
+            ? false
+            : state.canContinueAfterWarning,
+      );
+    }
+    if (clearVisibleStayWarning) {
+      unawaited(_notifications.cancelWarning());
+    }
+    // Sample-count checkpoints keep persistence and safety limits moving even
+    // when periodic Dart timers are throttled by Android/iOS power management.
+    if (_pendingPersist.length >= _checkpointBatchSize) {
+      unawaited(_runMaintenance());
+    }
+  }
+
+  Future<void> _evaluateSessionGuard(DateTime now) async {
+    final session = state.session;
+    if (session == null ||
+        !state.isTracking ||
+        state.isBusy ||
+        _autoStopInProgress) {
+      return;
+    }
+    final decision = _sessionGuard.evaluate(
+      startedAt: session.startedAt,
+      now: now,
     );
+    switch (decision.event) {
+      case SessionGuardEvent.none:
+        return;
+      case SessionGuardEvent.stationaryWarning:
+        const message = '한곳에 20분 이상 머물고 있어요. 정지 상태가 30분 이어지면 자동으로 저장하고 종료합니다.';
+        state = state.copyWith(
+          autoStopWarning: message,
+          canContinueAfterWarning: true,
+          statusMessage: '정지 상태 확인 중',
+        );
+        await _notifications.showWarning(
+          title: '산책을 계속 기록할까요?',
+          body: '$message 계속 머무를 예정이라면 앱에서 ‘계속 기록’을 눌러 주세요.',
+        );
+        return;
+      case SessionGuardEvent.stationaryLimit:
+        await _autoStop(completionNotice: '한곳에 30분 머물러 산책을 자동으로 저장하고 종료했어요.');
+        return;
+      case SessionGuardEvent.durationWarning:
+        const message = '산책 기록이 2시간 45분을 넘었어요. 총 3시간이 되면 자동으로 저장하고 종료합니다.';
+        state = state.copyWith(
+          autoStopWarning: message,
+          canContinueAfterWarning: false,
+          statusMessage: '자동 종료 예정',
+        );
+        await _notifications.showWarning(title: '산책 기록이 곧 종료돼요', body: message);
+        return;
+      case SessionGuardEvent.durationLimit:
+        await _autoStop(completionNotice: '3시간이 지나 산책을 자동으로 저장하고 종료했어요.');
+        return;
+    }
+  }
+
+  void continueTrackingAfterStay() {
+    if (!state.isTracking || !state.canContinueAfterWarning) return;
+    _sessionGuard.continueStationaryTracking(_clock());
+    state = state.copyWith(
+      clearAutoStopWarning: true,
+      canContinueAfterWarning: false,
+      statusMessage: '기록 중',
+    );
+    unawaited(_notifications.cancelWarning());
+  }
+
+  Future<void> _autoStop({required String completionNotice}) async {
+    if (_autoStopInProgress) return;
+    _autoStopInProgress = true;
+    try {
+      final ended = await stop(completionNotice: completionNotice);
+      if (ended != null) {
+        ref.read(historyTickProvider.notifier).state++;
+        await _notifications.showCompletion(
+          title: '산책 기록을 종료했어요',
+          body: completionNotice,
+        );
+        return;
+      }
+
+      if (state.needsRecovery && state.errorMessage != null) {
+        await _notifications.showWarning(
+          title: '산책 저장을 마치지 못했어요',
+          body: '앱을 열어 ‘저장하고 종료’를 다시 눌러 주세요. 기록은 기기에 남아 있습니다.',
+        );
+        return;
+      }
+
+      await _notifications.showCompletion(
+        title: '산책 기록을 종료했어요',
+        body: state.notice ?? completionNotice,
+      );
+    } finally {
+      _autoStopInProgress = false;
+    }
   }
 
   void _armFirstFixWatchdog() {
@@ -376,8 +614,8 @@ class SessionController extends Notifier<LiveSessionState> {
       if (state.sampleCount > 0) return;
       state = state.copyWith(
         errorMessage:
-            '위치를 아직 받지 못했어요. 알림·위치 권한이 허용돼 있는지 확인하고, '
-            '야외에서 다시 시작해 주세요. 설정 앱에서 산보 알림/정확한 위치를 켜 주세요.',
+            '위치를 아직 받지 못했어요. 기기 위치 서비스와 정확한 위치 권한을 확인하고, '
+            '하늘이 보이는 곳에서 잠시 기다려 주세요.',
         statusMessage: 'GPS 대기 중',
       );
     });
@@ -392,10 +630,10 @@ class SessionController extends Notifier<LiveSessionState> {
       return '위치 서비스가 꺼져 있습니다. 기기 설정에서 위치를 켜 주세요.';
     }
     if (s.contains('timeout') || s.contains('no_fix')) {
-      return 'GPS 신호를 받지 못했어요. 야외에서 다시 시도하거나 설정에서 위치·알림 권한을 확인해 주세요.';
+      return 'GPS 신호를 받지 못했어요. 하늘이 보이는 곳에서 다시 시도하고 정확한 위치 권한을 확인해 주세요.';
     }
     if (s.contains('notification') || s.contains('foreground')) {
-      return '알림 권한이 없어 위치 기록을 유지할 수 없어요. 설정에서 산보 알림을 허용해 주세요.';
+      return '백그라운드 위치 기록을 시작하지 못했어요. 앱 화면에서 다시 시작하고 위치 권한을 확인해 주세요.';
     }
     return '위치를 받는 중 문제가 생겼습니다. 잠시 후 다시 시도해 주세요.';
   }
@@ -407,11 +645,47 @@ class SessionController extends Notifier<LiveSessionState> {
     }
   }
 
-  Future<WalkSession?> stop() async {
+  /// Test helper for deterministic guard boundary checks.
+  Future<void> debugEvaluateSessionGuard([DateTime? now]) {
+    return _evaluateSessionGuard(now ?? _clock());
+  }
+
+  /// Suppress high-frequency presentation work while native GPS collection
+  /// continues in the background, then publish one caught-up snapshot.
+  void setAppForeground(bool foreground) {
+    if (_appForeground == foreground) return;
+    _appForeground = foreground;
+    if (!foreground) {
+      _ticker?.cancel();
+      _ticker = null;
+      unawaited(_runMaintenance());
+      return;
+    }
+
+    final session = state.session;
+    if (session != null && state.isTracking) {
+      state = state.copyWith(
+        elapsed: _elapsedSince(session.startedAt),
+        sampleCount: _sessionSamples.length,
+        validSampleCount: _validSampleCount,
+        liveSpeedMps: _liveSpeedMps,
+        liveDistanceM: _liveDistanceM,
+        lastAccuracyM: _lastAccuracyM,
+        statusMessage: state.autoStopWarning == null
+            ? (_validSampleCount == 0 ? 'GPS 보정 중' : '기록 중')
+            : state.statusMessage,
+      );
+      _startTicker(session.startedAt);
+    }
+    unawaited(_runMaintenance());
+  }
+
+  Future<WalkSession?> stop({String? completionNotice}) async {
     final session = state.session;
     if (session == null || state.isBusy) return null;
     state = state.copyWith(isBusy: true, clearError: true);
     try {
+      _cancelSessionGuard();
       _ticker?.cancel();
       _checkpointTimer?.cancel();
       _firstFixTimer?.cancel();
@@ -446,7 +720,7 @@ class SessionController extends Notifier<LiveSessionState> {
         }
       }
 
-      final now = DateTime.now();
+      final now = _clock();
       final lastTs = raw.isEmpty
           ? now
           : raw.map((s) => s.timestamp).reduce((a, b) => a.isAfter(b) ? a : b);
@@ -472,6 +746,8 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist.clear();
         _lastValidSample = null;
         _liveDistanceM = 0;
+        _liveSpeedMps = 0;
+        _lastAccuracyM = null;
         _validSampleCount = 0;
         state = const LiveSessionState(
           notice: 'GPS를 받지 못해 저장할 경로가 없어요. 야외에서 다시 시작해 주세요.',
@@ -486,7 +762,8 @@ class SessionController extends Notifier<LiveSessionState> {
       );
 
       // Too short / no real movement — don't pollute history with noise.
-      final tooShort = result.metrics.durationS < 20 &&
+      final tooShort =
+          result.metrics.durationS < 20 &&
           result.metrics.totalDistanceM < 15 &&
           result.metrics.validSampleCount < 5;
       if (tooShort) {
@@ -495,6 +772,8 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist.clear();
         _lastValidSample = null;
         _liveDistanceM = 0;
+        _liveSpeedMps = 0;
+        _lastAccuracyM = null;
         _validSampleCount = 0;
         state = const LiveSessionState(
           notice: '너무 짧아 산책을 저장하지 않았어요. 조금 더 걸은 뒤 종료해 주세요.',
@@ -522,21 +801,27 @@ class SessionController extends Notifier<LiveSessionState> {
       _pendingPersist.clear();
       _lastValidSample = null;
       _liveDistanceM = 0;
+      _liveSpeedMps = 0;
+      _lastAccuracyM = null;
       _validSampleCount = 0;
 
-      final weakGps = result.metrics.validSampleCount < 3 ||
+      final weakGps =
+          result.metrics.validSampleCount < 3 ||
           result.metrics.totalDistanceM < 5;
       state = LiveSessionState(
-        statusMessage: weakGps
-            ? '기록은 저장됐지만 GPS가 약했어요'
-            : '기록을 저장했어요',
+        statusMessage: weakGps ? '기록은 저장됐지만 GPS가 약했어요' : '기록을 저장했어요',
+        notice: completionNotice,
       );
       return ended;
     } catch (e) {
       state = state.copyWith(
         isBusy: false,
         isTracking: false,
-        errorMessage: '저장에 실패했습니다. 다시 종료를 눌러 주세요.',
+        needsRecovery: true,
+        clearAutoStopWarning: true,
+        canContinueAfterWarning: false,
+        errorMessage: '저장에 실패했습니다. 아래 ‘저장하고 종료’를 다시 눌러 주세요.',
+        statusMessage: '기록은 기기에 남아 있습니다.',
       );
       return null;
     }
@@ -547,6 +832,7 @@ class SessionController extends Notifier<LiveSessionState> {
     if (session == null || state.isBusy) return;
     state = state.copyWith(isBusy: true);
     try {
+      _cancelSessionGuard();
       _ticker?.cancel();
       _checkpointTimer?.cancel();
       _firstFixTimer?.cancel();
@@ -559,6 +845,8 @@ class SessionController extends Notifier<LiveSessionState> {
       _pendingPersist.clear();
       _lastValidSample = null;
       _liveDistanceM = 0;
+      _liveSpeedMps = 0;
+      _lastAccuracyM = null;
       _validSampleCount = 0;
       state = const LiveSessionState();
     } catch (_) {
@@ -596,7 +884,14 @@ class SessionController extends Notifier<LiveSessionState> {
   String _sampleKey(LocationSample s) =>
       '${s.timestamp.toUtc().millisecondsSinceEpoch}|'
       '${s.latitude.toStringAsFixed(6)}|${s.longitude.toStringAsFixed(6)}';
+
+  Duration _elapsedSince(DateTime startedAt) {
+    final elapsed = _clock().difference(startedAt);
+    return elapsed.isNegative ? Duration.zero : elapsed;
+  }
 }
 
 final sessionControllerProvider =
-    NotifierProvider<SessionController, LiveSessionState>(SessionController.new);
+    NotifierProvider<SessionController, LiveSessionState>(
+      SessionController.new,
+    );

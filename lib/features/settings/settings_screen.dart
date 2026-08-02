@@ -1,10 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_info.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/tracking_mode.dart';
+import '../../domain/services/app_backup.dart';
+import '../../platform/backup/backup_file_service.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
 import '../home/session_controller.dart';
@@ -28,14 +33,21 @@ class SettingsScreen extends ConsumerStatefulWidget {
 class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   var _isSavingTrackingMode = false;
   var _isDeletingAll = false;
+  var _isExportingBackup = false;
+  var _isImportingBackup = false;
+
+  bool get _isManagingData =>
+      _isDeletingAll || _isExportingBackup || _isImportingBackup;
 
   @override
   Widget build(BuildContext context) {
     final mode = ref.watch(trackingModeSettingProvider);
     final liveSession = ref.watch(sessionControllerProvider);
     final sessionInProgress = _isSessionInProgress(liveSession);
-    final canChangeMode = !sessionInProgress && !_isSavingTrackingMode;
-    final canDeleteAll = !sessionInProgress && !_isDeletingAll;
+    final canChangeMode =
+        !sessionInProgress && !_isSavingTrackingMode && !_isManagingData;
+    final canManageData = !sessionInProgress && !_isManagingData;
+    final canDeleteAll = canManageData;
     final theme = Theme.of(context);
 
     return Scaffold(
@@ -180,6 +192,63 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       ListTile(
+                        minTileHeight: 64,
+                        leading: const TonalIcon(
+                          icon: Icons.file_upload_outlined,
+                        ),
+                        title: const Text('전체 백업 내보내기'),
+                        subtitle: const Text('산책·원본 위치·수정 내용·장소 이름 포함'),
+                        trailing: _isExportingBackup
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.chevron_right_rounded),
+                        enabled: canManageData,
+                        onTap: canManageData
+                            ? () => unawaited(_exportBackup(context))
+                            : null,
+                      ),
+                      Divider(
+                        height: 1,
+                        indent: 16,
+                        endIndent: 16,
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.6,
+                        ),
+                      ),
+                      ListTile(
+                        minTileHeight: 64,
+                        leading: TonalIcon(
+                          icon: Icons.file_download_outlined,
+                          color: theme.colorScheme.secondary,
+                        ),
+                        title: const Text('백업 가져오기'),
+                        subtitle: const Text('기존 기록 유지 · 중복 산책 건너뛰기'),
+                        trailing: _isImportingBackup
+                            ? const SizedBox.square(
+                                dimension: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.chevron_right_rounded),
+                        enabled: canManageData,
+                        onTap: canManageData
+                            ? () => unawaited(_importBackup(context))
+                            : null,
+                      ),
+                      Divider(
+                        height: 1,
+                        indent: 16,
+                        endIndent: 16,
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.6,
+                        ),
+                      ),
+                      ListTile(
                         minTileHeight: 56,
                         leading: TonalIcon(
                           icon: Icons.delete_outline_rounded,
@@ -212,7 +281,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                           child: Text(
-                            '진행 중인 산책을 마친 뒤 모든 기록을 삭제할 수 있어요.',
+                            '진행 중인 산책을 마친 뒤 백업을 관리하거나 기록을 삭제할 수 있어요.',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -228,6 +297,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ),
                           ),
                         ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                        child: Text(
+                          '앱 업데이트에는 이 기기의 기록이 유지됩니다. 앱 삭제·기기 변경 전에는 백업 파일을 별도로 보관하세요. 백업에는 정밀한 위치가 포함됩니다.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -268,7 +346,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   }
 
   Future<void> _deleteAll(BuildContext context) async {
-    if (_isDeletingAll) return;
+    if (_isManagingData) return;
     if (_isSessionInProgress(ref.read(sessionControllerProvider))) {
       _showSessionInProgressMessage(context);
       return;
@@ -319,6 +397,133 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     } finally {
       if (mounted) setState(() => _isDeletingAll = false);
     }
+  }
+
+  Future<void> _exportBackup(BuildContext context) async {
+    if (_isManagingData) return;
+    if (_isSessionInProgress(ref.read(sessionControllerProvider))) {
+      _showSessionInProgressMessage(context);
+      return;
+    }
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('전체 백업 내보내기'),
+        content: const Text(
+          '백업 파일에는 산책 시각, 정밀한 GPS 경로, 활동 수정 내용과 저장한 장소 이름이 포함됩니다. 신뢰할 수 있는 곳에만 보관하세요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('파일 저장'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    if (_isSessionInProgress(ref.read(sessionControllerProvider))) {
+      _showSessionInProgressMessage(context);
+      return;
+    }
+
+    setState(() => _isExportingBackup = true);
+    try {
+      final raw = await ref.read(walkRepositoryProvider).createBackupJson();
+      final path = await ref
+          .read(backupFileServiceProvider)
+          .save(
+            fileName: _backupFileName(DateTime.now()),
+            bytes: Uint8List.fromList(utf8.encode(raw)),
+          );
+      if (!context.mounted || path == null) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('전체 백업 파일을 저장했어요')));
+    } on Object catch (error) {
+      if (context.mounted) {
+        _showDataError(context, '백업을 저장하지 못했어요', error);
+      }
+    } finally {
+      if (mounted) setState(() => _isExportingBackup = false);
+    }
+  }
+
+  Future<void> _importBackup(BuildContext context) async {
+    if (_isManagingData) return;
+    if (_isSessionInProgress(ref.read(sessionControllerProvider))) {
+      _showSessionInProgressMessage(context);
+      return;
+    }
+
+    setState(() => _isImportingBackup = true);
+    try {
+      final picked = await ref.read(backupFileServiceProvider).pick();
+      if (picked == null || !context.mounted) return;
+      final archive = AppBackupCodec.decodeBytes(picked.bytes);
+      final sessionCount = archive.table('sessions').length;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('백업 가져오기'),
+          content: Text(
+            '${picked.name}\n\n산책 $sessionCount개를 확인했습니다. 기존 기록은 지우지 않고, 같은 산책 ID는 건너뜁니다.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('취소'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('가져오기'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !context.mounted) return;
+      if (_isSessionInProgress(ref.read(sessionControllerProvider))) {
+        _showSessionInProgressMessage(context);
+        return;
+      }
+      final result = await ref
+          .read(walkRepositoryProvider)
+          .importBackupJson(utf8.decode(picked.bytes, allowMalformed: false));
+      ref.read(historyTickProvider.notifier).state++;
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '산책 ${result.importedSessions}개를 가져왔어요'
+            '${result.skippedSessions == 0 ? '' : ' · 중복 ${result.skippedSessions}개 건너뜀'}',
+          ),
+        ),
+      );
+    } on Object catch (error) {
+      if (context.mounted) {
+        _showDataError(context, '백업을 가져오지 못했어요', error);
+      }
+    } finally {
+      if (mounted) setState(() => _isImportingBackup = false);
+    }
+  }
+
+  String _backupFileName(DateTime now) {
+    String two(int value) => value.toString().padLeft(2, '0');
+    return 'sanbo-backup-${now.year}${two(now.month)}${two(now.day)}-'
+        '${two(now.hour)}${two(now.minute)}.sanbo';
+  }
+
+  void _showDataError(BuildContext context, String summary, Object error) {
+    final detail = error is FormatException
+        ? error.message.toString()
+        : '다시 시도해 주세요.';
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('$summary. $detail')));
   }
 
   void _showSessionInProgressMessage(BuildContext context) {

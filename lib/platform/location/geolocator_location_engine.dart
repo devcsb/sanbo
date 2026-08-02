@@ -13,7 +13,7 @@ import 'location_engine.dart';
 /// Production Android/iOS location via geolocator + FGS notification on Android.
 ///
 /// Real-device failure modes this implementation defends against:
-/// - Android 13+ FGS needs [Permission.notification] or `startForeground` fails
+/// - Android 13+ notification permission controls drawer visibility for the FGS
 /// - Broadcast stream without a listener drops seed / first fixes
 /// - Samsung Fused Location can hang; we fall back to LocationManager
 /// - Silent catch of permission/stream errors left the UI stuck at 0 samples
@@ -56,8 +56,8 @@ class GeolocatorLocationEngine implements LocationEngine {
     final service = await Geolocator.isLocationServiceEnabled();
     if (!service) return LocationPermissionState.serviceDisabled;
 
-    // Android 13+: FGS location stream shows a persistent notification.
-    // Without POST_NOTIFICATIONS, startForeground can fail and no fixes arrive.
+    // Android 13+: ask so the FGS and safety alerts remain visible in the
+    // notification drawer. Denial does not itself prevent FGS startup.
     if (Platform.isAndroid) {
       await _requestNotificationPermission();
     }
@@ -108,8 +108,8 @@ class GeolocatorLocationEngine implements LocationEngine {
 
   LocationPermissionState _mapPermission(LocationPermission p) {
     return switch (p) {
-      LocationPermission.always || LocationPermission.whileInUse =>
-        LocationPermissionState.granted,
+      LocationPermission.always ||
+      LocationPermission.whileInUse => LocationPermissionState.granted,
       LocationPermission.denied => LocationPermissionState.denied,
       LocationPermission.deniedForever => LocationPermissionState.deniedForever,
       LocationPermission.unableToDetermine => LocationPermissionState.unknown,
@@ -117,12 +117,20 @@ class GeolocatorLocationEngine implements LocationEngine {
   }
 
   LocationAccuracy get _accuracy => switch (_mode) {
-        TrackingMode.highAccuracy => LocationAccuracy.bestForNavigation,
-        TrackingMode.balanced => LocationAccuracy.best,
-        TrackingMode.batterySaver => LocationAccuracy.high,
-      };
+    TrackingMode.highAccuracy => LocationAccuracy.bestForNavigation,
+    TrackingMode.balanced => LocationAccuracy.high,
+    TrackingMode.batterySaver => LocationAccuracy.medium,
+  };
 
   Duration get _interval => Duration(seconds: _mode.targetIntervalSeconds);
+
+  int get _distanceFilterM => switch (_mode) {
+    TrackingMode.batterySaver => 10,
+    TrackingMode.balanced => 5,
+    TrackingMode.highAccuracy => 2,
+  };
+
+  bool get _keepCpuAwake => _mode == TrackingMode.highAccuracy;
 
   @override
   Future<void> start() async {
@@ -134,22 +142,18 @@ class GeolocatorLocationEngine implements LocationEngine {
     final perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied ||
         perm == LocationPermission.deniedForever) {
-      _controller.addError(
-        StateError('location_permission_denied'),
-        StackTrace.current,
-      );
+      final error = StateError('location_permission_denied');
+      _controller.addError(error, StackTrace.current);
       _running = false;
-      return;
+      throw error;
     }
 
     final serviceOn = await Geolocator.isLocationServiceEnabled();
     if (!serviceOn) {
-      _controller.addError(
-        StateError('location_service_disabled'),
-        StackTrace.current,
-      );
+      final error = StateError('location_service_disabled');
+      _controller.addError(error, StackTrace.current);
       _running = false;
-      return;
+      throw error;
     }
 
     try {
@@ -174,8 +178,8 @@ class GeolocatorLocationEngine implements LocationEngine {
         if (!_controller.isClosed) {
           _controller.addError(e2, st2);
         }
-        _running = false;
-        return;
+        await _stopTrackingOnly();
+        Error.throwWithStackTrace(e2, st2);
       }
     }
 
@@ -193,22 +197,31 @@ class GeolocatorLocationEngine implements LocationEngine {
     if (Platform.isAndroid) {
       locationSettings = AndroidSettings(
         accuracy: _accuracy,
-        distanceFilter: 0,
+        distanceFilter: _distanceFilterM,
         intervalDuration: _interval,
         forceLocationManager: forceLocationManager,
         // timeLimit on stream is not used — we use our own stall watchdog.
-        foregroundNotificationConfig: const ForegroundNotificationConfig(
+        foregroundNotificationConfig: ForegroundNotificationConfig(
           notificationTitle: '산보',
           notificationText: '산책 경로를 기록하고 있어요',
           notificationChannelName: '산보 위치 기록',
-          enableWakeLock: true,
+          enableWakeLock: _keepCpuAwake,
           setOngoing: true,
         ),
+      );
+    } else if (Platform.isIOS) {
+      locationSettings = AppleSettings(
+        accuracy: _accuracy,
+        distanceFilter: _distanceFilterM,
+        activityType: ActivityType.fitness,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: true,
+        allowBackgroundLocationUpdates: true,
       );
     } else {
       locationSettings = LocationSettings(
         accuracy: _accuracy,
-        distanceFilter: 0,
+        distanceFilter: _distanceFilterM,
       );
     }
 
@@ -273,10 +286,7 @@ class GeolocatorLocationEngine implements LocationEngine {
           stackTrace: st,
         );
         if (!_controller.isClosed) {
-          _controller.addError(
-            StateError('location_timeout_no_fix'),
-            st,
-          );
+          _controller.addError(StateError('location_timeout_no_fix'), st);
         }
       }
     });
@@ -303,7 +313,9 @@ class GeolocatorLocationEngine implements LocationEngine {
           stackTrace: st,
         );
         if (attempt + 1 < retries) {
-          await Future<void>.delayed(Duration(milliseconds: 600 * (attempt + 1)));
+          await Future<void>.delayed(
+            Duration(milliseconds: 600 * (attempt + 1)),
+          );
         }
       }
     }

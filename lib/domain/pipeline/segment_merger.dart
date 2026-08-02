@@ -1,5 +1,6 @@
 import '../models/activity_label.dart';
 import '../models/minute_window.dart';
+import 'geo.dart';
 
 /// Collapsed consecutive minute windows for readable timeline (PRD FR-13 / TRD §4.8).
 class ActivitySegment {
@@ -38,8 +39,11 @@ class ActivitySegment {
   int get minuteCount => windows.length;
 
   /// Exclusive end of the last minute (or partial span).
-  DateTime get endExclusive =>
-      endInclusive.add(Duration(seconds: windows.isEmpty ? 60 : windows.last.durationS.clamp(1, 60)));
+  DateTime get endExclusive => endInclusive.add(
+    Duration(
+      seconds: windows.isEmpty ? 60 : windows.last.durationS.clamp(1, 60),
+    ),
+  );
 
   /// True when this segment spans more than one wall-clock minute.
   bool get isMultiMinute => minuteCount > 1;
@@ -87,6 +91,28 @@ class SegmentMerger {
     final labelB = b.displayLabel;
     if (labelA != labelB) return false;
 
+    // Once places are known, do not collapse adjacent stays at different
+    // places into one misleading timeline segment.
+    if (a.placeId != null && b.placeId != null && a.placeId != b.placeId) {
+      return false;
+    }
+
+    // Identically classified stays can still be different real-world places.
+    // Preserve that boundary before place names are known.
+    if (_isStayLabel(labelA) &&
+        a.centroidLat != null &&
+        a.centroidLon != null &&
+        b.centroidLat != null &&
+        b.centroidLon != null) {
+      final centroidDistance = haversineMeters(
+        lat1: a.centroidLat!,
+        lon1: a.centroidLon!,
+        lat2: b.centroidLat!,
+        lon2: b.centroidLon!,
+      );
+      if (centroidDistance > 50) return false;
+    }
+
     // Unknown alone stays split unless user confirmed both the same.
     if (labelA == ActivityLabel.unknown) {
       return a.userConfirmed && b.userConfirmed;
@@ -101,6 +127,15 @@ class SegmentMerger {
     if (b.windowStart != expected) return false;
 
     return true;
+  }
+
+  bool _isStayLabel(ActivityLabel label) {
+    return switch (label) {
+      ActivityLabel.stationary ||
+      ActivityLabel.placeStay ||
+      ActivityLabel.cafeOrShop => true,
+      _ => false,
+    };
   }
 
   ActivitySegment _toSegment(List<MinuteWindow> bucket) {
@@ -146,11 +181,11 @@ class SegmentMerger {
 
   WindowQuality _worseQuality(WindowQuality a, WindowQuality b) {
     int rank(WindowQuality q) => switch (q) {
-          WindowQuality.high => 0,
-          WindowQuality.medium => 1,
-          WindowQuality.low => 2,
-          WindowQuality.gap => 3,
-        };
+      WindowQuality.high => 0,
+      WindowQuality.medium => 1,
+      WindowQuality.low => 2,
+      WindowQuality.gap => 3,
+    };
     return rank(a) >= rank(b) ? a : b;
   }
 }

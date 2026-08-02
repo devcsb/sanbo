@@ -4,12 +4,40 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/home/session_controller.dart';
 
-class SanboApp extends ConsumerWidget {
+class SanboApp extends ConsumerStatefulWidget {
   const SanboApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SanboApp> createState() => _SanboAppState();
+}
+
+class _SanboAppState extends ConsumerState<SanboApp> {
+  late final AppLifecycleListener _lifecycleListener;
+
+  @override
+  void initState() {
+    super.initState();
+    _lifecycleListener = AppLifecycleListener(
+      onResume: () {
+        ref.read(sessionControllerProvider.notifier).setAppForeground(true);
+      },
+      onPause: () =>
+          ref.read(sessionControllerProvider.notifier).setAppForeground(false),
+      onHide: () =>
+          ref.read(sessionControllerProvider.notifier).setAppForeground(false),
+    );
+  }
+
+  @override
+  void dispose() {
+    _lifecycleListener.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final router = ref.watch(routerProvider);
 
     return MaterialApp.router(

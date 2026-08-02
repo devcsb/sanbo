@@ -1,7 +1,7 @@
 name: sanbo
 description: 산책 분 단위 동선·속도·장소·활동 추정 개인 로그 (공개 지도 기반)
 publish_to: "none"
-version: 0.3.2+5
+version: 0.7.0+10
 
 environment:
   sdk: ^3.12.2
@@ -20,10 +20,12 @@ dependencies:
   sqflite: ^2.4.2
   uuid: ^4.5.1
   geolocator: ^13.0.4
+  geocoding: ^5.0.0
   permission_handler: ^11.4.0
   flutter_map: ^7.0.2
   latlong2: ^0.9.1
   http: ^1.2.2
+  file_selector: ^1.1.0
 
 dev_dependencies:
   flutter_test:

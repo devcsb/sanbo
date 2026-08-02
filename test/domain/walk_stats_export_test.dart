@@ -56,7 +56,10 @@ void main() {
       expect(ids, isNot(contains('walks_10')));
 
       final newly = stats.newlyUnlocked({'first_walk', 'walks_5'});
-      expect(newly.map((m) => m.id), containsAll(['distance_5km', 'long_walk_60m']));
+      expect(
+        newly.map((m) => m.id),
+        containsAll(['distance_5km', 'long_walk_60m']),
+      );
       expect(newly.map((m) => m.id), isNot(contains('first_walk')));
     });
   });
@@ -85,6 +88,44 @@ void main() {
       expect(text, contains('2.50 km'));
       expect(text, contains('강변 산책'));
       expect(text, contains('로컬 기록'));
+    });
+
+    test('human summary includes a confirmed place memory', () {
+      final session = _session(id: 'place', distance: 10, duration: 120);
+      final start = DateTime(2026, 7, 18, 9);
+      final windows = [
+        for (var minute = 0; minute < 2; minute++)
+          MinuteWindow(
+            windowStart: start.add(Duration(minutes: minute)),
+            durationS: 60,
+            partial: false,
+            sampleCount: 8,
+            rawSampleCount: 8,
+            distanceM: 5,
+            avgSpeedMps: 0.1,
+            maxSpeedMps: 0.2,
+            stationaryRatio: 0.9,
+            quality: WindowQuality.high,
+            hypothesisLabel: ActivityLabel.placeStay,
+            hypothesisConfidence: 0.7,
+            placeId: 1,
+            placeName: '강변 벤치',
+            placeAddress: '서울특별시',
+          ),
+      ];
+      final text = const SessionExport().humanSummary(
+        session: session,
+        windows: windows,
+      );
+      expect(text, contains('강변 벤치'));
+
+      final json = const SessionExport().toJsonDocument(
+        session: session,
+        windows: windows,
+      );
+      final firstWindow = (json['windows']! as List).first as Map;
+      expect(firstWindow['place_name'], '강변 벤치');
+      expect(firstWindow['place_address'], '서울특별시');
     });
 
     test('ndjson starts with session meta and includes samples', () {

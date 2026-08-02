@@ -28,6 +28,9 @@ class MinuteWindow {
     this.userLabel,
     this.userNote,
     this.userConfirmed = false,
+    this.placeId,
+    this.placeName,
+    this.placeAddress,
   });
 
   final DateTime windowStart;
@@ -53,6 +56,9 @@ class MinuteWindow {
   final ActivityLabel? userLabel;
   final String? userNote;
   final bool userConfirmed;
+  final int? placeId;
+  final String? placeName;
+  final String? placeAddress;
 
   /// Display label: user override wins (PRD FR-11).
   ActivityLabel get displayLabel => userLabel ?? hypothesisLabel;

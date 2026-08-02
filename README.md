@@ -52,26 +52,41 @@
 - 진행 중 **시간 · 거리 · 속도** 한눈에  
 - **산책 종료** 후 요약 화면으로 바로 이동  
 - Android 포그라운드 알림으로 백그라운드에서도 수집 유지  
+- 한 장소에 20분 머물면 안내, 30분이면 자동 저장·종료
+- 2시간 45분에 종료 예고, 3시간이면 자동 저장·종료
 
 ### ⏱️ 분 단위 타임라인
 - 벽시계 기준 **1분 윈도우**로 동선 집계  
 - 구간별 거리 · 속도 · 정지 비율  
-- GPS 공백 구간은 **빈 구간**으로 정직하게 표시  
+- GPS 공백 구간은 **빈 구간**으로 정직하게 표시
+- 구간을 탭하면 해당 시각과 동선을 지도에서 강조
+- 구간 보기와 활동·장소 편집 버튼을 분리해 오조작 방지
 
 ### 🧠 활동 추정 (가설)
 - 걷기 / 빠른 걷기 / 체류 / 카페·상점 추정 등  
 - UI에는 **「추정」** 카피 — AI 확정 표현 없음  
 - 탭해서 **수정 · 확정** 가능 (사용자 라벨 우선)  
 
+### 📍 장소 기억
+- 체류 구간에 `동네 카페`, `강변 벤치`처럼 직접 이름 저장
+- 다음 산책의 가까운 체류 지점에서 저장된 이름을 로컬로 재사용
+- 사용자가 요청할 때만 기기 주소 서비스로 주소 제안
+- 외부 지오코더 자동·배치 호출 없음
+
 ### 🗺️ 공개 지도 경로
 - **OpenStreetMap** 공개 타일(Carto Voyager) + 폴리라인 — **API 키 불필요**  
 - 상용 맵 SDK · 브이월드 키 연동 없음  
-- 저작권 attribution 표시 (`© OpenStreetMap · © CARTO`)  
+- 저작권 attribution 표시 (`© OpenStreetMap · © CARTO`)
+- 시간 슬라이더와 재생 버튼으로 경로·현재 활동·장소를 함께 회상
 
 ### 🔒 프라이버시 우선
 - **로컬 SQLite** 저장, 계정 · 서버 업로드 없음 (MVP)  
+- Android 클라우드 백업·기기 이전에서 위치 기록 제외
+- 앱 업데이트에는 로컬 기록 유지; 앱 삭제·기기 변경 전 수동 전체 백업 지원
+- 버전이 있는 `.sanbo` 전체 백업 내보내기·병합 가져오기 (중복 산책 건너뛰기)
 - 세션 / 전체 기록 삭제  
 - 위치는 산책 **세션 중에만** 수집 (상시 추적 아님)  
+- 장소 이름과 주소도 로컬 SQLite에만 저장
 
 ### ♻️ 미완료 산책 복구
 - 앱이 비정상 종료되어도 미완료 세션 안내  
@@ -82,6 +97,7 @@
 - 산책 종료 시 새로 열린 이정표만 짧게 안내  
 - 세션 **메모** (로컬 전용)  
 - 요약 **클립보드 복사** · **NDJSON 내보내기** (FR-16)  
+- 설정에서 모든 산책·원본 경로·수정 내용·장소를 파일로 백업·복원
 - 시작/종료 가벼운 햅틱  
 
 ---
@@ -95,7 +111,7 @@
 | 위치 | [geolocator](https://pub.dev/packages/geolocator) + Android FGS 알림 |
 | 저장 | [sqflite](https://pub.dev/packages/sqflite) (온디바이스) |
 | 지도 | [flutter_map](https://pub.dev/packages/flutter_map) + OSM 타일 |
-| 설계 문서 | `docs/PRD.md` · `TRD.md` · `PLATFORM_AND_MAPS.md` · `UX_REVIEW.md` |
+| 설계 문서 | `docs/PRD.md` · `TRD.md` · `PLATFORM_AND_MAPS.md` · `UX_REVIEW.md` · `QUALITY_REVIEW_0.7.md` |
 
 ---
 
@@ -121,7 +137,7 @@ flutter run
 # 4. 디버그 APK
 flutter build apk --debug
 
-# 5. 릴리스 APK (선택)
+# 5. 릴리스 APK는 아래 서명 설정 후 빌드
 flutter build apk --release --split-per-abi
 ```
 
@@ -130,6 +146,22 @@ flutter build apk --release --split-per-abi
 build/app/outputs/flutter-apk/app-arm64-v8a-release.apk   # 갤럭시 등
 build/app/outputs/flutter-apk/app-debug.apk
 ```
+
+디버그 APK는 개발·테스트용이며 배포용 릴리스가 아닙니다. 릴리스 빌드는
+`android/key.properties`에 지정한 키만 사용하고, 키 설정이 없으면 의도적으로
+실패합니다. 기존 배포 앱을 업데이트하려면 반드시 기존 배포본과 같은 서명
+인증서를 사용해야 합니다.
+
+```bash
+keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA \
+  -keysize 2048 -validity 10000 -alias upload
+cp android/key.properties.example android/key.properties
+# android/key.properties의 경로·비밀번호를 실제 값으로 변경
+flutter build appbundle --release
+```
+
+`android/key.properties`와 키스토어는 Git에서 제외됩니다. 안전한 비밀 저장소에
+별도로 보관하세요. 업로드 키를 잃으면 이후 업데이트 배포가 어려워질 수 있습니다.
 
 ### 지도
 
@@ -158,10 +190,12 @@ adb shell am start -n com.sanbo.sanbo/.MainActivity
 1. **홈**에서 **산책 시작** → 위치 권한 허용  
 2. 평소처럼 산책 (알림: “산보 · 산책 경로를 기록 중”)  
 3. **산책 종료** → 요약 카드 · 지도 경로 · 분 타임라인  
-4. 틀린 활동 추정은 탭해서 수정 · 확정  
+4. 타임라인 구간을 탭해 지도에서 보고, 편집 버튼으로 활동·장소 수정
 5. **기록** 탭에서 과거 세션 다시 보기 · 삭제  
 
-설정에서 추적 모드(절전 / 균형 / 고정확)를 바꿀 수 있습니다.
+설정에서 추적 모드(절전 20초 / 균형 8초 / 정밀 4초)를 바꾸고 전체 백업을
+내보내거나 가져올 수 있습니다. 백업 파일에는 정밀 위치가 있으므로 공유에
+주의하세요.
 
 ---
 
@@ -178,7 +212,7 @@ lib/
 │   ├── home/            # 시작/종료 · 복구 · 권한 UX
 │   ├── history/         # 세션 목록 · 빈 상태
 │   ├── session_detail/  # 맵 · 요약 · 타임라인
-│   └── settings/        # 모드 · 지도 · 데이터 삭제
+│   └── settings/        # 모드 · 지도 · 전체 백업/복원 · 데이터 삭제
 └── shared/widgets/      # 하단 탭, RouteMap
 docs/                    # PRD / TRD / 플랫폼·지도 / UX 검토
 test/                    # 단위 · e2e · UX 회귀
@@ -210,7 +244,12 @@ flutter test --concurrency=1
 | 0.2.0 | OSM 전용 지도 · 카피/설정 UX 정리 · 브이월드 제거 | ✅ |
 | 0.3.0 | 전 화면 디자인 시스템 · 반응형/접근성 · 설정 안전성 강화 | ✅ |
 | 0.3.1 | 개인 이정표 · 메모 · 요약 복사 · NDJSON export · 햅틱 | ✅ |
-| v1 | 장소 이름 개선, 공유 시트 연동 | 🔜 |
+| 0.3.3 | GPS 전력 최적화 · 장기 정지/3시간 자동 종료 알림 | ✅ |
+| 0.4.0 | 체류 장소 이름 · 기기 주소 제안 · 로컬 장소 재사용 | ✅ |
+| 0.5.0 | 지도–타임라인 연동 · 경로 슬라이더/재생 · 선택 구간 강조 | ✅ |
+| 0.6.0 | 전체 백업/병합 복원 · DB 무결성/마이그레이션 검증 · 백그라운드 UI 절전 · 릴리스 서명 안전장치 | ✅ |
+| 0.7.0 | 0.4–0.6 기능 통합 정식 릴리스 · 기존 설치 업데이트 호환 · 릴리스 산출물 검증 | ✅ |
+| v1 | 공유 시트 · GPX 내보내기 · POI 카테고리 | 🔜 |
 | Later | iOS, 온디바이스 ML, 일기 연동 | 🔜 |
 
 ---

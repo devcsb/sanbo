@@ -117,6 +117,17 @@ class HomeScreen extends ConsumerWidget {
                               .clearNotice(),
                         ),
                       ],
+                      if (tracking && live.autoStopWarning != null) ...[
+                        const SizedBox(height: 14),
+                        _AutoStopBanner(
+                          message: live.autoStopWarning!,
+                          onContinue: live.canContinueAfterWarning && !busy
+                              ? () => ref
+                                    .read(sessionControllerProvider.notifier)
+                                    .continueTrackingAfterStay()
+                              : null,
+                        ),
+                      ],
                       if (recovery) ...[
                         const SizedBox(height: 16),
                         _RecoveryCard(
@@ -203,7 +214,11 @@ class HomeScreen extends ConsumerWidget {
                                         .read(historyTickProvider.notifier)
                                         .state++;
                                     if (ended != null) {
-                                      await _celebrateMilestones(context, ref, ended);
+                                      await _celebrateMilestones(
+                                        context,
+                                        ref,
+                                        ended,
+                                      );
                                       if (!context.mounted) return;
                                       context.go('/history/${ended.id}');
                                     }
@@ -282,7 +297,7 @@ class HomeScreen extends ConsumerWidget {
     if (live.sampleCount == 0) {
       final elapsed = live.elapsed.inSeconds;
       if (elapsed >= 15) {
-        return '아직 GPS가 안 잡히고 있어요. 알림·위치 권한을 허용했는지, 야외인지 확인해 주세요.';
+        return '아직 GPS가 안 잡히고 있어요. 정확한 위치 권한과 기기 위치 서비스가 켜져 있는지 확인해 주세요.';
       }
       return 'GPS를 잡는 중이에요. 첫 신호까지 수 초~1분 걸릴 수 있어요.';
     }
@@ -312,7 +327,6 @@ class HomeScreen extends ConsumerWidget {
   }
 }
 
-
 Future<void> _celebrateMilestones(
   BuildContext context,
   WidgetRef ref,
@@ -323,10 +337,7 @@ Future<void> _celebrateMilestones(
     final stats = WalkStats.fromSessions(sessions);
     final flagsStore = ref.read(appFlagsStoreProvider);
     final flags = await flagsStore.load();
-    final newly = stats.newlyUnlocked(
-      flags.unlockedMilestones,
-      latest: ended,
-    );
+    final newly = stats.newlyUnlocked(flags.unlockedMilestones, latest: ended);
     if (newly.isEmpty) return;
     await flagsStore.unlockMilestones(newly.map((m) => m.id));
     if (!context.mounted) return;
@@ -476,15 +487,73 @@ class _NoticeBanner extends StatelessWidget {
             IconButton(
               tooltip: '닫기',
               onPressed: onDismiss,
-              style: IconButton.styleFrom(
-                minimumSize: const Size.square(48),
-              ),
+              style: IconButton.styleFrom(minimumSize: const Size.square(48)),
               icon: Icon(
                 Icons.close_rounded,
                 size: 20,
                 color: theme.colorScheme.onSurfaceVariant,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AutoStopBanner extends StatelessWidget {
+  const _AutoStopBanner({required this.message, this.onContinue});
+
+  final String message;
+  final VoidCallback? onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      liveRegion: true,
+      child: SoftPanel(
+        elevated: false,
+        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.92),
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.timer_outlined,
+                  size: 20,
+                  color: theme.colorScheme.onSecondaryContainer,
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    message,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSecondaryContainer,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (onContinue != null) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: onContinue,
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: const Text('계속 기록'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.onSecondaryContainer,
+                    minimumSize: const Size(48, 48),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
