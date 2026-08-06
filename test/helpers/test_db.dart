@@ -13,10 +13,11 @@ void ensureSqfliteFfi() {
   _ffiReady = true;
 }
 
-Future<WalkRepository> openTestRepository() async {
+Future<WalkRepository> openTestRepository({String? path}) async {
   ensureSqfliteFfi();
-  final path =
+  final databasePath =
+      path ??
       '${Directory.systemTemp.path}/sanbo_test_${DateTime.now().microsecondsSinceEpoch}.db';
-  final repo = await WalkRepository.open(path: path);
+  final repo = await WalkRepository.open(path: databasePath);
   return repo;
 }

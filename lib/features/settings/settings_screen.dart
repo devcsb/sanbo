@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -161,8 +161,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       const ListTile(
                         minTileHeight: 56,
                         leading: TonalIcon(icon: Icons.map_outlined),
-                        title: Text('OpenStreetMap'),
-                        subtitle: Text('누구나 이용할 수 있는 공개 지도'),
+                        title: Text('OpenStreetMap · CARTO'),
+                        subtitle: Text(
+                          '지도 타일을 볼 때 대략적인 지도 영역과 네트워크 정보가 CARTO에 전달됩니다',
+                        ),
                       ),
                       Divider(
                         height: 1,
@@ -179,7 +181,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           color: theme.colorScheme.secondary,
                         ),
                         title: const Text('이 기기에만 저장'),
-                        subtitle: const Text('서버 업로드 · 계정 없음'),
+                        subtitle: const Text('산책 원본 서버 업로드 · 계정 없음'),
                       ),
                     ],
                   ),
@@ -465,7 +467,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     try {
       final picked = await ref.read(backupFileServiceProvider).pick();
       if (picked == null || !context.mounted) return;
-      final archive = AppBackupCodec.decodeBytes(picked.bytes);
+      // Parsing can expand a near-limit JSON file several times in memory.
+      // Do it once off the UI isolate, then reuse the validated archive for
+      // both the confirmation preview and the transactional import.
+      final archive = await compute(AppBackupCodec.decodeBytes, picked.bytes);
+      if (!context.mounted) return;
       final sessionCount = archive.table('sessions').length;
       final confirmed = await showDialog<bool>(
         context: context,
@@ -493,7 +499,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       }
       final result = await ref
           .read(walkRepositoryProvider)
-          .importBackupJson(utf8.decode(picked.bytes, allowMalformed: false));
+          .importBackup(archive);
       ref.read(historyTickProvider.notifier).state++;
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(

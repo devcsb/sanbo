@@ -160,12 +160,18 @@ cp android/key.properties.example android/key.properties
 flutter build appbundle --release
 ```
 
-`android/key.properties`와 키스토어는 Git에서 제외됩니다. 안전한 비밀 저장소에
-별도로 보관하세요. 업로드 키를 잃으면 이후 업데이트 배포가 어려워질 수 있습니다.
+`android/key.properties`와 키스토어는 Git에서 제외됩니다. 저장·키 비밀번호는
+`SANBO_RELEASE_STORE_PASSWORD`와 `SANBO_RELEASE_KEY_PASSWORD` 환경 변수로도
+주입할 수 있습니다. macOS의 품질 스크립트는 `sanbo-release-keystore`라는 Keychain
+항목이 있으면 비밀번호를 출력하지 않고 사용합니다. 키스토어는 접근 권한을 제한하고
+암호화된 별도 백업을 유지하세요. 키를 잃으면 이후 업데이트 배포가 어려워질 수 있습니다.
 
 ### 지도
 
-베이스맵은 **OpenStreetMap** 데이터(Carto 타일)만 사용합니다. 별도 API 키·브이월드 연동은 없습니다.
+베이스맵은 **OpenStreetMap** 데이터(CARTO 타일)만 사용합니다. 별도 API 키·브이월드 연동은 없습니다.
+산책 원본 좌표를 업로드하지는 않지만, 지도를 열면 표시 영역에 해당하는 타일 좌표와
+IP 등 네트워크 정보가 CARTO에 전달될 수 있습니다. 지도 타일을 불러오지 못해도 GPS 기록과
+로컬 저장은 계속 동작합니다.
 
 USB 디버깅이 켜진 폰:
 
@@ -249,6 +255,7 @@ flutter test --concurrency=1
 | 0.5.0 | 지도–타임라인 연동 · 경로 슬라이더/재생 · 선택 구간 강조 | ✅ |
 | 0.6.0 | 전체 백업/병합 복원 · DB 무결성/마이그레이션 검증 · 백그라운드 UI 절전 · 릴리스 서명 안전장치 | ✅ |
 | 0.7.0 | 0.4–0.6 기능 통합 정식 릴리스 · 기존 설치 업데이트 호환 · 릴리스 산출물 검증 | ✅ |
+| 0.7.1 | 장기 기록 저장 복구 · GPS gap 통계 · 대용량 백업 응답성 · 릴리스 서명/manifest 게이트 강화 | ✅ |
 | v1 | 공유 시트 · GPX 내보내기 · POI 카테고리 | 🔜 |
 | Later | iOS, 온디바이스 ML, 일기 연동 | 🔜 |
 

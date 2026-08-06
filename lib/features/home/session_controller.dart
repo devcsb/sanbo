@@ -392,20 +392,27 @@ class SessionController extends Notifier<LiveSessionState> {
       session ??= await _repo.startSession(mode: mode, startedAt: _clock());
 
       if (resuming) {
-        // Reload any samples already checkpointed (recovery continue).
+        // Reconcile persisted and memory-only samples. A failed finalization
+        // can leave valid fixes only in memory; keep those in the pending
+        // queue so the resumed session checkpoints them again before another
+        // process death can lose them.
         final existing = await _repo.getSamples(session.id);
-        if (existing.isNotEmpty && _sessionSamples.isEmpty) {
-          _sessionSamples.addAll(existing);
-        }
+        final recovered = _mergeSamples(existing, _sessionSamples);
+        _sessionSamples
+          ..clear()
+          ..addAll(recovered);
+        _pendingPersist
+          ..clear()
+          ..addAll(_missingSamples(existing, recovered));
       } else {
         _sessionSamples.clear();
+        _pendingPersist.clear();
         _lastValidSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
         _lastAccuracyM = null;
         _validSampleCount = 0;
       }
-      _pendingPersist.clear();
 
       // Rebuild live metrics from memory buffer.
       _recomputeLiveMetricsFromBuffer();
@@ -486,8 +493,9 @@ class SessionController extends Notifier<LiveSessionState> {
     }
   }
 
-  void _onSample(LocationSample sample) {
+  void _onSample(LocationSample rawSample) {
     if (_endingSession) return;
+    final sample = rawSample.normalizedMetadata();
     _sessionSamples.add(sample);
     _pendingPersist.add(sample);
 
@@ -772,11 +780,12 @@ class SessionController extends Notifier<LiveSessionState> {
       // If flush failed and pending still has items, force-insert once more.
       if (_pendingPersist.isNotEmpty) {
         final leftover = List<LocationSample>.of(_pendingPersist);
-        _pendingPersist.clear();
         try {
           await _repo.insertSamples(session.id, leftover);
+          _pendingPersist.clear();
         } catch (_) {
-          // Fall back to processing the in-memory union below.
+          // Preserve memory-only samples for a retry/resume checkpoint. The
+          // in-memory union below can still finalize them in this attempt.
         }
       }
 

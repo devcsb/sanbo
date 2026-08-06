@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/data/app_database.dart';
@@ -7,6 +8,7 @@ import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/services/app_backup.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../helpers/test_db.dart';
 
@@ -94,7 +96,7 @@ void main() {
       expect(archive.table('minute_windows'), hasLength(1));
       expect(archive.table('places'), hasLength(1));
 
-      final result = await target.importBackupJson(raw);
+      final result = await target.importBackup(archive);
       expect(result.importedSessions, 1);
       expect(result.skippedSessions, 0);
       expect(result.importedSamples, 4);
@@ -112,7 +114,7 @@ void main() {
       expect(restoredWindows.single.placeName, '시청 옆 카페');
       expect(restoredWindows.single.placeAddress, '서울특별시 중구');
 
-      final duplicate = await target.importBackupJson(raw);
+      final duplicate = await target.importBackup(archive);
       expect(duplicate.importedSessions, 0);
       expect(duplicate.skippedSessions, 1);
       expect(await target.listCompleted(), hasLength(1));
@@ -157,6 +159,132 @@ void main() {
       throwsFormatException,
     );
     expect(await target.listCompleted(), isEmpty);
+  });
+
+  test('historical invalid REAL values export and import safely', () async {
+    final path =
+        '${Directory.systemTemp.path}/sanbo_historical_non_finite_${DateTime.now().microsecondsSinceEpoch}.db';
+    final source = await openTestRepository(path: path);
+    final target = await openTestRepository();
+    addTearDown(source.close);
+    addTearDown(target.close);
+
+    final start = DateTime(2026, 8, 1, 11, 30);
+    final session = await source.startSession(startedAt: start);
+    await source.insertSamples(session.id, [
+      LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+        speedMps: 1,
+        altitudeM: 20,
+      ),
+    ]);
+    await source.replaceWindows(session.id, [
+      MinuteWindow(
+        windowStart: start,
+        durationS: 60,
+        partial: false,
+        sampleCount: 1,
+        rawSampleCount: 1,
+        distanceM: 0,
+        avgSpeedMps: 0,
+        maxSpeedMps: 1,
+        stationaryRatio: 1,
+        quality: WindowQuality.high,
+        centroidLat: 37.5,
+        centroidLon: 127,
+        startLat: 37.5,
+        startLon: 127,
+        endLat: 37.5,
+        endLon: 127,
+        hypothesisLabel: ActivityLabel.stationary,
+        hypothesisConfidence: 1,
+        evidence: const ['historical fixture'],
+      ),
+    ]);
+    await source.completeSession(
+      sessionId: session.id,
+      endedAt: start.add(const Duration(minutes: 1)),
+      totalDistanceM: 0,
+      durationS: 60,
+      movingTimeS: 0,
+      stationaryTimeS: 60,
+      avgSpeedMps: 0,
+      validSampleCount: 1,
+    );
+
+    // Simulate a row written by 0.7.0 before non-finite normalization was
+    // enforced at repository boundaries.
+    final historicalDb = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(singleInstance: false),
+    );
+    await historicalDb.update(
+      'location_samples',
+      {
+        'accuracy_m': -1,
+        'speed_mps': -1,
+        'altitude_m': double.negativeInfinity,
+      },
+      where: 'session_id = ?',
+      whereArgs: [session.id],
+    );
+    await historicalDb.insert('location_samples', {
+      'session_id': session.id,
+      'ts': start.add(const Duration(seconds: 30)).toIso8601String(),
+      'lat': double.infinity,
+      'lon': 127,
+      'accuracy_m': 5,
+      'speed_mps': 1,
+      'altitude_m': 20,
+      'is_filtered_out': 1,
+    });
+    await historicalDb.update(
+      'minute_windows',
+      {
+        'distance_m': -1,
+        'max_speed_mps': double.infinity,
+        'stationary_ratio': -1,
+        'centroid_lat': 999,
+      },
+      where: 'session_id = ?',
+      whereArgs: [session.id],
+    );
+    await historicalDb.update(
+      'sessions',
+      {'total_distance_m': double.infinity},
+      where: 'id = ?',
+      whereArgs: [session.id],
+    );
+    await historicalDb.close();
+
+    final raw = await source.createBackupJson();
+    final decoded = jsonDecode(raw) as Map<String, dynamic>;
+    final tables = decoded['tables'] as Map<String, dynamic>;
+    final samples = tables['location_samples'] as List<dynamic>;
+    final sample = samples.single as Map<String, dynamic>;
+    expect(sample['accuracy_m'], isNull);
+    expect(sample['speed_mps'], isNull);
+    expect(sample['altitude_m'], isNull);
+    final windows = tables['minute_windows'] as List<dynamic>;
+    final window = windows.single as Map<String, dynamic>;
+    expect(window['distance_m'], 0);
+    expect(window['max_speed_mps'], 0);
+    expect(window['stationary_ratio'], 0);
+    expect(window['centroid_lat'], isNull);
+    expect(window['centroid_lon'], isNull);
+    final sessions = tables['sessions'] as List<dynamic>;
+    expect(
+      (sessions.single as Map<String, dynamic>)['total_distance_m'],
+      isNull,
+    );
+
+    final result = await target.importBackupJson(raw);
+    expect(result.importedSessions, 1);
+    expect(result.importedSamples, 1);
+    expect(result.importedWindows, 1);
   });
 
   test(

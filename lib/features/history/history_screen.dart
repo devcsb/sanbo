@@ -151,7 +151,7 @@ class HistoryScreen extends ConsumerWidget {
                         children: [
                           const SectionLabel('최근 산책'),
                           StatusPill(
-                            label: '${sessions.length}개의 산책',
+                            label: '${snapshot.stats.walkCount}개의 산책',
                             icon: Icons.directions_walk_rounded,
                           ),
                         ],

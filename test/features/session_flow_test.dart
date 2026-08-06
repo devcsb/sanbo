@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -7,7 +8,9 @@ import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/data/app_database.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
+import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
+import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/synthetic_location_engine.dart';
@@ -88,6 +91,51 @@ class _DelayedInsertRepository extends WalkRepository {
       await releaseInsert.future;
     }
     return super.insertSamples(sessionId, samples);
+  }
+}
+
+class _RetryableFailureRepository extends WalkRepository {
+  _RetryableFailureRepository(super.db);
+
+  var failWrites = true;
+
+  @override
+  Future<void> insertSamples(
+    String sessionId,
+    List<LocationSample> samples,
+  ) async {
+    if (failWrites) throw StateError('sample write failed');
+    return super.insertSamples(sessionId, samples);
+  }
+
+  @override
+  Future<WalkSession> finalizeSession({
+    required WalkSession session,
+    required List<LocationSample> samples,
+    required List<MinuteWindow> windows,
+    required DateTime endedAt,
+    required double totalDistanceM,
+    required int durationS,
+    required int movingTimeS,
+    required int stationaryTimeS,
+    required double avgSpeedMps,
+    required int validSampleCount,
+    double? medianAccuracyM,
+  }) {
+    if (failWrites) throw StateError('finalize failed');
+    return super.finalizeSession(
+      session: session,
+      samples: samples,
+      windows: windows,
+      endedAt: endedAt,
+      totalDistanceM: totalDistanceM,
+      durationS: durationS,
+      movingTimeS: movingTimeS,
+      stationaryTimeS: stationaryTimeS,
+      avgSpeedMps: avgSpeedMps,
+      validSampleCount: validSampleCount,
+      medianAccuracyM: medianAccuracyM,
+    );
   }
 }
 
@@ -186,6 +234,49 @@ void main() {
       reason: 'broadcast stream should deliver to SessionController listener',
     );
   });
+
+  test(
+    'non-finite GPS metadata cannot corrupt persistence or backup',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = container.read(sessionControllerProvider).session!;
+      controller.debugIngestSamples([
+        for (var index = 0; index < 10; index++)
+          LocationSample(
+            timestamp: session.startedAt.add(Duration(seconds: index * 4)),
+            latitude: 37.5665 + index * 0.00005,
+            longitude: 126.978,
+            accuracyM: 6,
+            speedMps: index == 2 ? double.infinity : 1.2,
+            altitudeM: index == 3 ? double.negativeInfinity : 25,
+          ),
+      ]);
+
+      final ended = await controller.stop();
+      expect(ended, isNotNull);
+      final stored = await repo.getSamples(ended!.id);
+      expect(stored[2].speedMps, isNull);
+      expect(stored[3].altitudeM, isNull);
+      expect(
+        jsonDecode(await repo.createBackupJson()),
+        isA<Map<String, dynamic>>(),
+      );
+    },
+  );
 
   test(
     'background fixes are checkpointed without rebuilding live UI state',
@@ -494,4 +585,46 @@ void main() {
     expect(ended, isNotNull);
     expect(ended!.totalDistanceM, greaterThan(20));
   });
+
+  test(
+    'resume re-checkpoints memory-only samples after a failed finalization',
+    () async {
+      ensureSqfliteFfi();
+      final path =
+          '${Directory.systemTemp.path}/sanbo_retry_${DateTime.now().microsecondsSinceEpoch}.db';
+      final db = await openAppDatabase(path: path);
+      final repo = _RetryableFailureRepository(db);
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = container.read(sessionControllerProvider).session!;
+      final trace = buildWalkTrace(
+        start: session.startedAt,
+        duration: const Duration(minutes: 1),
+        step: const Duration(seconds: 4),
+      );
+      controller.debugIngestSamples(trace);
+
+      expect(await controller.stop(), isNull);
+      expect(await repo.getSamples(session.id), isEmpty);
+
+      repo.failWrites = false;
+      await controller.start();
+      controller.setAppForeground(false);
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+
+      expect(await repo.getSamples(session.id), hasLength(trace.length));
+    },
+  );
 }

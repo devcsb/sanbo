@@ -12,10 +12,22 @@ val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use(keystoreProperties::load)
 }
-val requiredSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+fun signingValue(property: String, environment: String): String? =
+    keystoreProperties.getProperty(property)?.takeIf { it.isNotBlank() }
+        ?: System.getenv(environment)?.takeIf { it.isNotBlank() }
+
+val releaseStoreFile = signingValue("storeFile", "SANBO_RELEASE_STORE_FILE")
+val releaseStorePassword = signingValue("storePassword", "SANBO_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = signingValue("keyAlias", "SANBO_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = signingValue("keyPassword", "SANBO_RELEASE_KEY_PASSWORD")
 val hasReleaseSigning =
     keystorePropertiesFile.exists() &&
-        requiredSigningKeys.all { !keystoreProperties.getProperty(it).isNullOrBlank() }
+        listOf(
+            releaseStoreFile,
+            releaseStorePassword,
+            releaseKeyAlias,
+            releaseKeyPassword,
+        ).all { !it.isNullOrBlank() }
 val releaseTaskRequested =
     gradle.startParameter.taskNames.any { it.contains("release", ignoreCase = true) }
 if (releaseTaskRequested && !hasReleaseSigning) {
@@ -49,10 +61,10 @@ android {
     signingConfigs {
         if (hasReleaseSigning) {
             create("release") {
-                keyAlias = keystoreProperties.getProperty("keyAlias")
-                keyPassword = keystoreProperties.getProperty("keyPassword")
-                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
-                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
+                storeFile = rootProject.file(releaseStoreFile!!)
+                storePassword = releaseStorePassword
             }
         }
     }

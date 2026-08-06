@@ -252,4 +252,3 @@ Expected: three ABI APKs build successfully; if signing configuration is absent,
 - [ ] **Step 5: Re-check worktree and summarize evidence**
 
 Run: `git diff --check`, `git status --short --branch`, and inspect the staged/committed diff. Report test counts, build outputs, and any remaining real-device-only checks.
-

@@ -62,7 +62,8 @@ class WalkRepository {
   /// Dart. The history screen can therefore render a small page while keeping
   /// totals correct for long-lived users.
   Future<WalkStats> completedStats() async {
-    final rows = await _db.rawQuery('''
+    final rows = await _db.rawQuery(
+      '''
 SELECT COUNT(*) AS walk_count,
        COALESCE(SUM(total_distance_m), 0) AS total_distance_m,
        COALESCE(SUM(duration_s), 0) AS total_duration_s,
@@ -70,7 +71,9 @@ SELECT COUNT(*) AS walk_count,
        COALESCE(MAX(total_distance_m), 0) AS longest_distance_m
 FROM sessions
 WHERE status = ?
-''', [SessionStatus.completed.name]);
+''',
+      [SessionStatus.completed.name],
+    );
     final row = rows.single;
     return WalkStats(
       walkCount: (row['walk_count'] as num?)?.toInt() ?? 0,
@@ -124,16 +127,19 @@ WHERE status = ?
     await batch.commit(noResult: true);
   }
 
-  Map<String, Object?> _sampleToRow(String sessionId, LocationSample s) => {
-    'session_id': sessionId,
-    'ts': s.timestamp.toIso8601String(),
-    'lat': s.latitude,
-    'lon': s.longitude,
-    'accuracy_m': s.accuracyM,
-    'speed_mps': s.speedMps,
-    'altitude_m': s.altitudeM,
-    'is_filtered_out': s.isFilteredOut ? 1 : 0,
-  };
+  Map<String, Object?> _sampleToRow(String sessionId, LocationSample sample) {
+    final s = sample.normalizedMetadata();
+    return {
+      'session_id': sessionId,
+      'ts': s.timestamp.toIso8601String(),
+      'lat': s.latitude,
+      'lon': s.longitude,
+      'accuracy_m': s.accuracyM,
+      'speed_mps': s.speedMps,
+      'altitude_m': s.altitudeM,
+      'is_filtered_out': s.isFilteredOut ? 1 : 0,
+    };
+  }
 
   /// Atomically persist a finalized walk: replace samples, replace windows,
   /// and mark the session completed in a single transaction. Prevents a crash
@@ -577,30 +583,38 @@ ORDER BY w.window_start ASC
         'location_samples',
         orderBy: 'session_id ASC, ts ASC',
       );
-      final samples = allSamples
-          .where((row) => sessionIds.contains(row['session_id']))
-          .map((row) => _withoutKeys(row, const {'id'}))
-          .toList(growable: false);
+      final samples = <Map<String, Object?>>[
+        for (final row in allSamples)
+          if (sessionIds.contains(row['session_id']))
+            ?_sanitizedSampleBackupRow(row),
+      ];
       final allWindows = await txn.query(
         'minute_windows',
         orderBy: 'session_id ASC, window_start ASC',
       );
-      final windows = allWindows
+      final candidateWindows = allWindows
           .where((row) => sessionIds.contains(row['session_id']))
-          .map((row) => _withoutKeys(row, const {'id'}))
           .toList(growable: false);
-      final referencedPlaceIds = windows
+      final referencedPlaceIds = candidateWindows
           .map((row) => row['place_id'])
           .whereType<int>()
           .toSet();
       final allPlaces = await txn.query('places', orderBy: 'id ASC');
-      final places = allPlaces
-          .where((row) => referencedPlaceIds.contains(row['id']))
-          .map((row) => Map<String, Object?>.from(row))
+      final places = <Map<String, Object?>>[
+        for (final row in allPlaces)
+          if (referencedPlaceIds.contains(row['id']))
+            ?_sanitizedPlaceBackupRow(row),
+      ];
+      final validPlaceIds = places
+          .map((row) => row['id'])
+          .whereType<int>()
+          .toSet();
+      final windows = candidateWindows
+          .map((row) => _sanitizedWindowBackupRow(row, validPlaceIds))
           .toList(growable: false);
       return <String, List<Map<String, Object?>>>{
         'sessions': sessions
-            .map((row) => Map<String, Object?>.from(row))
+            .map(_sanitizedSessionBackupRow)
             .toList(growable: false),
         'location_samples': samples,
         'minute_windows': windows,
@@ -616,8 +630,16 @@ ORDER BY w.window_start ASC
 
   /// Atomically merges a full backup. Existing session IDs are left untouched;
   /// all rows belonging to a new session either import together or not at all.
-  Future<BackupImportResult> importBackupJson(String raw) async {
-    final archive = AppBackupCodec.decode(raw);
+  Future<BackupImportResult> importBackupJson(String raw) {
+    return importBackup(AppBackupCodec.decode(raw));
+  }
+
+  /// Imports an archive that has already been decoded and validated.
+  ///
+  /// File-based UI can parse once on a background isolate, show the preview,
+  /// and pass the same immutable archive here instead of decoding a large JSON
+  /// document twice on the UI isolate.
+  Future<BackupImportResult> importBackup(AppBackupArchive archive) async {
     if (archive.databaseSchemaVersion > schemaVersion) {
       throw const FormatException('더 새로운 산보 버전에서 만든 백업입니다');
     }
@@ -1112,7 +1134,91 @@ ORDER BY w.window_start ASC
       speedMps: (r['speed_mps'] as num?)?.toDouble(),
       altitudeM: (r['altitude_m'] as num?)?.toDouble(),
       isFilteredOut: (r['is_filtered_out'] as int? ?? 0) == 1,
+    ).normalizedMetadata();
+  }
+
+  Map<String, Object?> _sanitizedSessionBackupRow(Map<String, Object?> row) {
+    final sanitized = Map<String, Object?>.from(row);
+    for (final column in const [
+      'total_distance_m',
+      'avg_speed_mps',
+      'median_accuracy_m',
+    ]) {
+      sanitized[column] = _safeBackupDouble(sanitized[column], min: 0);
+    }
+    return sanitized;
+  }
+
+  Map<String, Object?>? _sanitizedSampleBackupRow(Map<String, Object?> row) {
+    final sanitized = _withoutKeys(row, const {'id'});
+    final lat = _safeBackupDouble(sanitized['lat'], min: -90, max: 90);
+    final lon = _safeBackupDouble(sanitized['lon'], min: -180, max: 180);
+    if (lat == null || lon == null) return null;
+    sanitized['lat'] = lat;
+    sanitized['lon'] = lon;
+    sanitized['accuracy_m'] = _safeBackupDouble(
+      sanitized['accuracy_m'],
+      min: 0,
     );
+    sanitized['speed_mps'] = _safeBackupDouble(sanitized['speed_mps'], min: 0);
+    sanitized['altitude_m'] = _safeBackupDouble(sanitized['altitude_m']);
+    return sanitized;
+  }
+
+  Map<String, Object?> _sanitizedWindowBackupRow(
+    Map<String, Object?> row,
+    Set<int> validPlaceIds,
+  ) {
+    final sanitized = _withoutKeys(row, const {'id'});
+    for (final column in const [
+      'distance_m',
+      'avg_speed_mps',
+      'max_speed_mps',
+    ]) {
+      sanitized[column] = _safeBackupDouble(sanitized[column], min: 0) ?? 0.0;
+    }
+    for (final column in const ['stationary_ratio', 'hypothesis_confidence']) {
+      sanitized[column] =
+          _safeBackupDouble(sanitized[column], min: 0, max: 1) ?? 0.0;
+    }
+    _sanitizeBackupCoordinatePair(sanitized, 'centroid_lat', 'centroid_lon');
+    _sanitizeBackupCoordinatePair(sanitized, 'start_lat', 'start_lon');
+    _sanitizeBackupCoordinatePair(sanitized, 'end_lat', 'end_lon');
+    if (!validPlaceIds.contains(sanitized['place_id'])) {
+      sanitized['place_id'] = null;
+    }
+    return sanitized;
+  }
+
+  Map<String, Object?>? _sanitizedPlaceBackupRow(Map<String, Object?> row) {
+    final sanitized = Map<String, Object?>.from(row);
+    final lat = _safeBackupDouble(sanitized['lat'], min: -90, max: 90);
+    final lon = _safeBackupDouble(sanitized['lon'], min: -180, max: 180);
+    if (lat == null || lon == null) return null;
+    sanitized['lat'] = lat;
+    sanitized['lon'] = lon;
+    return sanitized;
+  }
+
+  void _sanitizeBackupCoordinatePair(
+    Map<String, Object?> row,
+    String latKey,
+    String lonKey,
+  ) {
+    final lat = _safeBackupDouble(row[latKey], min: -90, max: 90);
+    final lon = _safeBackupDouble(row[lonKey], min: -180, max: 180);
+    row[latKey] = lat != null && lon != null ? lat : null;
+    row[lonKey] = lat != null && lon != null ? lon : null;
+  }
+
+  double? _safeBackupDouble(Object? value, {double? min, double? max}) {
+    if (value == null) return null;
+    if (value is! num || !value.isFinite) return null;
+    final result = value.toDouble();
+    if ((min != null && result < min) || (max != null && result > max)) {
+      return null;
+    }
+    return result;
   }
 
   Map<String, Object?> _windowToRow(String sessionId, MinuteWindow w) => {

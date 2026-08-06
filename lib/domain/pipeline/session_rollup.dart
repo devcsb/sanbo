@@ -24,9 +24,15 @@ class SessionRollupResult {
 
 /// Session-level metrics from filtered path (not sum of windows) — TRD §4.7.
 class SessionRollup {
-  SessionRollup({this.stationarySpeedMps = 0.3});
+  SessionRollup({
+    this.stationarySpeedMps = 0.3,
+    this.maxObservedGap = const Duration(minutes: 1),
+    this.minSegmentDistanceM = 1.5,
+  });
 
   final double stationarySpeedMps;
+  final Duration maxObservedGap;
+  final double minSegmentDistanceM;
 
   SessionRollupResult compute({
     required WalkSession session,
@@ -36,31 +42,38 @@ class SessionRollup {
     final valid = samples.where((s) => !s.isFilteredOut).toList()
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
-    final durationS = endedAt.difference(session.startedAt).inSeconds.clamp(
-      0,
-      86400 * 7,
-    );
-    final distance = pathDistanceMeters(
-      valid.map((s) => (lat: s.latitude, lon: s.longitude)),
-    );
-
+    final durationS = endedAt
+        .difference(session.startedAt)
+        .inSeconds
+        .clamp(0, 86400 * 7);
+    var distance = 0.0;
+    var movingS = 0.0;
     var stationaryS = 0.0;
     for (var i = 1; i < valid.length; i++) {
       final prev = valid[i - 1];
       final s = valid[i];
       final dt = s.timestamp.difference(prev.timestamp).inMilliseconds / 1000.0;
-      if (dt <= 0) continue;
+      if (dt <= 0 || dt > maxObservedGap.inMilliseconds / 1000.0) {
+        // Time outside trustworthy adjacent fixes is unobserved, not movement.
+        // Do not draw a straight-line distance across a genuine GPS gap.
+        continue;
+      }
       final d = haversineMeters(
         lat1: prev.latitude,
         lon1: prev.longitude,
         lat2: s.latitude,
         lon2: s.longitude,
       );
-      if (d / dt < stationarySpeedMps) stationaryS += dt;
+      if (d >= minSegmentDistanceM) distance += d;
+      if (d / dt < stationarySpeedMps) {
+        stationaryS += dt;
+      } else {
+        movingS += dt;
+      }
     }
 
     final stationaryTimeS = stationaryS.round().clamp(0, durationS);
-    final movingTimeS = (durationS - stationaryTimeS).clamp(0, durationS);
+    final movingTimeS = movingS.round().clamp(0, durationS);
     final avgSpeed = movingTimeS > 0 ? distance / movingTimeS : 0.0;
 
     final acc = valid.map((s) => s.accuracyM).whereType<double>().toList()

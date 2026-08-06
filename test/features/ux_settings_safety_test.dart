@@ -199,9 +199,16 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('백업 가져오기'));
     await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    final importDialog = find.textContaining('기존 기록은 지우지 않고');
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    while (importDialog.evaluate().isEmpty && DateTime.now().isBefore(deadline)) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
 
-    expect(find.textContaining('기존 기록은 지우지 않고'), findsOneWidget);
+    expect(importDialog, findsOneWidget);
     await tester.tap(find.text('가져오기'));
     await tester.pump();
     await tester.runAsync(() async {

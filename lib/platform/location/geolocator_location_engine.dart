@@ -355,8 +355,11 @@ class GeolocatorLocationEngine implements LocationEngine {
     // Geolocator Position.timestamp is UTC (fromMap isUtc:true). Normalize to
     // local wall-clock so minute windows match session.startedAt (DateTime.now()).
     final ts = pos.timestamp.isUtc ? pos.timestamp.toLocal() : pos.timestamp;
-    final accuracy = pos.accuracy.isNaN ? null : pos.accuracy;
-    final speed = pos.speed.isNaN || pos.speed < 0 ? null : pos.speed;
+    final accuracy = pos.accuracy.isFinite && pos.accuracy >= 0
+        ? pos.accuracy
+        : null;
+    final speed = pos.speed.isFinite && pos.speed >= 0 ? pos.speed : null;
+    final altitude = pos.altitude.isFinite ? pos.altitude : null;
     _emitCount++;
     if (kDebugMode && _emitCount <= 3) {
       developer.log(
@@ -372,7 +375,7 @@ class GeolocatorLocationEngine implements LocationEngine {
         longitude: pos.longitude,
         accuracyM: accuracy,
         speedMps: speed,
-        altitudeM: pos.altitude.isNaN ? null : pos.altitude,
+        altitudeM: altitude,
       ),
     );
   }
