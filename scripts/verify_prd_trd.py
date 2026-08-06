@@ -15,9 +15,9 @@ ROOT = Path(__file__).resolve().parents[1]
 PRD = ROOT / "docs" / "PRD.md"
 TRD = ROOT / "docs" / "TRD.md"
 PLATFORM = ROOT / "docs" / "PLATFORM_AND_MAPS.md"
-REF_IMAGES = [
-    ROOT / "산책, 달리기 추적 앱.jpg",
-    ROOT / "산책, 달리기 추적 앱2.jpg",
+REF_IMAGE_NAMES = [
+    "산책, 달리기 추적 앱.jpg",
+    "산책, 달리기 추적 앱2.jpg",
 ]
 
 
@@ -92,9 +92,9 @@ def main() -> None:
         ],
         "PRD inspiration image filenames",
     )
-    for img in REF_IMAGES:
-        if not img.is_file():
-            fail(f"reference image missing on disk: {img.name}")
+    # These are historical design references. They were intentionally removed
+    # from the public repository; PRD filename citations remain useful for
+    # traceability, but must not make the structural verifier fail.
 
     # Core flow section
     must_match_any(
@@ -232,7 +232,10 @@ def main() -> None:
     print(f"  PLATFORM: {PLATFORM} ({len(platform)} chars)")
     print(f"  PRD review axes (approx): {prd_axes}")
     print(f"  TRD FR mapping rows: {len(fr_rows)}")
-    print(f"  Reference images on disk: {len(REF_IMAGES)}")
+    print(
+        f"  Reference image citations: {len(REF_IMAGE_NAMES)} historical filenames; "
+        "binary files intentionally not required"
+    )
 
 
 if __name__ == "__main__":
