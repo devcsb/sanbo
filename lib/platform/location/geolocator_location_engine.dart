@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart' as ph;
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/tracking_mode.dart';
 import 'location_engine.dart';
+import 'location_request_policy.dart';
 
 /// Production Android/iOS location via geolocator + FGS notification on Android.
 ///
@@ -56,12 +57,6 @@ class GeolocatorLocationEngine implements LocationEngine {
     final service = await Geolocator.isLocationServiceEnabled();
     if (!service) return LocationPermissionState.serviceDisabled;
 
-    // Android 13+: ask so the FGS and safety alerts remain visible in the
-    // notification drawer. Denial does not itself prevent FGS startup.
-    if (Platform.isAndroid) {
-      await _requestNotificationPermission();
-    }
-
     var p = await Geolocator.checkPermission();
     if (p == LocationPermission.denied) {
       p = await Geolocator.requestPermission();
@@ -71,7 +66,13 @@ class GeolocatorLocationEngine implements LocationEngine {
     if (p == LocationPermission.denied) {
       p = await Geolocator.requestPermission();
     }
-    return _mapPermission(p);
+    final mapped = _mapPermission(p);
+    // Ask only after the location purpose has been accepted. Notification
+    // denial is non-fatal; GPS recording can still continue.
+    if (mapped == LocationPermissionState.granted && Platform.isAndroid) {
+      await _requestNotificationPermission();
+    }
+    return mapped;
   }
 
   Future<void> _requestNotificationPermission() async {
@@ -116,21 +117,15 @@ class GeolocatorLocationEngine implements LocationEngine {
     };
   }
 
-  LocationAccuracy get _accuracy => switch (_mode) {
-    TrackingMode.highAccuracy => LocationAccuracy.bestForNavigation,
-    TrackingMode.balanced => LocationAccuracy.high,
-    TrackingMode.batterySaver => LocationAccuracy.medium,
-  };
+  LocationRequestProfile get _profile => locationRequestProfile(_mode);
 
-  Duration get _interval => Duration(seconds: _mode.targetIntervalSeconds);
+  LocationAccuracy get _accuracy => _profile.accuracy;
 
-  int get _distanceFilterM => switch (_mode) {
-    TrackingMode.batterySaver => 10,
-    TrackingMode.balanced => 5,
-    TrackingMode.highAccuracy => 2,
-  };
+  Duration get _interval => _profile.interval;
 
-  bool get _keepCpuAwake => _mode == TrackingMode.highAccuracy;
+  int get _distanceFilterM => _profile.distanceFilterM;
+
+  bool get _keepCpuAwake => _profile.keepCpuAwake;
 
   @override
   Future<void> start() async {
@@ -277,7 +272,7 @@ class GeolocatorLocationEngine implements LocationEngine {
       try {
         await _startStream(forceLocationManager: true);
         _usingLocationManagerFallback = true;
-        unawaited(_emitCurrentPosition(retries: 2));
+        unawaited(_emitCurrentPosition(retries: 2, forceLocationManager: true));
       } catch (e, st) {
         developer.log(
           'Fallback stream failed',
@@ -292,13 +287,47 @@ class GeolocatorLocationEngine implements LocationEngine {
     });
   }
 
-  Future<void> _emitCurrentPosition({int retries = 1}) async {
+  LocationSettings _oneShotSettings({
+    required bool forceLocationManager,
+    required Duration timeLimit,
+  }) {
+    if (Platform.isAndroid) {
+      return AndroidSettings(
+        accuracy: _accuracy,
+        distanceFilter: _distanceFilterM,
+        intervalDuration: _interval,
+        forceLocationManager: forceLocationManager,
+        timeLimit: timeLimit,
+      );
+    }
+    if (Platform.isIOS) {
+      return AppleSettings(
+        accuracy: _accuracy,
+        distanceFilter: _distanceFilterM,
+        activityType: ActivityType.fitness,
+        pauseLocationUpdatesAutomatically: false,
+        showBackgroundLocationIndicator: true,
+        allowBackgroundLocationUpdates: true,
+        timeLimit: timeLimit,
+      );
+    }
+    return LocationSettings(
+      accuracy: _accuracy,
+      distanceFilter: _distanceFilterM,
+      timeLimit: timeLimit,
+    );
+  }
+
+  Future<void> _emitCurrentPosition({
+    int retries = 1,
+    bool forceLocationManager = false,
+  }) async {
     for (var attempt = 0; attempt < retries; attempt++) {
       if (!_running) return;
       try {
         final pos = await Geolocator.getCurrentPosition(
-          locationSettings: LocationSettings(
-            accuracy: _accuracy,
+          locationSettings: _oneShotSettings(
+            forceLocationManager: forceLocationManager,
             timeLimit: Duration(seconds: 8 + attempt * 4),
           ),
         );
