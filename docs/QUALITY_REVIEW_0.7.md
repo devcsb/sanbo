@@ -70,6 +70,7 @@
 - 1차 루프: 저장소 오류 복구 실패의 오류 노출 및 회귀 확인 (121개 테스트)
 - 2차 루프 보강: 종료 후 milestone 계산도 SQLite aggregate 경로로 전환
 - 루브릭 게이트: `python3 scripts/verify_prd_trd.py` 통과 (역사적 레퍼런스 이미지는 바이너리 없이 문서 파일명만 추적)
+- 자동 루프 옵션: `bash scripts/run_quality_loop.sh --release-apk` 통과 (3 ABI APK)
 
 ## 남은 위험
 
