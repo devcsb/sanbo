@@ -10,4 +10,10 @@ void main() {
     expect(src, contains('leavingHome'));
     expect(src, contains('isTracking'));
   });
+
+  test('app lifecycle suppresses presentation work as soon as it becomes inactive', () {
+    final src = File('lib/app.dart').readAsStringSync();
+    expect(src, contains('onInactive'));
+    expect(src, contains('setAppForeground(false)'));
+  });
 }

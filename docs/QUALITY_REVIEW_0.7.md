@@ -25,6 +25,7 @@
 | P1 | 저장소 오류가 발생하면 진행 중 기록 복구가 조용히 실패해 사용자가 기록 유실로 오해할 수 있음 | 복구 실패를 사용자용 오류·상태 문구로 노출하고 회귀 테스트 추가 |
 | P1 | 기록이 많아질수록 History와 산책 종료 milestone 계산이 모든 세션을 읽고 Dart에서 통계를 매번 재계산함 | 초기 50개 페이지 + ‘더 많은 기록 보기’, 누적 통계 SQLite 집계, 종료 milestone도 aggregate 사용, bounded query 회귀 테스트 |
 | P1 | 복구 조회 오류의 배너 재시도가 새 산책 시작으로 연결될 수 있음 | `canRetryRecovery`와 `retryRecovery()`로 복구 재시도·busy·신규 시작을 분리하고 source/UI 회귀 테스트 추가 |
+| P2 | 앱이 `inactive`가 된 짧은 생명주기 구간에도 화면 ticker가 잠시 유지될 수 있음 | `AppLifecycleListener.onInactive`에서도 presentation 절전을 시작하고 lifecycle 회귀 테스트 추가 |
 | P1 | iOS 설명 문자열은 있으나 background location capability/settings가 불완전 | `UIBackgroundModes=location`, fitness용 `AppleSettings`, 위치 사용 표시 추가 |
 | P1 | DB 열기 시 FK/무결성 확인과 업데이트 보존 검증이 약함 | FK 활성화, `quick_check`, 증가형 v1→v2 마이그레이션 및 기존 행 보존 테스트 추가 |
 | P1 | 최초 선택한 `file_picker 11.0.3`이 AGP 9에서 Android 빌드를 차단 | AGP 9 내장 Kotlin을 지원하는 Flutter 공식 `file_selector` 구현으로 교체 |
@@ -56,7 +57,7 @@
 ## 검증 결과
 
 - `flutter analyze`: 문제 없음
-- `flutter test --concurrency=1`: 122개 통과
+- `flutter test --concurrency=1`: 123개 통과
 - Android release split APK: `0.7.0+10` 빌드 성공
 - Android release: 3개 ABI APK의 인증서가 기존 v0.3.2 배포본과 동일함을 확인
 - APK SHA-256: arm64 `9b981c…6322`, armeabi-v7a `39d071…e0c4`, x86_64 `4b88d6…214c`
