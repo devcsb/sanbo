@@ -28,7 +28,7 @@
 | P2 | 앱이 `inactive`가 된 짧은 생명주기 구간에도 화면 ticker가 잠시 유지될 수 있음 | `AppLifecycleListener.onInactive`에서도 presentation 절전을 시작하고 lifecycle 회귀 테스트 추가 |
 | P2 | 상세 진입 시 세션·샘플·윈도우를 순차 조회해 첫 화면 지연이 누적될 수 있음 | 세션 확인 뒤 샘플·윈도우 독립 쿼리를 `Future.wait`로 병렬 실행하고 구조·위젯 테스트 재검증 |
 | P1 | PRD/TRD 구조 검증기가 의도적으로 제거된 역사적 이미지 파일을 필수로 요구해 항상 실패함 | 이미지 파일명 traceability는 유지하고 바이너리 존재 검사는 제거; G7 게이트 재통과 |
-| P1 | 완료 기록의 상태·시각 정렬 조회에 복합 인덱스가 없어 장기 기록에서 전체 스캔·정렬 비용이 커질 수 있음 | schema v3 `idx_sessions_status_started_at` 추가 및 v1→v3 마이그레이션 보존 테스트 |
+| P1 | 완료 기록의 상태·시각 정렬 조회에 복합 인덱스가 없어 장기 기록에서 전체 스캔·정렬 비용이 커질 수 있음 | schema v3 `idx_sessions_status_started_at` 추가, v1→v3 마이그레이션 보존 및 `EXPLAIN QUERY PLAN` 사용 확인 |
 | P1 | iOS 설명 문자열은 있으나 background location capability/settings가 불완전 | `UIBackgroundModes=location`, fitness용 `AppleSettings`, 위치 사용 표시 추가 |
 | P1 | DB 열기 시 FK/무결성 확인과 업데이트 보존 검증이 약함 | FK 활성화, `quick_check`, 증가형 v1→v2 마이그레이션 및 기존 행 보존 테스트 추가 |
 | P1 | 최초 선택한 `file_picker 11.0.3`이 AGP 9에서 Android 빌드를 차단 | AGP 9 내장 Kotlin을 지원하는 Flutter 공식 `file_selector` 구현으로 교체 |

@@ -59,6 +59,20 @@ CREATE TABLE minute_windows (
       whereArgs: ['idx_sessions_status_started_at'],
     );
     expect(indexes, hasLength(1));
+    final queryPlan = await upgraded.rawQuery(
+      'EXPLAIN QUERY PLAN '
+      'SELECT id FROM sessions WHERE status = ? '
+      'ORDER BY started_at DESC LIMIT 50',
+      ['completed'],
+    );
+    expect(
+      queryPlan.any(
+        (row) => row.values.any(
+          (value) => value.toString().contains('idx_sessions_status_started_at'),
+        ),
+      ),
+      isTrue,
+    );
     final preserved = await upgraded.query('minute_windows');
     expect(preserved, hasLength(1));
     expect(preserved.single['session_id'], 'legacy-session');
