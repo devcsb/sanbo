@@ -73,6 +73,7 @@
 - 2차 루프 보강: 종료 후 milestone 계산도 SQLite aggregate 경로로 전환
 - 루브릭 게이트: `python3 scripts/verify_prd_trd.py` 통과 (역사적 레퍼런스 이미지는 바이너리 없이 문서 파일명만 추적)
 - 자동 루프 옵션: `bash scripts/run_quality_loop.sh --release-apk` 통과 (3 ABI APK)
+- release arm64 APK manifest: 위치·FGS location·알림·WakeLock 권한과 `GeolocatorLocationService` 확인
 
 ## 남은 위험
 
