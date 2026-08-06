@@ -51,7 +51,7 @@
 ## 검증 결과
 
 - `flutter analyze`: 문제 없음
-- `flutter test --concurrency=1`: 114개 통과
+- `flutter test --concurrency=1`: 120개 통과
 - Android release split APK: `0.7.0+10` 빌드 성공
 - Android release: 3개 ABI APK의 인증서가 기존 v0.3.2 배포본과 동일함을 확인
 - APK SHA-256: arm64 `9b981c…6322`, armeabi-v7a `39d071…e0c4`, x86_64 `4b88d6…214c`
