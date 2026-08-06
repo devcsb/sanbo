@@ -97,6 +97,7 @@ void main() {
     expect(importTile.enabled, isFalse);
     expect(selector.onSelectionChanged, isNull);
     expect(find.textContaining('진행 중인 산책을 마친 뒤'), findsNWidgets(2));
+    expect(find.textContaining('앱 삭제 전 보관'), findsOneWidget);
   });
 
   testWidgets('backup export warns about precise location and saves a file', (

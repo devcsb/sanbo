@@ -197,7 +197,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           icon: Icons.file_upload_outlined,
                         ),
                         title: const Text('전체 백업 내보내기'),
-                        subtitle: const Text('산책·원본 위치·수정 내용·장소 이름 포함'),
+                        subtitle: const Text(
+                          '앱 삭제 전 보관 · 원본 위치·수정 내용·장소 이름 포함',
+                        ),
                         trailing: _isExportingBackup
                             ? const SizedBox.square(
                                 dimension: 20,

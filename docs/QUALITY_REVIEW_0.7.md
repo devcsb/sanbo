@@ -1,6 +1,6 @@
 # 산보 0.7 비판적 품질 검토
 
-검토일: 2026-08-02
+검토일: 2026-08-06
 
 ## 결론
 
@@ -18,6 +18,8 @@
 | P1 | 백업 입력이 손상되면 일부 행만 들어갈 위험 | 파일/행/좌표/범위/FK/버전 검증 후 단일 SQLite transaction으로 반영, 오류 시 전체 rollback |
 | P1 | 백그라운드에서도 GPS 샘플마다 Riverpod/UI 상태를 발행하고 1초 타이머가 유지됨 | 네이티브 위치 수집은 유지하되 화면 상태 발행·1초 타이머는 중단, 복귀 시 누적값 1회 동기화 |
 | P1 | 저장 체크포인트와 안전 종료 타이머가 분리돼 중복 wake-up 발생 | 30초 유지보수 경로로 통합하고 모드별 약 30초 샘플 묶음도 보조 트리거로 사용 |
+| P0 | 체크포인트 쓰기 중 종료·버리기가 실행되면 늦은 SQLite callback이 최종화·삭제 뒤 샘플을 재삽입할 수 있음 | 직렬 maintenance queue와 세션 generation fence를 추가하고 종료 전에 현재 쓰기를 기다리도록 수정; 경합 회귀 테스트 추가 |
+| P1 | 최초 Android 시작에서 알림 권한이 위치 권한보다 먼저 요청되고, seed 요청이 현재 추적 모드와 무관한 공통 설정을 사용함 | 위치 권한 승인 뒤 알림 권한을 best-effort로 요청하고, seed/fallback을 절전·균형·정밀 프로파일에 맞춤 |
 | P1 | iOS 설명 문자열은 있으나 background location capability/settings가 불완전 | `UIBackgroundModes=location`, fitness용 `AppleSettings`, 위치 사용 표시 추가 |
 | P1 | DB 열기 시 FK/무결성 확인과 업데이트 보존 검증이 약함 | FK 활성화, `quick_check`, 증가형 v1→v2 마이그레이션 및 기존 행 보존 테스트 추가 |
 | P1 | 최초 선택한 `file_picker 11.0.3`이 AGP 9에서 Android 빌드를 차단 | AGP 9 내장 Kotlin을 지원하는 Flutter 공식 `file_selector` 구현으로 교체 |
@@ -28,6 +30,7 @@
 - 절전/균형/정밀 목표 주기는 각각 20초/8초/4초이며 거리 필터는 10m/5m/2m다.
 - CPU WakeLock은 정밀 모드에서만 켠다.
 - 백그라운드에서는 화면 rebuild와 1초 경과 타이머를 중단한다.
+- 첫 위치 seed와 fallback도 선택한 모드의 정확도·주기·거리 필터를 사용한다.
 - SQLite 체크포인트는 30초 타이머와 샘플 묶음 중 먼저 도달한 조건으로 수행한다.
 - 20분 정지 경고, 30분 정지 종료, 2시간 45분 경고, 3시간 종료는 유지한다.
 
@@ -55,6 +58,7 @@
 - iOS Simulator debug: Xcode/CocoaPods 빌드 성공
 - DB: v1→v2 마이그레이션에서 기존 행 보존 확인
 - 백업: 전체 왕복, 중복 가져오기, 손상 좌표 rollback, 미래 DB 버전 거부 확인
+- 추가 회귀: maintenance 직렬화·종료 경합·discard fence·추적 모드 요청 프로파일 확인
 
 ## 남은 위험
 
