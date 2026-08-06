@@ -54,7 +54,7 @@
 ## 검증 결과
 
 - `flutter analyze`: 문제 없음
-- `flutter test --concurrency=1`: 120개 통과
+- `flutter test --concurrency=1`: 121개 통과
 - Android release split APK: `0.7.0+10` 빌드 성공
 - Android release: 3개 ABI APK의 인증서가 기존 v0.3.2 배포본과 동일함을 확인
 - APK SHA-256: arm64 `9b981c…6322`, armeabi-v7a `39d071…e0c4`, x86_64 `4b88d6…214c`
@@ -62,7 +62,7 @@
 - DB: v1→v2 마이그레이션에서 기존 행 보존 확인
 - 백업: 전체 왕복, 중복 가져오기, 손상 좌표 rollback, 미래 DB 버전 거부 확인
 - 추가 회귀: maintenance 직렬화·종료 경합·discard fence·추적 모드 요청 프로파일 확인
-- 1차 루프: 저장소 오류 복구 실패의 오류 노출 및 회귀 확인
+- 1차 루프: 저장소 오류 복구 실패의 오류 노출 및 회귀 확인 (121개 테스트)
 
 ## 남은 위험
 
