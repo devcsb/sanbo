@@ -74,6 +74,7 @@
 - 루브릭 게이트: `python3 scripts/verify_prd_trd.py` 통과 (역사적 레퍼런스 이미지는 바이너리 없이 문서 파일명만 추적)
 - 자동 루프 옵션: `bash scripts/run_quality_loop.sh --release-apk` 통과 (3 ABI APK)
 - release arm64 APK manifest: 위치·FGS location·알림·WakeLock 권한과 `GeolocatorLocationService` 확인
+- 자동 G8 manifest 게이트: release arm64 APK 권한·서비스·location FGS 타입 확인
 
 ## 남은 위험
 

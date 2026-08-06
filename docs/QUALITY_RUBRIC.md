@@ -33,6 +33,7 @@ G4 release APK (release key available)    build succeeds
 G5 git diff --check + generated-file audit clean
 G6 every P0/P1 finding has a test, fix, or explicit next-loop owner
 G7 python3 scripts/verify_prd_trd.py        PRD/TRD structural verification passes
+G8 release arm64 APK manifest               location/FGS/notification/WakeLock + service type
 ```
 
 반복 실행 명령:
