@@ -9,6 +9,8 @@
 릴리스 서명 분리와 기존 설치의 업데이트 호환성 확보다. 기존 산책·복구·지도·장소·자동 종료 흐름은 전체 회귀
 테스트로 재검증했다.
 
+반복 판정 기준과 증거 게이트는 [`docs/QUALITY_RUBRIC.md`](QUALITY_RUBRIC.md)에 고정한다.
+
 ## 발견 사항과 조치
 
 | 우선순위 | 발견 | 조치 |
@@ -20,6 +22,7 @@
 | P1 | 저장 체크포인트와 안전 종료 타이머가 분리돼 중복 wake-up 발생 | 30초 유지보수 경로로 통합하고 모드별 약 30초 샘플 묶음도 보조 트리거로 사용 |
 | P0 | 체크포인트 쓰기 중 종료·버리기가 실행되면 늦은 SQLite callback이 최종화·삭제 뒤 샘플을 재삽입할 수 있음 | 직렬 maintenance queue와 세션 generation fence를 추가하고 종료 전에 현재 쓰기를 기다리도록 수정; 경합 회귀 테스트 추가 |
 | P1 | 최초 Android 시작에서 알림 권한이 위치 권한보다 먼저 요청되고, seed 요청이 현재 추적 모드와 무관한 공통 설정을 사용함 | 위치 권한 승인 뒤 알림 권한을 best-effort로 요청하고, seed/fallback을 절전·균형·정밀 프로파일에 맞춤 |
+| P1 | 저장소 오류가 발생하면 진행 중 기록 복구가 조용히 실패해 사용자가 기록 유실로 오해할 수 있음 | 복구 실패를 사용자용 오류·상태 문구로 노출하고 회귀 테스트 추가 |
 | P1 | iOS 설명 문자열은 있으나 background location capability/settings가 불완전 | `UIBackgroundModes=location`, fitness용 `AppleSettings`, 위치 사용 표시 추가 |
 | P1 | DB 열기 시 FK/무결성 확인과 업데이트 보존 검증이 약함 | FK 활성화, `quick_check`, 증가형 v1→v2 마이그레이션 및 기존 행 보존 테스트 추가 |
 | P1 | 최초 선택한 `file_picker 11.0.3`이 AGP 9에서 Android 빌드를 차단 | AGP 9 내장 Kotlin을 지원하는 Flutter 공식 `file_selector` 구현으로 교체 |
@@ -59,6 +62,7 @@
 - DB: v1→v2 마이그레이션에서 기존 행 보존 확인
 - 백업: 전체 왕복, 중복 가져오기, 손상 좌표 rollback, 미래 DB 버전 거부 확인
 - 추가 회귀: maintenance 직렬화·종료 경합·discard fence·추적 모드 요청 프로파일 확인
+- 1차 루프: 저장소 오류 복구 실패의 오류 노출 및 회귀 확인
 
 ## 남은 위험
 
@@ -67,3 +71,4 @@
 3. Android 제조사별 절전 정책과 iOS 잠금 화면의 장시간 수집은 실기기 검증이 필요하다.
 4. OS 파일 선택기의 저장/가져오기 UX는 Android·iPhone 실기기에서 최종 확인해야 한다.
 5. iOS background location은 App Store 제출 사유와 권한 교육 문구를 별도 심사해야 한다.
+6. 장기 기록에서 history 화면이 전체 세션·통계를 한 번에 읽는 확장성 검증이 아직 없다.

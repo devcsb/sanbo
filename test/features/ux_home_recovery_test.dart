@@ -39,6 +39,33 @@ void main() {
     expect(live.statusMessage, isNotNull);
   });
 
+  test('restoreIfNeeded surfaces a recoverable storage error', () async {
+    final repo = await openTestRepository();
+    await repo.close();
+    addTearDown(() async {
+      try {
+        await repo.close();
+      } catch (_) {}
+    });
+
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(sessionControllerProvider.notifier).restoreIfNeeded();
+    final live = container.read(sessionControllerProvider);
+    expect(live.needsRecovery, isFalse);
+    expect(live.errorMessage, contains('기록을 확인하지 못했어요'));
+    expect(live.errorMessage, isNot(contains('DatabaseException')));
+  });
+
   test(
     'recovery stop caps duration at last sample, not wall-clock now',
     () async {

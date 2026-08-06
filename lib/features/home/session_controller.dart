@@ -226,7 +226,14 @@ class SessionController extends Notifier<LiveSessionState> {
             ? '이전에 끝내지 못한 산책이 있어요.'
             : '이전에 끝내지 못한 산책이 있어요. 위치 ${existing.length}개가 저장되어 있습니다.',
       );
-    } catch (_) {}
+    } catch (_) {
+      // A storage failure must be visible: silently treating it as "no active
+      // session" can make a user believe an in-progress walk disappeared.
+      state = state.copyWith(
+        errorMessage: '이전 기록을 확인하지 못했어요. 저장 공간을 확인한 뒤 다시 시도해 주세요.',
+        statusMessage: '복구할 기록을 확인하지 못했어요.',
+      );
+    }
   }
 
   void clearError() {
