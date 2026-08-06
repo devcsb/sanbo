@@ -11,7 +11,8 @@ void main() {
   test('history and detail ship stats notes export helpers', () {
     final history = File('lib/features/history/history_screen.dart').readAsStringSync();
     expect(history.contains('나의 흐름'), isTrue);
-    expect(history.contains('WalkStats.fromSessions'), isTrue);
+    expect(history.contains('snapshot.stats'), isTrue);
+    expect(history.contains('더 많은 기록 보기'), isTrue);
 
     final detail =
         File('lib/features/session_detail/session_detail_screen.dart')

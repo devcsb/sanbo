@@ -4,17 +4,13 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../data/walk_repository.dart';
-import '../../domain/models/walk_session.dart';
 import '../../domain/services/walk_stats.dart';
 import '../../shared/widgets/ui_bits.dart';
 import 'history_providers.dart';
 
-final completedSessionsProvider = FutureProvider<List<WalkSession>>((
-  ref,
-) async {
+final completedSessionsProvider = FutureProvider<HistorySnapshot>((ref) async {
   ref.watch(historyTickProvider);
-  return ref.watch(walkRepositoryProvider).listCompleted();
+  return ref.watch(completedHistoryProvider.future);
 });
 
 class HistoryScreen extends ConsumerWidget {
@@ -37,7 +33,8 @@ class HistoryScreen extends ConsumerWidget {
           actionLabel: '다시 시도',
           onAction: () => ref.invalidate(completedSessionsProvider),
         ),
-        data: (sessions) {
+        data: (snapshot) {
+          final sessions = snapshot.sessions;
           if (sessions.isEmpty) {
             return EmptyStateView(
               icon: Icons.directions_walk_rounded,
@@ -51,12 +48,12 @@ class HistoryScreen extends ConsumerWidget {
           return PageFrame(
             child: ListView.separated(
               padding: EdgeInsets.zero,
-              itemCount: sessions.length + 1,
+              itemCount: sessions.length + (snapshot.hasMore ? 2 : 1),
               separatorBuilder: (_, index) =>
                   SizedBox(height: index == 0 ? 20 : 10),
               itemBuilder: (context, index) {
                 if (index == 0) {
-                  final stats = WalkStats.fromSessions(sessions);
+                  final stats = snapshot.stats;
                   final milestones = stats.satisfied().take(3).toList();
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -160,6 +157,22 @@ class HistoryScreen extends ConsumerWidget {
                         ],
                       ),
                     ],
+                  );
+                }
+
+                if (index == sessions.length + 1) {
+                  return Padding(
+                    padding: const EdgeInsets.only(top: 4, bottom: 24),
+                    child: snapshot.hasMore
+                        ? OutlinedButton(
+                            onPressed: () {
+                              ref
+                                  .read(historyPageProvider.notifier)
+                                  .state++;
+                            },
+                            child: const Text('더 많은 기록 보기'),
+                          )
+                        : const SizedBox.shrink(),
                   );
                 }
 

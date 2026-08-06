@@ -13,6 +13,7 @@ import '../domain/models/tracking_mode.dart';
 import '../domain/models/walk_session.dart';
 import '../domain/pipeline/geo.dart';
 import '../domain/services/app_backup.dart';
+import '../domain/services/walk_stats.dart';
 import 'app_database.dart';
 
 /// Persistent walk store (sessions + samples + minute windows).
@@ -42,14 +43,40 @@ class WalkRepository {
     return _sessionFromRow(rows.first);
   }
 
-  Future<List<WalkSession>> listCompleted() async {
+  Future<List<WalkSession>> listCompleted({int? limit, int offset = 0}) async {
+    if (limit != null && limit <= 0) return const [];
     final rows = await _db.query(
       'sessions',
       where: "status = ?",
       whereArgs: [SessionStatus.completed.name],
       orderBy: 'started_at DESC',
+      limit: limit,
+      offset: offset,
     );
     return rows.map(_sessionFromRow).toList();
+  }
+
+  /// Computes history summary in SQLite without loading every session into
+  /// Dart. The history screen can therefore render a small page while keeping
+  /// totals correct for long-lived users.
+  Future<WalkStats> completedStats() async {
+    final rows = await _db.rawQuery('''
+SELECT COUNT(*) AS walk_count,
+       COALESCE(SUM(total_distance_m), 0) AS total_distance_m,
+       COALESCE(SUM(duration_s), 0) AS total_duration_s,
+       COALESCE(MAX(duration_s), 0) AS longest_duration_s,
+       COALESCE(MAX(total_distance_m), 0) AS longest_distance_m
+FROM sessions
+WHERE status = ?
+''', [SessionStatus.completed.name]);
+    final row = rows.single;
+    return WalkStats(
+      walkCount: (row['walk_count'] as num?)?.toInt() ?? 0,
+      totalDistanceM: (row['total_distance_m'] as num?)?.toDouble() ?? 0,
+      totalDurationS: (row['total_duration_s'] as num?)?.toInt() ?? 0,
+      longestDurationS: (row['longest_duration_s'] as num?)?.toInt() ?? 0,
+      longestDistanceM: (row['longest_distance_m'] as num?)?.toDouble() ?? 0,
+    );
   }
 
   Future<WalkSession?> getSession(String id) async {

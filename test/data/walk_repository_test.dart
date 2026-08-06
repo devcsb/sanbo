@@ -4,11 +4,42 @@ import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
+import 'package:sanbo/domain/services/walk_stats.dart';
 
 import '../helpers/test_db.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('completed history supports bounded pages and aggregate stats', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    for (var i = 0; i < 3; i++) {
+      final started = DateTime(2026, 7, 20, 10 + i);
+      final session = await repo.startSession(startedAt: started);
+      await repo.completeSession(
+        sessionId: session.id,
+        endedAt: started.add(Duration(minutes: i + 1)),
+        totalDistanceM: (i + 1) * 1000,
+        durationS: (i + 1) * 60,
+        movingTimeS: (i + 1) * 50,
+        stationaryTimeS: (i + 1) * 10,
+        avgSpeedMps: 1,
+        validSampleCount: i + 1,
+      );
+    }
+
+    final page = await repo.listCompleted(limit: 2);
+    expect(page, hasLength(2));
+    expect(page.first.startedAt.hour, 12);
+
+    final stats = await repo.completedStats();
+    expect(stats, isA<WalkStats>());
+    expect(stats.walkCount, 3);
+    expect(stats.totalDistanceM, 6000);
+    expect(stats.totalDurationS, 360);
+    expect(stats.longestDurationS, 180);
+  });
 
   test('persist session samples windows and survive re-open query', () async {
     final repo = await openTestRepository();
