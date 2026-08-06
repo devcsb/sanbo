@@ -20,6 +20,12 @@ void main() {
       version: 1,
       onCreate: (db, version) async {
         await db.execute('''
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY NOT NULL,
+  started_at TEXT NOT NULL,
+  status TEXT NOT NULL
+)''');
+        await db.execute('''
 CREATE TABLE minute_windows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL,
@@ -46,6 +52,13 @@ CREATE TABLE minute_windows (
       where: "type = 'table'",
     );
     expect(tables.map((row) => row['name']), contains('places'));
+    final indexes = await upgraded.query(
+      'sqlite_master',
+      columns: ['name'],
+      where: "type = 'index' AND name = ?",
+      whereArgs: ['idx_sessions_status_started_at'],
+    );
+    expect(indexes, hasLength(1));
     final preserved = await upgraded.query('minute_windows');
     expect(preserved, hasLength(1));
     expect(preserved.single['session_id'], 'legacy-session');

@@ -28,6 +28,7 @@
 | P2 | 앱이 `inactive`가 된 짧은 생명주기 구간에도 화면 ticker가 잠시 유지될 수 있음 | `AppLifecycleListener.onInactive`에서도 presentation 절전을 시작하고 lifecycle 회귀 테스트 추가 |
 | P2 | 상세 진입 시 세션·샘플·윈도우를 순차 조회해 첫 화면 지연이 누적될 수 있음 | 세션 확인 뒤 샘플·윈도우 독립 쿼리를 `Future.wait`로 병렬 실행하고 구조·위젯 테스트 재검증 |
 | P1 | PRD/TRD 구조 검증기가 의도적으로 제거된 역사적 이미지 파일을 필수로 요구해 항상 실패함 | 이미지 파일명 traceability는 유지하고 바이너리 존재 검사는 제거; G7 게이트 재통과 |
+| P1 | 완료 기록의 상태·시각 정렬 조회에 복합 인덱스가 없어 장기 기록에서 전체 스캔·정렬 비용이 커질 수 있음 | schema v3 `idx_sessions_status_started_at` 추가 및 v1→v3 마이그레이션 보존 테스트 |
 | P1 | iOS 설명 문자열은 있으나 background location capability/settings가 불완전 | `UIBackgroundModes=location`, fitness용 `AppleSettings`, 위치 사용 표시 추가 |
 | P1 | DB 열기 시 FK/무결성 확인과 업데이트 보존 검증이 약함 | FK 활성화, `quick_check`, 증가형 v1→v2 마이그레이션 및 기존 행 보존 테스트 추가 |
 | P1 | 최초 선택한 `file_picker 11.0.3`이 AGP 9에서 Android 빌드를 차단 | AGP 9 내장 Kotlin을 지원하는 Flutter 공식 `file_selector` 구현으로 교체 |
@@ -65,6 +66,7 @@
 - APK SHA-256: arm64 `9b981c…6322`, armeabi-v7a `39d071…e0c4`, x86_64 `4b88d6…214c`
 - iOS Simulator debug: Xcode/CocoaPods 빌드 성공
 - DB: v1→v2 마이그레이션에서 기존 행 보존 확인
+- DB: v1→v3 마이그레이션에서 기존 행·세션 조회 인덱스 보존 확인
 - 백업: 전체 왕복, 중복 가져오기, 손상 좌표 rollback, 미래 DB 버전 거부 확인
 - 추가 회귀: maintenance 직렬화·종료 경합·discard fence·추적 모드 요청 프로파일 확인
 - 1차 루프: 저장소 오류 복구 실패의 오류 노출 및 회귀 확인 (121개 테스트)

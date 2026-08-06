@@ -2,7 +2,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-const schemaVersion = 2;
+const schemaVersion = 3;
 
 /// Opens the on-device SQLite DB (TRD §3).
 Future<Database> openAppDatabase({String? path}) async {
@@ -37,6 +37,12 @@ CREATE TABLE places (
           'CREATE INDEX idx_windows_place ON minute_windows(place_id)',
         );
       }
+      if (oldVersion < 3) {
+        await db.execute(
+          'CREATE INDEX IF NOT EXISTS idx_sessions_status_started_at '
+          'ON sessions(status, started_at DESC)',
+        );
+      }
     },
     onOpen: (db) async {
       final check = await db.rawQuery('PRAGMA quick_check(1)');
@@ -65,6 +71,10 @@ CREATE TABLE sessions (
   median_accuracy_m REAL,
   notes TEXT
 )''');
+  await db.execute(
+    'CREATE INDEX idx_sessions_status_started_at '
+    'ON sessions(status, started_at DESC)',
+  );
   await db.execute('''
 CREATE TABLE places (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
