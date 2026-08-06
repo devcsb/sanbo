@@ -30,8 +30,12 @@ final sessionDetailProvider = FutureProvider.autoDispose
       final repo = ref.watch(walkRepositoryProvider);
       final session = await repo.getSession(id);
       if (session == null) return null;
-      final samples = await repo.getSamples(id);
-      var windows = await repo.getWindows(id);
+      final loaded = await Future.wait<Object>([
+        repo.getSamples(id),
+        repo.getWindows(id),
+      ]);
+      final samples = loaded[0] as List<LocationSample>;
+      var windows = loaded[1] as List<MinuteWindow>;
       var segments = SegmentMerger().merge(windows);
 
       // Reuse only places the user previously named. This is a local DB

@@ -26,6 +26,7 @@
 | P1 | 기록이 많아질수록 History와 산책 종료 milestone 계산이 모든 세션을 읽고 Dart에서 통계를 매번 재계산함 | 초기 50개 페이지 + ‘더 많은 기록 보기’, 누적 통계 SQLite 집계, 종료 milestone도 aggregate 사용, bounded query 회귀 테스트 |
 | P1 | 복구 조회 오류의 배너 재시도가 새 산책 시작으로 연결될 수 있음 | `canRetryRecovery`와 `retryRecovery()`로 복구 재시도·busy·신규 시작을 분리하고 source/UI 회귀 테스트 추가 |
 | P2 | 앱이 `inactive`가 된 짧은 생명주기 구간에도 화면 ticker가 잠시 유지될 수 있음 | `AppLifecycleListener.onInactive`에서도 presentation 절전을 시작하고 lifecycle 회귀 테스트 추가 |
+| P2 | 상세 진입 시 세션·샘플·윈도우를 순차 조회해 첫 화면 지연이 누적될 수 있음 | 세션 확인 뒤 샘플·윈도우 독립 쿼리를 `Future.wait`로 병렬 실행하고 구조·위젯 테스트 재검증 |
 | P1 | iOS 설명 문자열은 있으나 background location capability/settings가 불완전 | `UIBackgroundModes=location`, fitness용 `AppleSettings`, 위치 사용 표시 추가 |
 | P1 | DB 열기 시 FK/무결성 확인과 업데이트 보존 검증이 약함 | FK 활성화, `quick_check`, 증가형 v1→v2 마이그레이션 및 기존 행 보존 테스트 추가 |
 | P1 | 최초 선택한 `file_picker 11.0.3`이 AGP 9에서 Android 빌드를 차단 | AGP 9 내장 Kotlin을 지원하는 Flutter 공식 `file_selector` 구현으로 교체 |

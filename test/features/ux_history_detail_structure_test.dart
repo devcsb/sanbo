@@ -21,6 +21,7 @@ void main() {
     expect(detail.contains('_copySummary'), isTrue);
     expect(detail.contains('_exportSession'), isTrue);
     expect(detail.contains('SessionExport'), isTrue);
+    expect(detail.contains('Future.wait'), isTrue);
 
     final home = File('lib/features/home/home_screen.dart').readAsStringSync();
     expect(home.contains('_celebrateMilestones'), isTrue);
