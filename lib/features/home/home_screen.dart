@@ -9,7 +9,6 @@ import '../../core/theme/app_theme.dart';
 import '../../platform/location/location_engine.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/walk_session.dart';
-import '../../domain/services/walk_stats.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
 import '../intro/intro_providers.dart';
@@ -333,8 +332,7 @@ Future<void> _celebrateMilestones(
   WalkSession ended,
 ) async {
   try {
-    final sessions = await ref.read(walkRepositoryProvider).listCompleted();
-    final stats = WalkStats.fromSessions(sessions);
+    final stats = await ref.read(walkRepositoryProvider).completedStats();
     final flagsStore = ref.read(appFlagsStoreProvider);
     final flags = await flagsStore.load();
     final newly = stats.newlyUnlocked(flags.unlockedMilestones, latest: ended);

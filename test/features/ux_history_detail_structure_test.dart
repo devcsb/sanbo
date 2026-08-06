@@ -24,6 +24,8 @@ void main() {
 
     final home = File('lib/features/home/home_screen.dart').readAsStringSync();
     expect(home.contains('_celebrateMilestones'), isTrue);
+    expect(home.contains('completedStats'), isTrue);
+    expect(home.contains('listCompleted'), isFalse);
     expect(home.contains('HapticFeedback'), isTrue);
   });
 
