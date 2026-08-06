@@ -10,15 +10,19 @@ void main() {
     final secondRan = Completer<void>();
     final order = <int>[];
 
-    queue.enqueue(() async {
-      order.add(1);
-      await firstGate.future;
-    });
-    queue.enqueue(() async => order.add(2));
-    queue.enqueue(() async {
-      order.add(3);
-      secondRan.complete();
-    });
+    unawaited(
+      queue.enqueue(() async {
+        order.add(1);
+        await firstGate.future;
+      }),
+    );
+    unawaited(queue.enqueue(() async => order.add(2)));
+    unawaited(
+      queue.enqueue(() async {
+        order.add(3);
+        secondRan.complete();
+      }),
+    );
 
     expect(order, [1]);
     firstGate.complete();
@@ -31,8 +35,8 @@ void main() {
     final gate = Completer<void>();
     var ranQueued = false;
 
-    queue.enqueue(() => gate.future);
-    queue.enqueue(() async => ranQueued = true);
+    unawaited(queue.enqueue(() => gate.future));
+    unawaited(queue.enqueue(() async => ranQueued = true));
 
     final closing = queue.close();
     expect(queue.isClosed, isTrue);
