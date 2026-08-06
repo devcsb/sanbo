@@ -33,6 +33,7 @@ class LiveSessionState {
     this.autoStopWarning,
     this.canContinueAfterWarning = false,
     this.needsRecovery = false,
+    this.canRetryRecovery = false,
   });
 
   final WalkSession? session;
@@ -65,6 +66,9 @@ class LiveSessionState {
   /// Incomplete session recovered from disk (UX-H04).
   final bool needsRecovery;
 
+  /// The last recovery lookup failed; retry must not start a new walk.
+  final bool canRetryRecovery;
+
   LiveSessionState copyWith({
     WalkSession? session,
     Duration? elapsed,
@@ -82,6 +86,7 @@ class LiveSessionState {
     String? autoStopWarning,
     bool? canContinueAfterWarning,
     bool? needsRecovery,
+    bool? canRetryRecovery,
     bool clearError = false,
     bool clearSession = false,
     bool clearNotice = false,
@@ -107,6 +112,7 @@ class LiveSessionState {
       canContinueAfterWarning:
           canContinueAfterWarning ?? this.canContinueAfterWarning,
       needsRecovery: needsRecovery ?? this.needsRecovery,
+      canRetryRecovery: canRetryRecovery ?? this.canRetryRecovery,
     );
   }
 }
@@ -232,6 +238,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = state.copyWith(
         errorMessage: '이전 기록을 확인하지 못했어요. 저장 공간을 확인한 뒤 다시 시도해 주세요.',
         statusMessage: '복구할 기록을 확인하지 못했어요.',
+        canRetryRecovery: true,
       );
     }
   }
@@ -322,6 +329,7 @@ class SessionController extends Notifier<LiveSessionState> {
       isBusy: true,
       clearError: true,
       clearNotice: true,
+      canRetryRecovery: false,
       statusMessage: state.needsRecovery ? state.statusMessage : null,
     );
     final LocationPermissionState perm;

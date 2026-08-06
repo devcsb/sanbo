@@ -62,6 +62,7 @@ void main() {
     await container.read(sessionControllerProvider.notifier).restoreIfNeeded();
     final live = container.read(sessionControllerProvider);
     expect(live.needsRecovery, isFalse);
+    expect(live.canRetryRecovery, isTrue);
     expect(live.errorMessage, contains('기록을 확인하지 못했어요'));
     expect(live.errorMessage, isNot(contains('DatabaseException')));
   });
@@ -162,6 +163,8 @@ void main() {
       expect(home, contains('openSystemSettings'));
       expect(home, contains('계속 기록'));
       expect(home, contains('autoStopWarning'));
+      expect(home, contains('canRetryRecovery'));
+      expect(home, contains('restoreIfNeeded'));
       expect(home, contains('else if (!recovery)'));
       expect(home, isNot(contains("'LIVE'")));
       expect(confirm, contains('기록 지우기'));

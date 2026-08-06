@@ -85,12 +85,13 @@ class HomeScreen extends ConsumerWidget {
                           onRetry: busy
                               ? null
                               : () {
+                                  final controller = ref.read(
+                                    sessionControllerProvider.notifier,
+                                  );
                                   unawaited(
-                                    ref
-                                        .read(
-                                          sessionControllerProvider.notifier,
-                                        )
-                                        .start(mode: startMode),
+                                    live.canRetryRecovery
+                                        ? controller.restoreIfNeeded()
+                                        : controller.start(mode: startMode),
                                   );
                                 },
                           onOpenSettings: needsSystemSettings && !busy
