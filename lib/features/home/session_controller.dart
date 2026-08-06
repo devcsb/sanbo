@@ -13,6 +13,7 @@ import '../../domain/services/session_pipeline.dart';
 import '../../platform/location/location_engine.dart';
 import '../../platform/notifications/session_notification_service.dart';
 import '../history/history_providers.dart';
+import 'session_maintenance_queue.dart';
 
 class LiveSessionState {
   const LiveSessionState({
@@ -153,8 +154,9 @@ class SessionController extends Notifier<LiveSessionState> {
   late SessionGuard _sessionGuard;
   late SessionNotificationService _notifications;
   late DateTime Function() _clock;
-  bool _flushing = false;
-  bool _maintenanceRunning = false;
+  final _maintenanceQueue = SessionMaintenanceQueue();
+  var _sessionGeneration = 0;
+  var _endingSession = false;
   bool _autoStopInProgress = false;
   bool _appForeground = true;
 
@@ -172,6 +174,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _checkpointTimer = null;
       _firstFixTimer?.cancel();
       _firstFixTimer = null;
+      unawaited(_maintenanceQueue.close());
       unawaited(_notifications.cancelWarning());
       unawaited(_sampleSub?.cancel() ?? Future<void>.value());
       _sampleSub = null;
@@ -266,14 +269,17 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   Future<void> _runMaintenance() async {
-    if (_maintenanceRunning) return;
-    _maintenanceRunning = true;
-    try {
-      await _flushPendingSamples();
-      await _evaluateSessionGuard(_clock());
-    } finally {
-      _maintenanceRunning = false;
-    }
+    final generation = _sessionGeneration;
+    await _maintenanceQueue.enqueue(() async {
+      if (_endingSession || generation != _sessionGeneration) return;
+      await _flushPendingSamples(generation: generation);
+      if (_endingSession || generation != _sessionGeneration) return;
+      await _evaluateSessionGuard(
+        _clock(),
+        generation: generation,
+        deferAutoStop: true,
+      );
+    });
   }
 
   int get _checkpointBatchSize => switch (_engine.mode) {
@@ -282,10 +288,17 @@ class SessionController extends Notifier<LiveSessionState> {
     TrackingMode.highAccuracy => 8,
   };
 
-  Future<void> _flushPendingSamples() async {
+  Future<void> _flushPendingSamples({
+    required int generation,
+    bool allowEnding = false,
+  }) async {
     final session = state.session;
-    if (session == null || _pendingPersist.isEmpty || _flushing) return;
-    _flushing = true;
+    if (session == null ||
+        _pendingPersist.isEmpty ||
+        generation != _sessionGeneration ||
+        (_endingSession && !allowEnding)) {
+      return;
+    }
     final batch = List<LocationSample>.of(_pendingPersist);
     _pendingPersist.clear();
     try {
@@ -293,8 +306,6 @@ class SessionController extends Notifier<LiveSessionState> {
     } catch (_) {
       // Keep samples in memory; retry on next checkpoint / stop.
       _pendingPersist.insertAll(0, batch);
-    } finally {
-      _flushing = false;
     }
   }
 
@@ -342,6 +353,10 @@ class SessionController extends Notifier<LiveSessionState> {
       return;
     }
 
+    _endingSession = false;
+    _sessionGeneration++;
+    _maintenanceQueue.reopen();
+
     WalkSession? session;
     try {
       session = await _repo.getActiveSession();
@@ -372,9 +387,11 @@ class SessionController extends Notifier<LiveSessionState> {
       // Listen BEFORE start so seed/first GPS fixes are not dropped on the
       // broadcast stream (real-device cold start race).
       await _sampleSub?.cancel();
+      final generation = _sessionGeneration;
       _sampleSub = _engine.samples.listen(
         _onSample,
         onError: (Object e) {
+          if (generation != _sessionGeneration || _endingSession) return;
           final msg = _locationErrorMessage(e);
           state = state.copyWith(
             errorMessage: msg,
@@ -442,6 +459,7 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   void _onSample(LocationSample sample) {
+    if (_endingSession) return;
     _sessionSamples.add(sample);
     _pendingPersist.add(sample);
 
@@ -520,11 +538,18 @@ class SessionController extends Notifier<LiveSessionState> {
     }
   }
 
-  Future<void> _evaluateSessionGuard(DateTime now) async {
+  Future<void> _evaluateSessionGuard(
+    DateTime now, {
+    int? generation,
+    bool deferAutoStop = false,
+  }) async {
+    final expectedGeneration = generation ?? _sessionGeneration;
     final session = state.session;
     if (session == null ||
         !state.isTracking ||
         state.isBusy ||
+        _endingSession ||
+        expectedGeneration != _sessionGeneration ||
         _autoStopInProgress) {
       return;
     }
@@ -548,7 +573,13 @@ class SessionController extends Notifier<LiveSessionState> {
         );
         return;
       case SessionGuardEvent.stationaryLimit:
-        await _autoStop(completionNotice: '한곳에 30분 머물러 산책을 자동으로 저장하고 종료했어요.');
+        if (deferAutoStop) {
+          unawaited(
+            _autoStop(completionNotice: '한곳에 30분 머물러 산책을 자동으로 저장하고 종료했어요.'),
+          );
+        } else {
+          await _autoStop(completionNotice: '한곳에 30분 머물러 산책을 자동으로 저장하고 종료했어요.');
+        }
         return;
       case SessionGuardEvent.durationWarning:
         const message = '산책 기록이 2시간 45분을 넘었어요. 총 3시간이 되면 자동으로 저장하고 종료합니다.';
@@ -560,7 +591,13 @@ class SessionController extends Notifier<LiveSessionState> {
         await _notifications.showWarning(title: '산책 기록이 곧 종료돼요', body: message);
         return;
       case SessionGuardEvent.durationLimit:
-        await _autoStop(completionNotice: '3시간이 지나 산책을 자동으로 저장하고 종료했어요.');
+        if (deferAutoStop) {
+          unawaited(
+            _autoStop(completionNotice: '3시간이 지나 산책을 자동으로 저장하고 종료했어요.'),
+          );
+        } else {
+          await _autoStop(completionNotice: '3시간이 지나 산책을 자동으로 저장하고 종료했어요.');
+        }
         return;
     }
   }
@@ -609,8 +646,13 @@ class SessionController extends Notifier<LiveSessionState> {
 
   void _armFirstFixWatchdog() {
     _firstFixTimer?.cancel();
+    final generation = _sessionGeneration;
     _firstFixTimer = Timer(const Duration(seconds: 20), () {
-      if (!state.isTracking) return;
+      if (!state.isTracking ||
+          _endingSession ||
+          generation != _sessionGeneration) {
+        return;
+      }
       if (state.sampleCount > 0) return;
       state = state.copyWith(
         errorMessage:
@@ -683,8 +725,11 @@ class SessionController extends Notifier<LiveSessionState> {
   Future<WalkSession?> stop({String? completionNotice}) async {
     final session = state.session;
     if (session == null || state.isBusy) return null;
+    final generation = ++_sessionGeneration;
+    _endingSession = true;
     state = state.copyWith(isBusy: true, clearError: true);
     try {
+      await _maintenanceQueue.close();
       _cancelSessionGuard();
       _ticker?.cancel();
       _checkpointTimer?.cancel();
@@ -695,7 +740,7 @@ class SessionController extends Notifier<LiveSessionState> {
       await _engine.stop();
 
       // Flush remaining in-memory samples before rollup.
-      await _flushPendingSamples();
+      await _flushPendingSamples(generation: generation, allowEnding: true);
       // If flush failed and pending still has items, force-insert once more.
       if (_pendingPersist.isNotEmpty) {
         final leftover = List<LocationSample>.of(_pendingPersist);
@@ -830,8 +875,11 @@ class SessionController extends Notifier<LiveSessionState> {
   Future<void> discardActive() async {
     final session = state.session;
     if (session == null || state.isBusy) return;
+    ++_sessionGeneration;
+    _endingSession = true;
     state = state.copyWith(isBusy: true);
     try {
+      await _maintenanceQueue.close();
       _cancelSessionGuard();
       _ticker?.cancel();
       _checkpointTimer?.cancel();

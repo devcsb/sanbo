@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sanbo/data/walk_repository.dart';
+import 'package:sanbo/data/app_database.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
@@ -65,6 +67,27 @@ class _ThrowingStartEngine extends SyntheticLocationEngine {
   @override
   Future<void> start() {
     throw StateError('foreground service start failed');
+  }
+}
+
+class _DelayedInsertRepository extends WalkRepository {
+  _DelayedInsertRepository(super.db);
+
+  final insertStarted = Completer<void>();
+  final releaseInsert = Completer<void>();
+  var delayNextInsert = true;
+
+  @override
+  Future<void> insertSamples(
+    String sessionId,
+    List<LocationSample> samples,
+  ) async {
+    if (delayNextInsert) {
+      delayNextInsert = false;
+      insertStarted.complete();
+      await releaseInsert.future;
+    }
+    return super.insertSamples(sessionId, samples);
   }
 }
 
@@ -206,6 +229,100 @@ void main() {
       final caughtUp = container.read(sessionControllerProvider);
       expect(caughtUp.sampleCount, 4);
       expect(caughtUp.liveDistanceM, greaterThan(0));
+    },
+  );
+
+  test(
+    'stop waits for an in-flight checkpoint before finalizing samples',
+    () async {
+      ensureSqfliteFfi();
+      final path =
+          '${Directory.systemTemp.path}/sanbo_delayed_${DateTime.now().microsecondsSinceEpoch}.db';
+      final db = await openAppDatabase(path: path);
+      final repo = _DelayedInsertRepository(db);
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start(mode: TrackingMode.balanced);
+      final session = container.read(sessionControllerProvider).session!;
+      controller.setAppForeground(false);
+      final fixes = [
+        for (var index = 0; index < 4; index++)
+          LocationSample(
+            timestamp: session.startedAt.add(Duration(seconds: index * 8)),
+            latitude: 37.5665 + index * 0.0001,
+            longitude: 126.978,
+            accuracyM: 6,
+            speedMps: 1.2,
+          ),
+      ];
+      controller.debugIngestSamples(fixes);
+      await repo.insertStarted.future;
+
+      final stopFuture = controller.stop();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(container.read(sessionControllerProvider).isBusy, isTrue);
+
+      repo.releaseInsert.complete();
+      final ended = await stopFuture;
+      expect(ended, isNotNull);
+      final stored = await repo.getSamples(ended!.id);
+      final logicalKeys = stored
+          .map(
+            (sample) =>
+                '${sample.timestamp.toUtc().microsecondsSinceEpoch}|'
+                '${sample.latitude.toStringAsFixed(6)}|'
+                '${sample.longitude.toStringAsFixed(6)}',
+          )
+          .toSet();
+      expect(logicalKeys.length, stored.length);
+      expect(stored, hasLength(fixes.length));
+    },
+  );
+
+  test(
+    'discard closes the session before removing its checkpoint data',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = container.read(sessionControllerProvider).session!;
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: session.startedAt,
+          latitude: 37.5665,
+          longitude: 126.978,
+          accuracyM: 6,
+          speedMps: 1.2,
+        ),
+      ]);
+
+      await controller.discardActive();
+      expect(await repo.getActiveSession(), isNull);
+      expect(await repo.getSamples(session.id), isEmpty);
+      expect(container.read(sessionControllerProvider).session, isNull);
     },
   );
 
