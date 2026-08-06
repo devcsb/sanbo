@@ -49,7 +49,9 @@ class WalkRepository {
       'sessions',
       where: "status = ?",
       whereArgs: [SessionStatus.completed.name],
-      orderBy: 'started_at DESC',
+      // The id tie-breaker keeps offset pagination deterministic when users
+      // finish multiple walks in the same timestamp bucket.
+      orderBy: 'started_at DESC, id DESC',
       limit: limit,
       offset: offset,
     );

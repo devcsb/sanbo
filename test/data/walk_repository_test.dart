@@ -41,6 +41,34 @@ void main() {
     expect(stats.longestDurationS, 180);
   });
 
+  test('completed pages use a stable id tie-breaker for equal start times', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final started = DateTime(2026, 7, 20, 10);
+    for (var i = 0; i < 3; i++) {
+      final session = await repo.startSession(startedAt: started);
+      await repo.completeSession(
+        sessionId: session.id,
+        endedAt: started.add(const Duration(minutes: 1)),
+        totalDistanceM: 100,
+        durationS: 60,
+        movingTimeS: 60,
+        stationaryTimeS: 0,
+        avgSpeedMps: 1,
+        validSampleCount: 1,
+      );
+    }
+
+    final firstPage = await repo.listCompleted(limit: 2);
+    final secondPage = await repo.listCompleted(limit: 2, offset: 2);
+    final ids = [...firstPage, ...secondPage].map((s) => s.id).toList();
+
+    expect(firstPage, hasLength(2));
+    expect(secondPage, hasLength(1));
+    expect(ids.toSet(), hasLength(3));
+    expect(ids, orderedEquals([...ids]..sort((a, b) => b.compareTo(a))));
+  });
+
   test('persist session samples windows and survive re-open query', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

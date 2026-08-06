@@ -76,6 +76,7 @@
 - release arm64 APK manifest: 위치·FGS location·알림·WakeLock 권한과 `GeolocatorLocationService` 확인
 - 자동 G8 manifest 게이트: release arm64 APK 권한·서비스·location FGS 타입 확인
 - 비정상 GPS 좌표(NaN·범위 초과) 샘플은 경로 앵커가 되지 않도록 필터 경계 검증 추가
+- 동일 시각 완료 기록의 history offset 페이지가 ID tie-breaker로 중복·누락되지 않도록 보강
 
 ## 남은 위험
 
