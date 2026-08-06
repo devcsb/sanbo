@@ -74,3 +74,4 @@
 4. OS 파일 선택기의 저장/가져오기 UX는 Android·iPhone 실기기에서 최종 확인해야 한다.
 5. iOS background location은 App Store 제출 사유와 권한 교육 문구를 별도 심사해야 한다.
 6. 페이지 크기와 SQLite 집계는 코드·DB 테스트로 검증했지만, 실제 수천 건 스크롤 체감은 실기기에서 추가 측정해야 한다.
+7. 실기기 배터리·백그라운드 검증 절차는 [`docs/DEVICE_VALIDATION.md`](DEVICE_VALIDATION.md)로 고정했지만, 아직 측정 결과는 없다.
