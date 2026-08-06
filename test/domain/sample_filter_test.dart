@@ -67,6 +67,29 @@ void main() {
     expect(out.single.isFilteredOut, isTrue);
   });
 
+  test('rejects non-finite and out-of-range coordinates', () {
+    final filtered = SampleFilter().apply([
+      LocationSample(
+        timestamp: DateTime(2026, 1, 1),
+        latitude: double.nan,
+        longitude: 126.9,
+      ),
+      LocationSample(
+        timestamp: DateTime(2026, 1, 1).add(const Duration(seconds: 8)),
+        latitude: 91,
+        longitude: 126.9,
+      ),
+      LocationSample(
+        timestamp: DateTime(2026, 1, 1).add(const Duration(seconds: 16)),
+        latitude: 37.5,
+        longitude: 181,
+      ),
+    ]);
+
+    expect(filtered, everyElement(isA<LocationSample>()));
+    expect(filtered, everyElement(predicate<LocationSample>((s) => s.isFilteredOut)));
+  });
+
   test('filters GPS jump as impossible speed', () {
     final t0 = DateTime(2026, 7, 12, 10, 0, 0);
     final raw = [

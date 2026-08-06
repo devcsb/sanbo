@@ -39,10 +39,22 @@ class SampleFilter {
     for (final s in sorted) {
       var filtered = false;
 
-      final acc = s.accuracyM;
-      if (acc != null && acc > config.hardMaxAccuracyM) {
+      // A malformed provider fix must never become the path anchor. Without
+      // this guard, NaN coordinates make distance comparisons false and can
+      // poison live distance/stationary calculations for the rest of a walk.
+      if (!s.latitude.isFinite ||
+          !s.longitude.isFinite ||
+          s.latitude < -90 ||
+          s.latitude > 90 ||
+          s.longitude < -180 ||
+          s.longitude > 180) {
         filtered = true;
-      } else if (acc != null &&
+      }
+
+      final acc = s.accuracyM;
+      if (!filtered && acc != null && acc > config.hardMaxAccuracyM) {
+        filtered = true;
+      } else if (!filtered && acc != null &&
           acc > config.maxAccuracyM &&
           lastValid != null) {
         // Soft reject only once we already have a usable path anchor.
