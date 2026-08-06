@@ -90,6 +90,25 @@ void main() {
     expect(filtered, everyElement(predicate<LocationSample>((s) => s.isFilteredOut)));
   });
 
+  test('rejects invalid accuracy metadata instead of trusting it', () {
+    final filtered = SampleFilter().apply([
+      LocationSample(
+        timestamp: DateTime(2026, 1, 1),
+        latitude: 37.5,
+        longitude: 126.9,
+        accuracyM: double.nan,
+      ),
+      LocationSample(
+        timestamp: DateTime(2026, 1, 1).add(const Duration(seconds: 8)),
+        latitude: 37.5,
+        longitude: 126.9,
+        accuracyM: -1,
+      ),
+    ]);
+
+    expect(filtered, everyElement(predicate<LocationSample>((s) => s.isFilteredOut)));
+  });
+
   test('filters GPS jump as impossible speed', () {
     final t0 = DateTime(2026, 7, 12, 10, 0, 0);
     final raw = [

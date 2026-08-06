@@ -52,6 +52,11 @@ class SampleFilter {
       }
 
       final acc = s.accuracyM;
+      if (!filtered &&
+          acc != null &&
+          (!acc.isFinite || acc < 0)) {
+        filtered = true;
+      }
       if (!filtered && acc != null && acc > config.hardMaxAccuracyM) {
         filtered = true;
       } else if (!filtered && acc != null &&
