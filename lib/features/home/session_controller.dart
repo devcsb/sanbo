@@ -191,6 +191,19 @@ class SessionController extends Notifier<LiveSessionState> {
   /// Call after app start (bootstrap) to recover incomplete sessions.
   Future<void> restoreIfNeeded() => _restoreActive();
 
+  /// Retries a failed recovery lookup without starting a new walk.
+  Future<void> retryRecovery() async {
+    if (state.isBusy || !state.canRetryRecovery) return;
+    state = state.copyWith(isBusy: true, clearError: true);
+    try {
+      await _restoreActive();
+    } finally {
+      if (state.isBusy) {
+        state = state.copyWith(isBusy: false);
+      }
+    }
+  }
+
   WalkRepository get _repo => ref.read(walkRepositoryProvider);
   LocationEngine get _engine => ref.read(locationEngineProvider);
   SessionPipeline get _pipeline => ref.read(sessionPipelineProvider);

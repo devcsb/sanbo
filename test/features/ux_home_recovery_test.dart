@@ -65,6 +65,12 @@ void main() {
     expect(live.canRetryRecovery, isTrue);
     expect(live.errorMessage, contains('기록을 확인하지 못했어요'));
     expect(live.errorMessage, isNot(contains('DatabaseException')));
+
+    final retry = container.read(sessionControllerProvider.notifier).retryRecovery();
+    expect(container.read(sessionControllerProvider).isBusy, isTrue);
+    await retry;
+    expect(container.read(sessionControllerProvider).isBusy, isFalse);
+    expect(container.read(sessionControllerProvider).canRetryRecovery, isTrue);
   });
 
   test(
@@ -164,7 +170,7 @@ void main() {
       expect(home, contains('계속 기록'));
       expect(home, contains('autoStopWarning'));
       expect(home, contains('canRetryRecovery'));
-      expect(home, contains('restoreIfNeeded'));
+      expect(home, contains('retryRecovery'));
       expect(home, contains('else if (!recovery)'));
       expect(home, isNot(contains("'LIVE'")));
       expect(confirm, contains('기록 지우기'));

@@ -90,7 +90,7 @@ class HomeScreen extends ConsumerWidget {
                                   );
                                   unawaited(
                                     live.canRetryRecovery
-                                        ? controller.restoreIfNeeded()
+                                        ? controller.retryRecovery()
                                         : controller.start(mode: startMode),
                                   );
                                 },
