@@ -35,6 +35,17 @@ G6 every P0/P1 finding has a test, fix, or explicit next-loop owner
 G7 python3 scripts/verify_prd_trd.py        PRD/TRD structural verification passes
 ```
 
+반복 실행 명령:
+
+```bash
+bash scripts/run_quality_loop.sh             # 구조·analyze·전체 테스트
+bash scripts/run_quality_loop.sh --debug-apk
+bash scripts/run_quality_loop.sh --release-apk
+```
+
+APK 옵션은 로컬 release signing 설정과 빌드 시간을 전제로 한다. Flutter 명령이 생성하는
+iOS 보조 파일은 커밋 전에 저장소 정책에 맞게 정리한다.
+
 ## 루프 기록 양식
 
 ```text
