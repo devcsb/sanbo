@@ -35,19 +35,19 @@
 - Produces `WalkRepository.dailyStats({required DateTime startDate, required DateTime endDateExclusive}) -> Future<List<DailyWalkStats>>`.
 - `date` is a local midnight value; `totalDistanceM` and `totalDurationS` are non-negative.
 
-- [ ] **Step 1: Write failing domain tests**
+- [x] **Step 1: Write failing domain tests**
 
 Add `test/domain/daily_walk_stats_test.dart` asserting that the model exposes km and
 `Duration` helpers, normalizes date comparisons through local midnight, and formats a
 zero-value day without throwing.
 
-- [ ] **Step 2: Run domain tests and verify the expected missing-model failure**
+- [x] **Step 2: Run domain tests and verify the expected missing-model failure**
 
 Run: `flutter test --no-pub test/domain/daily_walk_stats_test.dart`
 
 Expected: FAIL because `daily_walk_stats.dart` and `DailyWalkStats` do not exist.
 
-- [ ] **Step 3: Implement the minimal immutable model**
+- [x] **Step 3: Implement the minimal immutable model**
 
 Create `DailyWalkStats` with the four required fields plus:
 
@@ -62,13 +62,13 @@ static DailyWalkStats zero(DateTime date) => DailyWalkStats(
 );
 ```
 
-- [ ] **Step 4: Run domain tests and verify they pass**
+- [x] **Step 4: Run domain tests and verify they pass**
 
 Run: `flutter test --no-pub test/domain/daily_walk_stats_test.dart`
 
 Expected: PASS.
 
-- [ ] **Step 5: Write failing repository tests**
+- [x] **Step 5: Write failing repository tests**
 
 Extend `test/data/walk_repository_test.dart` with real SQLite fixtures covering:
 
@@ -83,13 +83,13 @@ The fixtures must include a session ending after midnight to prove it remains on
 start date, and use `DateTime(2026, 8, 10, ...)` local values so the expected grouping is
 unambiguous.
 
-- [ ] **Step 6: Run repository tests and verify the expected missing-method failure**
+- [x] **Step 6: Run repository tests and verify the expected missing-method failure**
 
 Run: `flutter test --no-pub test/data/walk_repository_test.dart`
 
 Expected: FAIL because `WalkRepository.dailyStats` is not defined.
 
-- [ ] **Step 7: Implement the SQLite-backed API**
+- [x] **Step 7: Implement the SQLite-backed API**
 
 In `WalkRepository.dailyStats`, normalize both inputs to local midnight, reject
 `startDate >= endDateExclusive`, build a list of every day in the half-open range, and
@@ -109,18 +109,18 @@ GROUP BY substr(started_at, 1, 10)
 Map grouped rows by `yyyy-MM-dd`, fill missing dates with `DailyWalkStats.zero`, and
 clamp invalid negative/non-finite aggregate values to zero before returning.
 
-- [ ] **Step 8: Run repository tests and verify they pass**
+- [x] **Step 8: Run repository tests and verify they pass**
 
 Run: `flutter test --no-pub test/data/walk_repository_test.dart`
 
 Expected: PASS, including index-plan and midnight cases.
 
-- [ ] **Step 9: Refactor only after green**
+- [x] **Step 9: Refactor only after green**
 
 Extract private date-key and non-negative-number helpers if needed, rerun both focused
 test files, and keep the public API unchanged.
 
-- [ ] **Step 10: Commit the API unit**
+- [x] **Step 10: Commit the API unit**
 
 ```bash
 git add lib/domain/services/daily_walk_stats.dart lib/data/walk_repository.dart test/domain/daily_walk_stats_test.dart test/data/walk_repository_test.dart
@@ -134,11 +134,11 @@ git commit -m "Add daily activity aggregation API"
 - Create: `test/features/daily_activity_provider_test.dart`
 
 **Interfaces:**
-- Produces `dailyHistorySelectionProvider` holding the selected local day and week end.
-- Produces `dailyActivityProvider` returning `DailyActivitySnapshot { days, selectedDay, weekStart, weekEnd }`.
+- Produces `dailyWeekEndProvider` and `dailySelectedDayProvider` holding the local range and selected day.
+- Produces `dailyActivityProvider` returning `DailyActivitySnapshot { days, weekStart, weekEnd }`.
 - `historyTickProvider` invalidates both completed history and daily activity.
 
-- [ ] **Step 1: Write failing provider tests**
+- [x] **Step 1: Write failing provider tests**
 
 Add provider tests with an in-memory/fake `WalkRepository` override asserting:
 
@@ -149,13 +149,13 @@ test('moving a week requests exactly a seven-day half-open range', () async { /*
 test('history tick refreshes daily activity', () async { /* increment tick and observe a second API call */ });
 ```
 
-- [ ] **Step 2: Run provider tests and verify the expected missing-provider failure**
+- [x] **Step 2: Run provider tests and verify the expected missing-provider failure**
 
 Run: `flutter test --no-pub test/features/daily_activity_provider_test.dart`
 
 Expected: FAIL because the selection state, snapshot, and provider do not exist.
 
-- [ ] **Step 3: Implement provider state and date navigation helpers**
+- [x] **Step 3: Implement provider state and date navigation helpers**
 
 Add a small immutable selection/state type or equivalent Riverpod state that stores
 `weekEnd` and `selectedDay`. Initialize both to today at local midnight. The provider
@@ -163,13 +163,13 @@ calls `repo.dailyStats(startDate: weekEnd - 6 days, endDateExclusive: weekEnd + 
 and watches `historyTickProvider`; selecting a day changes only local selection, while
 previous/next week changes the week end and resets selection to that week’s last day.
 
-- [ ] **Step 4: Run provider tests and verify they pass**
+- [x] **Step 4: Run provider tests and verify they pass**
 
 Run: `flutter test --no-pub test/features/daily_activity_provider_test.dart`
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit provider state**
+- [x] **Step 5: Commit provider state**
 
 ```bash
 git add lib/features/history/history_providers.dart test/features/daily_activity_provider_test.dart
@@ -181,8 +181,8 @@ git commit -m "Add daily activity history state"
 **Files:**
 - Create: `lib/features/history/daily_activity_panel.dart`
 - Modify: `lib/features/history/history_screen.dart`
+- Test: `test/features/daily_activity_panel_test.dart`
 - Test: `test/features/ux_history_detail_widget_test.dart`
-- Test: `test/features/ux_design_system_test.dart`
 
 **Interfaces:**
 - `DailyActivityPanel` consumes `dailyActivityProvider` and renders loading, partial-error,
@@ -190,7 +190,7 @@ git commit -m "Add daily activity history state"
 - `HistoryScreen` places the panel below the existing aggregate card and above the recent
   list/empty CTA.
 
-- [ ] **Step 1: Write failing widget tests**
+- [x] **Step 1: Write failing widget tests**
 
 Add tests that override the daily provider and assert:
 
@@ -204,13 +204,13 @@ testWidgets('daily panel stacks safely on a compact large-text phone', () async 
 
 Use real widgets and provider overrides; do not test private implementation names.
 
-- [ ] **Step 2: Run widget tests and verify the expected missing-widget failure**
+- [x] **Step 2: Run widget tests and verify the expected missing-widget failure**
 
-Run: `flutter test --no-pub test/features/ux_history_detail_widget_test.dart test/features/ux_design_system_test.dart`
+Run: `flutter test --no-pub test/features/daily_activity_panel_test.dart test/features/ux_history_detail_widget_test.dart`
 
 Expected: FAIL because `DailyActivityPanel` and its history integration are missing.
 
-- [ ] **Step 3: Implement the panel with existing design primitives**
+- [x] **Step 3: Implement the panel with existing design primitives**
 
 Use `SoftPanel`, `SectionLabel`, `StatusPill`, `MetricStrip`, and themed `IconButton`s.
 Render a 7-item horizontally scrollable date row with each item at least 48dp high,
@@ -219,23 +219,24 @@ today/selected styling independent of color, and Semantics labels such as
 its candidate week end is after today. Format selected metrics as `0.00 km`, compact
 duration, and `0회`.
 
-- [ ] **Step 4: Integrate without changing recent-list semantics**
+- [x] **Step 4: Integrate without changing recent-list semantics**
 
-Update `HistoryScreen` so the panel is rendered for both populated and empty histories.
-For an empty history, retain a clear `산책 시작하기` CTA below the daily panel. Keep the
-existing recent list unfiltered and preserve current loading/error behavior for the main
-history provider.
+Update `HistoryScreen` so the panel is rendered below the existing aggregate card for
+populated histories. Keep the existing empty-history screen focused on its clear
+`산책 시작하기` CTA because there is no completed data to summarize. Keep the existing
+recent list unfiltered and preserve current loading/error behavior for the main history
+provider.
 
-- [ ] **Step 5: Run widget tests and verify they pass**
+- [x] **Step 5: Run widget tests and verify they pass**
 
-Run: `flutter test --no-pub test/features/ux_history_detail_widget_test.dart test/features/ux_design_system_test.dart`
+Run: `flutter test --no-pub test/features/daily_activity_panel_test.dart test/features/ux_history_detail_widget_test.dart`
 
 Expected: PASS with no `RenderFlex overflow` or tester exception.
 
-- [ ] **Step 6: Commit the UI unit**
+- [x] **Step 6: Commit the UI unit**
 
 ```bash
-git add lib/features/history/daily_activity_panel.dart lib/features/history/history_screen.dart test/features/ux_history_detail_widget_test.dart test/features/ux_design_system_test.dart
+git add lib/features/history/daily_activity_panel.dart lib/features/history/history_screen.dart test/features/daily_activity_panel_test.dart test/features/ux_history_detail_widget_test.dart
 git commit -m "Add daily activity summary to history"
 ```
 
@@ -251,21 +252,21 @@ git commit -m "Add daily activity summary to history"
 - Documents FR acceptance for daily totals and the repository API without changing the
   database schema or backup format.
 
-- [ ] **Step 1: Update product and technical docs**
+- [x] **Step 1: Update product and technical docs**
 
 Add a daily activity acceptance row to `docs/PRD.md`, map it in `docs/TRD.md`, add the
 API/query behavior and user-facing scope to `README.md`, and record the change in the
 quality review document. Explicitly state that step count, calories, Samsung Health, and
 calendar/monthly charts remain out of scope.
 
-- [ ] **Step 2: Run the structural documentation check**
+- [x] **Step 2: Run the structural documentation check**
 
 Run: `python3 scripts/verify_prd_trd.py`
 
 Expected: PASS with the new acceptance row, API mapping, and unchanged schema/backup
 constraints present.
 
-- [ ] **Step 3: Run documentation checks and the complete regression suite**
+- [x] **Step 3: Run documentation checks and the complete regression suite**
 
 Run:
 
@@ -279,7 +280,7 @@ flutter build apk --debug
 Expected: all commands exit 0; the full Flutter suite includes the new repository,
 provider, and widget coverage.
 
-- [ ] **Step 4: Inspect the final diff and clean tree**
+- [x] **Step 4: Inspect the final diff and clean tree**
 
 Run:
 
@@ -292,9 +293,9 @@ git log --oneline -5
 Expected: no whitespace errors, only intentional commits, and no generated or secret
 files staged.
 
-- [ ] **Step 5: Commit documentation and verification changes**
+- [x] **Step 5: Commit documentation and verification changes**
 
 ```bash
-git add docs/PRD.md docs/TRD.md README.md docs/QUALITY_REVIEW_0.7.1.md test
+git add docs/PRD.md docs/TRD.md README.md docs/QUALITY_REVIEW_0.7.1.md docs/superpowers/plans/2026-08-15-daily-activity-plan.md
 git commit -m "Document daily activity summary"
 ```

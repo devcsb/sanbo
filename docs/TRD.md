@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |------|------|
-| 문서 ID | `TRD-SANBO-v1.5` |
-| 버전 | 1.5 (Flutter · Android · 한국 공개 지도 고정) |
+| 문서 ID | `TRD-SANBO-v1.6` |
+| 버전 | 1.6 (Flutter · Android · 한국 공개 지도 고정) |
 | 상태 | 구현 가능 수준 스펙 / 앱 코드 미포함 |
 | 상위 문서 | [PRD](./PRD.md) (`PRD-SANBO-v1.2`), [PLATFORM_AND_MAPS](./PLATFORM_AND_MAPS.md) |
 | 추적 | §12 PRD↔TRD 매핑 표 |
@@ -22,6 +22,7 @@
 4. 장소/체류를 추론한다 (FR-08, FR-09).  
 5. 활동 **가설**을 규칙으로 생성하고 사용자 라벨을 우선 저장한다 (FR-10–12).  
 6. 조회·맵·삭제·로컬 우선·export를 지원한다 (FR-06, FR-14–19).
+7. 기록 화면에서 로컬 날짜별 완료 산책 합계를 조회한다 (FR-25).
 
 ### 1.2 비범위
 
@@ -387,6 +388,24 @@ LocationSample 수집
 
 **매핑**: FR-15, 레퍼런스 요약 카드 패리티.
 
+### 4.7.1 DailyActivityQuery
+
+기록 화면의 최근 7일 요약은 세션 목록을 메모리에서 재합산하지 않고
+`WalkRepository.dailyStats(startDate, endDateExclusive)`의 SQLite 집계 결과를 사용한다.
+
+- 범위는 로컬 자정 기준 `[startDate, endDateExclusive)`이며 `started_at`의 시작일에
+  완료 세션을 귀속한다. 자정을 넘어 종료한 세션도 시작일에 남긴다.
+- SQL은 `status = completed`와 `started_at` 범위를 함께 제한하고, 날짜별
+  `COUNT(*)`, `SUM(total_distance_m)`, `SUM(duration_s)`를 그룹화한다. 누락된 날짜는
+  `DailyWalkStats.zero`로 채워 항상 7개를 반환한다.
+- UI provider는 `historyTickProvider`를 구독해 산책 종료·삭제·가져오기 뒤 갱신한다.
+  날짜 선택은 이미 로드된 7개 행만 바꾸고, 주간 이동에서만 새 쿼리를 실행한다.
+- 패널은 거리·시간·횟수만 노출한다. 걸음 수, 칼로리, Samsung Health/Health Connect,
+  월간 차트는 이 API의 범위가 아니다. 최근 산책 목록은 선택일로 필터링하지 않는다.
+- API 오류는 패널 내부 재시도 상태로 열화하며 전체 기록 목록을 가리지 않는다.
+
+**매핑**: FR-14, FR-25, NFR-05, NFR-06.
+
 ### 4.8 SegmentMerger (P1)
 
 - 표시 라벨(`user_label ?? hypothesis_label`)이 동일하고 연속이며 둘 다 conf ≥ 0.4 (또는 user 확정)이면 병합.  
@@ -652,6 +671,7 @@ PRD §14와 정합. 기술 결론:
 | FR-19 | §1.3, §8 | SQLite only MVP | — |
 | FR-20 | §4.5, §8 | round+cache | P1 |
 | FR-24 | §8, §9.3 | 버전 백업 + transaction 병합 | 파일 자체 암호화는 P2 |
+| FR-25 | §4.7.1 DailyActivityQuery | `WalkRepository.dailyStats` + Riverpod 7일 패널 | 로컬 시작일·완료 세션만; 목록 비필터 |
 | NFR-01 | §4.3, §6 gaps | 커버리지/표시 | 조건부 |
 | NFR-02 | §4.1 modes | balanced default | 기기차 |
 | NFR-03 | §4.2 filter | jump/accuracy | — |
@@ -705,6 +725,7 @@ PRD §14와 정합. 기술 결론:
 | 1.4 | 2026-07-31 | 지도–타임라인 연동, 경로 슬라이더·재생, 선택 구간 강조 및 보기/편집 분리 |
 | 1.5 | 2026-08-01 | 전체 백업·원자적 병합 복원, DB 무결성/마이그레이션, 백그라운드 UI 절전, iOS background location·릴리스 서명 안전장치 |
 | 1.6 | 2026-08-07 | 장기 기록 저장 재시도 내구성, 미관측 GPS gap 통계 제외, CARTO 타일 네트워크 고지, 릴리스 인증서 fail-closed 검증 |
+| 1.7 | 2026-08-15 | 기록 화면 7일 일별 집계 API·Riverpod 상태·접근성 패널 매핑 추가 |
 
 ---
 
