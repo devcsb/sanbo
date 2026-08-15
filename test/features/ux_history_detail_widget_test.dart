@@ -8,6 +8,7 @@ import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sanbo/features/history/history_screen.dart';
+import 'package:sanbo/features/history/history_providers.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/features/session_detail/session_detail_screen.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
@@ -31,8 +32,9 @@ void main() {
     await initializeDateFormatting('ko');
   });
 
-  testWidgets('empty HistoryScreen CTA navigates home via go_router',
-      (tester) async {
+  testWidgets('empty HistoryScreen CTA navigates home via go_router', (
+    tester,
+  ) async {
     late WalkRepository repo;
     await tester.runAsync(() async {
       repo = await openTestRepository();
@@ -60,10 +62,7 @@ void main() {
           path: '/',
           builder: (_, _) => const Scaffold(body: Text('HOME_MARK')),
         ),
-        GoRoute(
-          path: '/history',
-          builder: (_, _) => const HistoryScreen(),
-        ),
+        GoRoute(path: '/history', builder: (_, _) => const HistoryScreen()),
       ],
     );
 
@@ -85,8 +84,65 @@ void main() {
     expect(find.text('HOME_MARK'), findsOneWidget);
   });
 
-  testWidgets('SessionDetailScreen delete dialog then go /history',
-      (tester) async {
+  testWidgets('daily selection changes totals while recent history remains', (
+    tester,
+  ) async {
+    late WalkRepository repo;
+    await tester.runAsync(() async {
+      repo = await openTestRepository();
+      final start = DateTime(2026, 8, 12, 9);
+      final session = await repo.startSession(startedAt: start);
+      await repo.completeSession(
+        sessionId: session.id,
+        endedAt: start.add(const Duration(minutes: 10)),
+        totalDistanceM: 1000,
+        durationS: 600,
+        movingTimeS: 600,
+        stationaryTimeS: 0,
+        avgSpeedMps: 1.6,
+        validSampleCount: 1,
+      );
+    });
+    addTearDown(() async {
+      await tester.runAsync(() => repo.close());
+    });
+
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        dailyWeekEndProvider.overrideWith((_) => DateTime(2026, 8, 15)),
+        dailySelectedDayProvider.overrideWith((_) => DateTime(2026, 8, 15)),
+      ],
+    );
+    addTearDown(container.dispose);
+    final router = GoRouter(
+      initialLocation: '/history',
+      routes: [
+        GoRoute(path: '/history', builder: (_, _) => const HistoryScreen()),
+      ],
+    );
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: MaterialApp.router(routerConfig: router),
+      ),
+    );
+    await settle(tester);
+    await settle(tester);
+
+    expect(find.text('일별 운동량'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel(RegExp(r'^8월 12일')));
+    await tester.pump();
+    expect(find.text('1.00 km'), findsAtLeastNWidgets(1));
+    await tester.drag(find.byType(ListView).last, const Offset(0, -500));
+    await tester.pump();
+    expect(find.text('소요 시간 10:00'), findsOneWidget);
+  });
+
+  testWidgets('SessionDetailScreen delete dialog then go /history', (
+    tester,
+  ) async {
     late WalkRepository repo;
     late String sessionId;
 
@@ -177,8 +233,9 @@ void main() {
     await settle(tester);
     await settle(tester);
 
-    final gone =
-        await tester.runAsync<Object?>(() => repo.getSession(sessionId));
+    final gone = await tester.runAsync<Object?>(
+      () => repo.getSession(sessionId),
+    );
     expect(gone, isNull);
     // Shipped code calls context.go('/history') after delete.
     expect(find.text('HISTORY_LIST_MARK'), findsOneWidget);

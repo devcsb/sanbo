@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/services/walk_stats.dart';
 import '../../shared/widgets/ui_bits.dart';
+import 'daily_activity_panel.dart';
 import 'history_providers.dart';
 
 final completedSessionsProvider = FutureProvider<HistorySnapshot>((ref) async {
@@ -71,10 +72,7 @@ class HistoryScreen extends ConsumerWidget {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              '나의 흐름',
-                              style: theme.textTheme.titleSmall,
-                            ),
+                            Text('나의 흐름', style: theme.textTheme.titleSmall),
                             const SizedBox(height: 6),
                             Text(
                               stats.summaryLine(),
@@ -109,7 +107,11 @@ class HistoryScreen extends ConsumerWidget {
                                 if (stack) {
                                   return Column(
                                     children: [
-                                      for (var i = 0; i < tiles.length; i++) ...[
+                                      for (
+                                        var i = 0;
+                                        i < tiles.length;
+                                        i++
+                                      ) ...[
                                         if (i > 0) const SizedBox(height: 8),
                                         tiles[i],
                                       ],
@@ -143,6 +145,8 @@ class HistoryScreen extends ConsumerWidget {
                           ],
                         ),
                       ),
+                      const SizedBox(height: 16),
+                      const DailyActivityPanel(),
                       const SizedBox(height: 20),
                       Wrap(
                         spacing: 8,
@@ -166,9 +170,7 @@ class HistoryScreen extends ConsumerWidget {
                     child: snapshot.hasMore
                         ? OutlinedButton(
                             onPressed: () {
-                              ref
-                                  .read(historyPageProvider.notifier)
-                                  .state++;
+                              ref.read(historyPageProvider.notifier).state++;
                             },
                             child: const Text('더 많은 기록 보기'),
                           )
@@ -189,8 +191,9 @@ class HistoryScreen extends ConsumerWidget {
                     padding: EdgeInsets.zero,
                     child: InkWell(
                       onTap: () => context.go('/history/${s.id}'),
-                      borderRadius:
-                          BorderRadius.circular(AppTheme.radiusMedium),
+                      borderRadius: BorderRadius.circular(
+                        AppTheme.radiusMedium,
+                      ),
                       child: ConstrainedBox(
                         constraints: const BoxConstraints(minHeight: 76),
                         child: Padding(
