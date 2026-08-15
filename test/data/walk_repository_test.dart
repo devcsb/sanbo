@@ -1,4 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:io';
+
+import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
@@ -7,67 +10,197 @@ import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sanbo/domain/services/walk_stats.dart';
 
 import '../helpers/test_db.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('completed history supports bounded pages and aggregate stats', () async {
+  test('daily stats sums completed sessions by local start date', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
-    for (var i = 0; i < 3; i++) {
-      final started = DateTime(2026, 7, 20, 10 + i);
-      final session = await repo.startSession(startedAt: started);
-      await repo.completeSession(
-        sessionId: session.id,
-        endedAt: started.add(Duration(minutes: i + 1)),
-        totalDistanceM: (i + 1) * 1000,
-        durationS: (i + 1) * 60,
-        movingTimeS: (i + 1) * 50,
-        stationaryTimeS: (i + 1) * 10,
-        avgSpeedMps: 1,
-        validSampleCount: i + 1,
-      );
-    }
 
-    final page = await repo.listCompleted(limit: 2);
-    expect(page, hasLength(2));
-    expect(page.first.startedAt.hour, 12);
+    final first = DateTime(2026, 8, 10, 23, 50);
+    await _completeSession(
+      repo,
+      startedAt: first,
+      endedAt: DateTime(2026, 8, 11, 0, 10),
+      distanceM: 1200,
+      durationS: 1200,
+    );
+    await _completeSession(
+      repo,
+      startedAt: DateTime(2026, 8, 10, 10),
+      endedAt: DateTime(2026, 8, 10, 10, 30),
+      distanceM: 800,
+      durationS: 1800,
+    );
+    await _completeSession(
+      repo,
+      startedAt: DateTime(2026, 8, 11, 9),
+      endedAt: DateTime(2026, 8, 11, 10),
+      distanceM: 3000,
+      durationS: 3600,
+    );
+    await repo.startSession(startedAt: DateTime(2026, 8, 10, 18));
 
-    final stats = await repo.completedStats();
-    expect(stats, isA<WalkStats>());
-    expect(stats.walkCount, 3);
-    expect(stats.totalDistanceM, 6000);
-    expect(stats.totalDurationS, 360);
-    expect(stats.longestDurationS, 180);
+    final days = await repo.dailyStats(
+      startDate: DateTime(2026, 8, 10),
+      endDateExclusive: DateTime(2026, 8, 13),
+    );
+
+    expect(days.map((day) => day.date), [
+      DateTime(2026, 8, 10),
+      DateTime(2026, 8, 11),
+      DateTime(2026, 8, 12),
+    ]);
+    expect(days[0].walkCount, 2);
+    expect(days[0].totalDistanceM, 2000);
+    expect(days[0].totalDurationS, 3000);
+    expect(days[1].walkCount, 1);
+    expect(days[1].totalDistanceM, 3000);
+    expect(days[2].walkCount, 0);
   });
 
-  test('completed pages use a stable id tie-breaker for equal start times', () async {
+  test(
+    'daily stats excludes the end boundary and includes zero days',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+
+      await _completeSession(
+        repo,
+        startedAt: DateTime(2026, 8, 12, 8),
+        endedAt: DateTime(2026, 8, 12, 9),
+        distanceM: 500,
+        durationS: 3600,
+      );
+      await _completeSession(
+        repo,
+        startedAt: DateTime(2026, 8, 14, 8),
+        endedAt: DateTime(2026, 8, 14, 9),
+        distanceM: 900,
+        durationS: 3600,
+      );
+
+      final days = await repo.dailyStats(
+        startDate: DateTime(2026, 8, 12, 23, 59),
+        endDateExclusive: DateTime(2026, 8, 14),
+      );
+
+      expect(days, hasLength(2));
+      expect(days.first.walkCount, 1);
+      expect(days.last.walkCount, 0);
+    },
+  );
+
+  test('daily stats rejects an empty or reversed date range', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
-    final started = DateTime(2026, 7, 20, 10);
-    for (var i = 0; i < 3; i++) {
-      final session = await repo.startSession(startedAt: started);
-      await repo.completeSession(
-        sessionId: session.id,
-        endedAt: started.add(const Duration(minutes: 1)),
-        totalDistanceM: 100,
-        durationS: 60,
-        movingTimeS: 60,
-        stationaryTimeS: 0,
-        avgSpeedMps: 1,
-        validSampleCount: 1,
-      );
-    }
 
-    final firstPage = await repo.listCompleted(limit: 2);
-    final secondPage = await repo.listCompleted(limit: 2, offset: 2);
-    final ids = [...firstPage, ...secondPage].map((s) => s.id).toList();
-
-    expect(firstPage, hasLength(2));
-    expect(secondPage, hasLength(1));
-    expect(ids.toSet(), hasLength(3));
-    expect(ids, orderedEquals([...ids]..sort((a, b) => b.compareTo(a))));
+    expect(
+      () => repo.dailyStats(
+        startDate: DateTime(2026, 8, 10),
+        endDateExclusive: DateTime(2026, 8, 10),
+      ),
+      throwsArgumentError,
+    );
+    expect(
+      () => repo.dailyStats(
+        startDate: DateTime(2026, 8, 11),
+        endDateExclusive: DateTime(2026, 8, 10),
+      ),
+      throwsArgumentError,
+    );
   });
+
+  test('daily stats range uses the completed-start index', () async {
+    final path =
+        '${Directory.systemTemp.path}/sanbo_daily_plan_${DateTime.now().microsecondsSinceEpoch}.db';
+    final repo = await openTestRepository(path: path);
+    await repo.close();
+    final db = await databaseFactory.openDatabase(path);
+    addTearDown(db.close);
+
+    final plan = await db.rawQuery(
+      '''
+EXPLAIN QUERY PLAN
+SELECT substr(started_at, 1, 10) AS day,
+       COUNT(*) AS walk_count,
+       COALESCE(SUM(total_distance_m), 0) AS total_distance_m,
+       COALESCE(SUM(duration_s), 0) AS total_duration_s
+FROM sessions
+WHERE status = ? AND started_at >= ? AND started_at < ?
+GROUP BY substr(started_at, 1, 10)
+''',
+      ['completed', '2026-08-10T00:00:00', '2026-08-17T00:00:00'],
+    );
+
+    expect(plan.join(' '), contains('idx_sessions_status_started_at'));
+  });
+
+  test(
+    'completed history supports bounded pages and aggregate stats',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      for (var i = 0; i < 3; i++) {
+        final started = DateTime(2026, 7, 20, 10 + i);
+        final session = await repo.startSession(startedAt: started);
+        await repo.completeSession(
+          sessionId: session.id,
+          endedAt: started.add(Duration(minutes: i + 1)),
+          totalDistanceM: (i + 1) * 1000,
+          durationS: (i + 1) * 60,
+          movingTimeS: (i + 1) * 50,
+          stationaryTimeS: (i + 1) * 10,
+          avgSpeedMps: 1,
+          validSampleCount: i + 1,
+        );
+      }
+
+      final page = await repo.listCompleted(limit: 2);
+      expect(page, hasLength(2));
+      expect(page.first.startedAt.hour, 12);
+
+      final stats = await repo.completedStats();
+      expect(stats, isA<WalkStats>());
+      expect(stats.walkCount, 3);
+      expect(stats.totalDistanceM, 6000);
+      expect(stats.totalDurationS, 360);
+      expect(stats.longestDurationS, 180);
+    },
+  );
+
+  test(
+    'completed pages use a stable id tie-breaker for equal start times',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final started = DateTime(2026, 7, 20, 10);
+      for (var i = 0; i < 3; i++) {
+        final session = await repo.startSession(startedAt: started);
+        await repo.completeSession(
+          sessionId: session.id,
+          endedAt: started.add(const Duration(minutes: 1)),
+          totalDistanceM: 100,
+          durationS: 60,
+          movingTimeS: 60,
+          stationaryTimeS: 0,
+          avgSpeedMps: 1,
+          validSampleCount: 1,
+        );
+      }
+
+      final firstPage = await repo.listCompleted(limit: 2);
+      final secondPage = await repo.listCompleted(limit: 2, offset: 2);
+      final ids = [...firstPage, ...secondPage].map((s) => s.id).toList();
+
+      expect(firstPage, hasLength(2));
+      expect(secondPage, hasLength(1));
+      expect(ids.toSet(), hasLength(3));
+      expect(ids, orderedEquals([...ids]..sort((a, b) => b.compareTo(a))));
+    },
+  );
 
   test('persist session samples windows and survive re-open query', () async {
     final repo = await openTestRepository();
@@ -283,5 +416,25 @@ void main() {
         isNull,
       );
     },
+  );
+}
+
+Future<void> _completeSession(
+  WalkRepository repo, {
+  required DateTime startedAt,
+  required DateTime endedAt,
+  required double distanceM,
+  required int durationS,
+}) async {
+  final session = await repo.startSession(startedAt: startedAt);
+  await repo.completeSession(
+    sessionId: session.id,
+    endedAt: endedAt,
+    totalDistanceM: distanceM,
+    durationS: durationS,
+    movingTimeS: durationS,
+    stationaryTimeS: 0,
+    avgSpeedMps: distanceM / durationS,
+    validSampleCount: 1,
   );
 }

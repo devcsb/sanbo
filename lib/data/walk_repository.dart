@@ -13,6 +13,7 @@ import '../domain/models/tracking_mode.dart';
 import '../domain/models/walk_session.dart';
 import '../domain/pipeline/geo.dart';
 import '../domain/services/app_backup.dart';
+import '../domain/services/daily_walk_stats.dart';
 import '../domain/services/walk_stats.dart';
 import 'app_database.dart';
 
@@ -82,6 +83,62 @@ WHERE status = ?
       longestDurationS: (row['longest_duration_s'] as num?)?.toInt() ?? 0,
       longestDistanceM: (row['longest_distance_m'] as num?)?.toDouble() ?? 0,
     );
+  }
+
+  /// Returns one aggregate row for every local calendar day in the half-open
+  /// range. A completed session belongs entirely to its start date, even when
+  /// it ends after midnight.
+  Future<List<DailyWalkStats>> dailyStats({
+    required DateTime startDate,
+    required DateTime endDateExclusive,
+  }) async {
+    final start = _localDateOnly(startDate);
+    final end = _localDateOnly(endDateExclusive);
+    if (!start.isBefore(end)) {
+      throw ArgumentError.value(
+        endDateExclusive,
+        'endDateExclusive',
+        'must be after startDate',
+      );
+    }
+
+    final rows = await _db.rawQuery(
+      '''
+SELECT substr(started_at, 1, 10) AS day,
+       COUNT(*) AS walk_count,
+       COALESCE(SUM(total_distance_m), 0) AS total_distance_m,
+       COALESCE(SUM(duration_s), 0) AS total_duration_s
+FROM sessions
+WHERE status = ? AND started_at >= ? AND started_at < ?
+GROUP BY substr(started_at, 1, 10)
+ORDER BY day ASC
+''',
+      [
+        SessionStatus.completed.name,
+        start.toIso8601String(),
+        end.toIso8601String(),
+      ],
+    );
+    final grouped = <String, DailyWalkStats>{
+      for (final row in rows)
+        if (row['day'] is String)
+          row['day'] as String: DailyWalkStats(
+            date: _dateFromKey(row['day']! as String),
+            walkCount: _nonNegativeInt(row['walk_count']),
+            totalDistanceM: _nonNegativeDouble(row['total_distance_m']),
+            totalDurationS: _nonNegativeInt(row['total_duration_s']),
+          ),
+    };
+
+    final days = <DailyWalkStats>[];
+    for (
+      var day = start;
+      day.isBefore(end);
+      day = day.add(const Duration(days: 1))
+    ) {
+      days.add(grouped[_dateKey(day)] ?? DailyWalkStats.zero(day));
+    }
+    return days;
   }
 
   Future<WalkSession?> getSession(String id) async {
@@ -1071,6 +1128,34 @@ ORDER BY w.window_start ASC
     if (!ActivityLabel.values.any((value) => value.storageKey == key)) {
       throw const FormatException('알 수 없는 활동 값이 있습니다');
     }
+  }
+
+  DateTime _localDateOnly(DateTime value) {
+    final local = value.isUtc ? value.toLocal() : value;
+    return DateTime(local.year, local.month, local.day);
+  }
+
+  String _dateKey(DateTime value) {
+    final day = _localDateOnly(value);
+    final year = day.year.toString().padLeft(4, '0');
+    final month = day.month.toString().padLeft(2, '0');
+    final date = day.day.toString().padLeft(2, '0');
+    return '$year-$month-$date';
+  }
+
+  DateTime _dateFromKey(String value) {
+    final parsed = DateTime.parse(value);
+    return DateTime(parsed.year, parsed.month, parsed.day);
+  }
+
+  int _nonNegativeInt(Object? value) {
+    if (value is! num || !value.isFinite || value < 0) return 0;
+    return value.toInt();
+  }
+
+  double _nonNegativeDouble(Object? value) {
+    if (value is! num || !value.isFinite || value < 0) return 0;
+    return value.toDouble();
   }
 
   String _stableWindowStart(DateTime ts) {
