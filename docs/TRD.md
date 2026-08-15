@@ -2,8 +2,8 @@
 
 | 항목 | 내용 |
 |------|------|
-| 문서 ID | `TRD-SANBO-v1.6` |
-| 버전 | 1.6 (Flutter · Android · 한국 공개 지도 고정) |
+| 문서 ID | `TRD-SANBO-v1.7` |
+| 버전 | 1.7 (Flutter · Android · 한국 공개 지도 고정) |
 | 상태 | 구현 가능 수준 스펙 / 앱 코드 미포함 |
 | 상위 문서 | [PRD](./PRD.md) (`PRD-SANBO-v1.2`), [PLATFORM_AND_MAPS](./PLATFORM_AND_MAPS.md) |
 | 추적 | §12 PRD↔TRD 매핑 표 |
