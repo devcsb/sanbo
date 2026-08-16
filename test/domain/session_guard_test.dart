@@ -182,19 +182,21 @@ void main() {
     );
   });
 
-  test('warns at 2h45 and limits every session at 3h', () {
+  test('warns at 4h45 and limits every session at 5h', () {
     final guard = SessionGuard();
 
     final warning = guard.evaluate(
       startedAt: start,
-      now: start.add(const Duration(hours: 2, minutes: 45)),
+      now: start.add(const Duration(hours: 4, minutes: 45)),
     );
     expect(warning.event, SessionGuardEvent.durationWarning);
     expect(warning.remaining, const Duration(minutes: 15));
 
     expect(
-      guard
-          .evaluate(startedAt: start, now: start.add(const Duration(hours: 3)))
+      guard.evaluate(
+        startedAt: start,
+        now: start.add(const Duration(hours: 5)),
+      )
           .event,
       SessionGuardEvent.durationLimit,
     );

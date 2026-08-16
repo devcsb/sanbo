@@ -15,8 +15,8 @@ class SessionGuardPolicy {
   const SessionGuardPolicy({
     this.stationaryWarningAfter = const Duration(minutes: 20),
     this.stationaryLimit = const Duration(minutes: 30),
-    this.durationWarningAfter = const Duration(hours: 2, minutes: 45),
-    this.durationLimit = const Duration(hours: 3),
+    this.durationWarningAfter = const Duration(hours: 4, minutes: 45),
+    this.durationLimit = const Duration(hours: 5),
     this.stationaryRadiusM = 35,
     this.movingSpeedMps = 0.9,
     this.maxUsableAccuracyM = 80,

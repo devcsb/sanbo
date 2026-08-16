@@ -672,7 +672,7 @@ class SessionController extends Notifier<LiveSessionState> {
         }
         return;
       case SessionGuardEvent.durationWarning:
-        const message = '산책 기록이 2시간 45분을 넘었어요. 총 3시간이 되면 자동으로 저장하고 종료합니다.';
+        const message = '산책 기록이 4시간 45분을 넘었어요. 총 5시간이 되면 자동으로 저장하고 종료합니다.';
         state = state.copyWith(
           autoStopWarning: message,
           canContinueAfterWarning: false,
@@ -683,10 +683,10 @@ class SessionController extends Notifier<LiveSessionState> {
       case SessionGuardEvent.durationLimit:
         if (deferAutoStop) {
           unawaited(
-            _autoStop(completionNotice: '3시간이 지나 산책을 자동으로 저장하고 종료했어요.'),
+            _autoStop(completionNotice: '5시간이 지나 산책을 자동으로 저장하고 종료했어요.'),
           );
         } else {
-          await _autoStop(completionNotice: '3시간이 지나 산책을 자동으로 저장하고 종료했어요.');
+          await _autoStop(completionNotice: '5시간이 지나 산책을 자동으로 저장하고 종료했어요.');
         }
         return;
     }
