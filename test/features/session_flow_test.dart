@@ -279,6 +279,191 @@ void main() {
   );
 
   test(
+    'live speed falls back to GPS displacement when provider speed is zero',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = container.read(sessionControllerProvider).session!;
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: session.startedAt,
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+          speedMps: 0,
+        ),
+        LocationSample(
+          timestamp: session.startedAt.add(const Duration(seconds: 8)),
+          latitude: 37.500108,
+          longitude: 127,
+          accuracyM: 5,
+          speedMps: 0,
+        ),
+      ]);
+
+      final live = container.read(sessionControllerProvider);
+      expect(live.liveDistanceM, greaterThan(8));
+      expect(live.liveSpeedMps, closeTo(1.5, 0.3));
+    },
+  );
+
+  test('filtered GPS fixes cannot overwrite live speed', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final session = container.read(sessionControllerProvider).session!;
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: session.startedAt,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+        speedMps: 0,
+      ),
+      LocationSample(
+        timestamp: session.startedAt.add(const Duration(seconds: 8)),
+        latitude: 37.500108,
+        longitude: 127,
+        accuracyM: 5,
+        speedMps: 0,
+      ),
+      LocationSample(
+        timestamp: session.startedAt.add(const Duration(seconds: 9)),
+        latitude: 37.5,
+        longitude: 128,
+        accuracyM: 5,
+        speedMps: 100,
+      ),
+    ]);
+
+    final live = container.read(sessionControllerProvider);
+    expect(live.liveSpeedMps, lessThan(10));
+    expect(live.liveDistanceM, lessThan(100));
+  });
+
+  test('live distance does not bridge a long GPS gap', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final session = container.read(sessionControllerProvider).session!;
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: session.startedAt,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: session.startedAt.add(const Duration(seconds: 8)),
+        latitude: 37.5009,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      // A ten-minute gap must not be interpreted as a continuous 1000 m path.
+      LocationSample(
+        timestamp: session.startedAt.add(const Duration(minutes: 10)),
+        latitude: 37.51,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: session.startedAt.add(
+          const Duration(minutes: 10, seconds: 8),
+        ),
+        latitude: 37.5109,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+    ]);
+
+    final live = container.read(sessionControllerProvider);
+    expect(live.liveDistanceM, greaterThan(100));
+    expect(live.liveDistanceM, lessThan(300));
+  });
+
+  test('recovered live distance does not bridge a long GPS gap', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final start = DateTime(2026, 8, 16, 9);
+    final session = await repo.startSession(startedAt: start);
+    await repo.insertSamples(session.id, [
+      LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: start.add(const Duration(seconds: 8)),
+        latitude: 37.5009,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: start.add(const Duration(minutes: 10)),
+        latitude: 37.51,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+    ]);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+
+    final live = container.read(sessionControllerProvider);
+    expect(live.needsRecovery, isTrue);
+    expect(live.liveDistanceM, greaterThan(100));
+    expect(live.liveDistanceM, lessThan(300));
+  });
+
+  test(
     'background fixes are checkpointed without rebuilding live UI state',
     () async {
       final repo = await openTestRepository();

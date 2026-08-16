@@ -26,8 +26,8 @@ class SessionRollupResult {
 class SessionRollup {
   SessionRollup({
     this.stationarySpeedMps = 0.3,
-    this.maxObservedGap = const Duration(minutes: 1),
-    this.minSegmentDistanceM = 1.5,
+    this.maxObservedGap = trustedLocationGap,
+    this.minSegmentDistanceM = minMeaningfulSegmentDistanceM,
   });
 
   final double stationarySpeedMps;

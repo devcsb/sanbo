@@ -1,5 +1,13 @@
 import 'dart:math' as math;
 
+/// Maximum interval for treating two GPS fixes as an observed path segment.
+/// Longer intervals are unobserved and must not be bridged with a straight
+/// line in live or completed-session metrics.
+const trustedLocationGap = Duration(minutes: 1);
+
+/// Displacements below this floor are treated as GPS micro-jitter.
+const minMeaningfulSegmentDistanceM = 1.5;
+
 /// Haversine distance in meters between two WGS84 points.
 double haversineMeters({
   required double lat1,
@@ -26,7 +34,7 @@ double haversineMeters({
 /// does not inflate distance, while real walking steps still accumulate.
 double pathDistanceMeters(
   Iterable<({double lat, double lon})> points, {
-  double minSegmentM = 1.5,
+  double minSegmentM = minMeaningfulSegmentDistanceM,
 }) {
   final list = points.toList();
   if (list.length < 2) return 0;
@@ -57,11 +65,5 @@ DateTime asLocal(DateTime ts) => ts.isUtc ? ts.toLocal() : ts;
 /// in non-UTC zones (e.g. KST) and every window becomes an empty gap.
 DateTime floorToMinute(DateTime ts) {
   final local = asLocal(ts);
-  return DateTime(
-    local.year,
-    local.month,
-    local.day,
-    local.hour,
-    local.minute,
-  );
+  return DateTime(local.year, local.month, local.day, local.hour, local.minute);
 }

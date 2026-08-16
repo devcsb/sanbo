@@ -79,6 +79,27 @@ void main() {
     },
   );
 
+  test('derives walking speed when provider reports zero', () {
+    final guard = SessionGuard();
+    guard.observe(sample(at: start));
+    guard.evaluate(
+      startedAt: start,
+      now: start.add(const Duration(minutes: 20)),
+    );
+
+    // Keep an adjacent fix so the controller can derive speed from GPS
+    // displacement even though Android reports speed=0.0.
+    guard.observe(sample(at: start.add(const Duration(minutes: 20))));
+    final cleared = guard.observe(
+      sample(
+        at: start.add(const Duration(minutes: 20, seconds: 8)),
+        latitude: 37.566608,
+      ),
+    );
+
+    expect(cleared, isTrue);
+  });
+
   test('continue action gives a fresh 20-minute stationary window', () {
     final guard = SessionGuard();
     guard.observe(sample(at: start));

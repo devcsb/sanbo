@@ -167,6 +167,8 @@ class SessionController extends Notifier<LiveSessionState> {
   bool _appForeground = true;
 
   static const _checkpointEvery = Duration(seconds: 30);
+  static const _maxObservedLiveGap = trustedLocationGap;
+  static const _minLiveSegmentDistanceM = minMeaningfulSegmentDistanceM;
 
   @override
   LiveSessionState build() {
@@ -213,13 +215,53 @@ class SessionController extends Notifier<LiveSessionState> {
     final valid = filtered.where((s) => !s.isFilteredOut).toList();
     _lastValidSample = valid.isEmpty ? null : valid.last;
     _validSampleCount = valid.length;
-    _liveSpeedMps = valid.isEmpty ? 0 : (valid.last.speedMps ?? 0);
+    _liveSpeedMps = _liveSpeedFromSamples(valid);
     _lastAccuracyM = _sessionSamples.isEmpty
         ? null
         : _sessionSamples.last.accuracyM;
-    _liveDistanceM = pathDistanceMeters(
-      valid.map((s) => (lat: s.latitude, lon: s.longitude)),
-    );
+    _liveDistanceM = _trustedLiveDistance(valid);
+  }
+
+  double _trustedLiveDistance(List<LocationSample> valid) {
+    var total = 0.0;
+    for (var i = 1; i < valid.length; i++) {
+      final previous = valid[i - 1];
+      final current = valid[i];
+      final dt = current.timestamp.difference(previous.timestamp);
+      if (dt <= Duration.zero || dt > _maxObservedLiveGap) continue;
+      final distance = haversineMeters(
+        lat1: previous.latitude,
+        lon1: previous.longitude,
+        lat2: current.latitude,
+        lon2: current.longitude,
+      );
+      if (distance >= _minLiveSegmentDistanceM) total += distance;
+    }
+    return total;
+  }
+
+  double _liveSpeedFromSamples(List<LocationSample> valid) {
+    if (valid.isEmpty) return 0;
+    if (valid.length >= 2) {
+      final previous = valid[valid.length - 2];
+      final current = valid.last;
+      final dt = current.timestamp.difference(previous.timestamp);
+      if (dt > Duration.zero && dt <= _maxObservedLiveGap) {
+        final distance = haversineMeters(
+          lat1: previous.latitude,
+          lon1: previous.longitude,
+          lat2: current.latitude,
+          lon2: current.longitude,
+        );
+        if (distance >= _minLiveSegmentDistanceM) {
+          return distance / (dt.inMilliseconds / 1000.0);
+        }
+      }
+    }
+    final providerSpeed = valid.last.speedMps;
+    return providerSpeed != null && providerSpeed.isFinite && providerSpeed > 0
+        ? providerSpeed
+        : 0;
   }
 
   Future<void> _restoreActive() async {
@@ -522,7 +564,8 @@ class SessionController extends Notifier<LiveSessionState> {
             lon2: marked.longitude,
           );
           // Match pathDistanceMeters jitter floor (1.5 m).
-          if (d >= 1.5) {
+          if (dtMs <= _maxObservedLiveGap.inMilliseconds &&
+              d >= _minLiveSegmentDistanceM) {
             _liveDistanceM += d;
             segmentSpeed = d / (dtMs / 1000.0);
           }
@@ -533,11 +576,22 @@ class SessionController extends Notifier<LiveSessionState> {
       clearedStayWarning = _sessionGuard.observe(marked, observedAt: _clock());
     }
 
-    double? speed = sample.speedMps;
-    if (speed == null || speed.isNaN || speed < 0) {
-      speed = segmentSpeed;
+    final providerSpeed = sample.speedMps;
+    if (segmentSpeed != null) {
+      // Android fused fixes frequently report 0 m/s while the coordinates
+      // are moving. Prefer the measured segment whenever it is trustworthy.
+      _liveSpeedMps = segmentSpeed;
+    } else if (ordered &&
+        !marked.isFilteredOut &&
+        providerSpeed != null &&
+        providerSpeed.isFinite &&
+        providerSpeed > 0) {
+      _liveSpeedMps = providerSpeed;
+    } else if (ordered && !marked.isFilteredOut && prev != null) {
+      // A valid stationary/duplicate fix should not leave the previous
+      // walking speed on screen indefinitely.
+      _liveSpeedMps = 0;
     }
-    _liveSpeedMps = speed ?? _liveSpeedMps;
     _lastAccuracyM = sample.accuracyM ?? _lastAccuracyM;
 
     if (_sessionSamples.isNotEmpty) {

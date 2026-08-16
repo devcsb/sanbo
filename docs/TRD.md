@@ -388,6 +388,12 @@ LocationSample 수집
 
 **매핑**: FR-15, 레퍼런스 요약 카드 패리티.
 
+실시간 홈 지표와 미완료 세션 복구 지표도 `trustedLocationGap = 60초`와
+`minMeaningfulSegmentDistanceM = 1.5m`을 동일하게 적용한다. 60초를 넘긴 두 fix를
+직선으로 연결하지 않아 화면상의 누적 거리와 종료 후 롤업이 서로 달라지지 않게 한다.
+OS가 `speed_mps = 0` 또는 값을 생략한 경우에는 인접한 신뢰 fix의 좌표·시간으로
+속도를 파생하고, 필터된 fix의 공급자 속도는 UI에 반영하지 않는다.
+
 ### 4.7.1 DailyActivityQuery
 
 기록 화면의 최근 7일 요약은 세션 목록을 메모리에서 재합산하지 않고

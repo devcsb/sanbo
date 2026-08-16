@@ -81,6 +81,7 @@ class SessionGuard {
       return false;
     }
 
+    final previous = _lastUsableSample;
     _lastUsableSample = sample;
     final anchor = _anchor;
     if (anchor == null) {
@@ -99,8 +100,10 @@ class SessionGuard {
       lon2: sample.longitude,
     );
     final speed = sample.speedMps;
+    final segmentSpeed = _segmentSpeedMps(previous, sample);
     final movingAtWalkingSpeed =
-        speed != null && speed.isFinite && speed >= policy.movingSpeedMps;
+        (speed != null && speed.isFinite && speed >= policy.movingSpeedMps) ||
+        (segmentSpeed != null && segmentSpeed >= policy.movingSpeedMps);
 
     if (distance > radius || movingAtWalkingSpeed) {
       final clearedWarning = _stationaryWarningIssued;
@@ -108,6 +111,19 @@ class SessionGuard {
       return clearedWarning;
     }
     return false;
+  }
+
+  double? _segmentSpeedMps(LocationSample? previous, LocationSample current) {
+    if (previous == null) return null;
+    final dt = current.timestamp.difference(previous.timestamp);
+    if (dt <= Duration.zero || dt > trustedLocationGap) return null;
+    final distance = haversineMeters(
+      lat1: previous.latitude,
+      lon1: previous.longitude,
+      lat2: current.latitude,
+      lon2: current.longitude,
+    );
+    return distance / (dt.inMilliseconds / 1000.0);
   }
 
   SessionGuardDecision evaluate({
