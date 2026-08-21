@@ -16,21 +16,31 @@ void main() {
     tester,
   ) async {
     final days = _days();
-    await _pumpPanel(tester, days, selected: DateTime(2026, 8, 12));
+    await _pumpPanel(tester, days, selected: days[3].date);
 
     expect(find.text('일별 운동량'), findsOneWidget);
     expect(find.text('4.00 km'), findsOneWidget);
     expect(find.text('4:00:00'), findsOneWidget);
     expect(find.text('4회'), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp(r'^8월 12일')), findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp(r'^8월 15일')), findsOneWidget);
+    expect(
+      find.bySemanticsLabel(
+        RegExp('^${days[3].date.month}월 ${days[3].date.day}일'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.bySemanticsLabel(
+        RegExp('^${days.last.date.month}월 ${days.last.date.day}일'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('daily panel navigates weeks but never into the future', (
     tester,
   ) async {
     final days = _days();
-    await _pumpPanel(tester, days, selected: DateTime(2026, 8, 15));
+    await _pumpPanel(tester, days, selected: days.last.date);
 
     final next = tester.widget<IconButton>(
       find.widgetWithIcon(IconButton, Icons.chevron_right_rounded),
@@ -42,16 +52,23 @@ void main() {
     final container = ProviderScope.containerOf(
       tester.element(find.byType(DailyActivityPanel)),
     );
-    expect(container.read(dailyWeekEndProvider), DateTime(2026, 8, 8));
+    expect(
+      container.read(dailyWeekEndProvider),
+      days.last.date.subtract(const Duration(days: 7)),
+    );
   });
 
   testWidgets('selecting a date changes metrics without leaving the panel', (
     tester,
   ) async {
     final days = _days();
-    await _pumpPanel(tester, days, selected: DateTime(2026, 8, 15));
+    await _pumpPanel(tester, days, selected: days.last.date);
 
-    await tester.tap(find.bySemanticsLabel(RegExp(r'^8월 11일')));
+    await tester.tap(
+      find.bySemanticsLabel(
+        RegExp('^${days[2].date.month}월 ${days[2].date.day}일'),
+      ),
+    );
     await tester.pump();
 
     expect(find.text('3.00 km'), findsOneWidget);
@@ -152,10 +169,11 @@ Future<void> _pumpPanel(
 }
 
 List<DailyWalkStats> _days() {
+  final end = localDateOnly(DateTime.now());
   return [
     for (var index = 0; index < 7; index++)
       DailyWalkStats(
-        date: DateTime(2026, 8, 9 + index),
+        date: end.subtract(Duration(days: 6 - index)),
         walkCount: index + 1,
         totalDistanceM: (index + 1) * 1000,
         totalDurationS: (index + 1) * 3600,

@@ -196,6 +196,49 @@ void main() {
   });
 
   test(
+    'a filter-accepted high-speed-invalid sample immediately evaluates duration',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      var now = DateTime(2026, 8, 22, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final startedAt = container
+          .read(sessionControllerProvider)
+          .session!
+          .startedAt;
+      now = startedAt.add(const Duration(hours: 4, minutes: 45));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.5665,
+          longitude: 126.9780,
+          // Accepted by SampleFilter but rejected by the high-speed guard.
+          accuracyM: 100,
+        ),
+      ]);
+      await _pumpGuard();
+
+      expect(
+        container.read(sessionControllerProvider).activeWarning?.kind,
+        SessionWarningKind.duration,
+      );
+    },
+  );
+
+  test(
     'auto-save failure stays recoverable and never claims completion',
     () async {
       final repo = await openTestRepository();
@@ -274,7 +317,7 @@ void main() {
         now = sample.timestamp;
         controller.debugIngestSamples([sample]);
       }
-      await controller.debugEvaluateSessionGuard(now);
+      await _pumpGuard();
 
       var live = container.read(sessionControllerProvider);
       expect(live.activeWarning?.kind, SessionWarningKind.highSpeed);
@@ -295,7 +338,7 @@ void main() {
         now = sample.timestamp;
         controller.debugIngestSamples([sample]);
       }
-      await controller.debugEvaluateSessionGuard(now);
+      await _pumpGuard();
       expect(container.read(sessionControllerProvider).activeWarning, isNull);
     },
   );
@@ -331,7 +374,7 @@ void main() {
         now = sample.timestamp;
         controller.debugIngestSamples([sample]);
       }
-      await controller.debugEvaluateSessionGuard(now);
+      await _pumpGuard();
       await Future<void>.delayed(Duration.zero);
 
       expect(
@@ -368,54 +411,21 @@ void main() {
       now = sample.timestamp;
       controller.debugIngestSamples([sample]);
     }
-    await controller.debugEvaluateSessionGuard(now);
+    await _pumpGuard();
 
-    final ended = await controller.stopFromHighSpeedWarning();
-    expect(ended, isNotNull);
+    final ended = await Future.wait([
+      controller.stopFromHighSpeedWarning(),
+      controller.stopFromHighSpeedWarning(),
+    ]);
+    expect(ended.whereType<WalkSession>(), hasLength(1));
     expect(await repo.listCompleted(), hasLength(1));
     expect(container.read(historyTickProvider), 0);
   });
+}
 
-  test(
-    'duration auto-stop wins when high-speed warning is also active',
-    () async {
-      final repo = await openTestRepository();
-      addTearDown(repo.close);
-      final engine = SyntheticLocationEngine(
-        permission: LocationPermissionState.granted,
-      );
-      var now = DateTime(2026, 8, 21, 9);
-      final container = ProviderContainer(
-        overrides: [
-          walkRepositoryProvider.overrideWithValue(repo),
-          locationEngineProvider.overrideWithValue(engine),
-          sessionClockProvider.overrideWithValue(() => now),
-        ],
-      );
-      addTearDown(container.dispose);
-
-      final controller = container.read(sessionControllerProvider.notifier);
-      await controller.start();
-      final startedAt = container
-          .read(sessionControllerProvider)
-          .session!
-          .startedAt;
-      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
-        now = sample.timestamp;
-        controller.debugIngestSamples([sample]);
-      }
-      await controller.debugEvaluateSessionGuard(now);
-      expect(
-        container.read(sessionControllerProvider).activeWarning?.kind,
-        SessionWarningKind.highSpeed,
-      );
-
-      now = startedAt.add(const Duration(hours: 5));
-      await controller.debugEvaluateSessionGuard(now);
-      expect(container.read(sessionControllerProvider).isTracking, isFalse);
-      expect(await repo.listCompleted(), hasLength(1));
-    },
-  );
+Future<void> _pumpGuard() async {
+  await Future<void>.delayed(Duration.zero);
+  await Future<void>.delayed(Duration.zero);
 }
 
 List<LocationSample> _highSpeedTrace(DateTime start, {required int seconds}) {

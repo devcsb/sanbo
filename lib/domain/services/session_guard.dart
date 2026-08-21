@@ -161,11 +161,21 @@ class SessionGuard {
                 !timestamp.isAfter(receivedUtc);
           }).toList()
           ..sort((a, b) => a.timestamp.toUtc().compareTo(b.timestamp.toUtc()));
-    for (final sample in recentSamples) {
-      // Replaying with the original receipt times retains a recent contiguous
-      // high-speed span while the outer window prevents stale recovery data
-      // from arming a warning.
-      observe(sample, observedAt: sample.timestamp);
+    final lastTrustedIndex = recentSamples.lastIndexWhere(_trustedForHighSpeed);
+    if (lastTrustedIndex == -1 ||
+        !_freshAtReceipt(recentSamples[lastTrustedIndex], receivedUtc)) {
+      return;
+    }
+
+    // Recovery receives saved timestamps rather than their original receipt
+    // times. Verify the last trusted fix against the real recovery time, then
+    // shift every prior receipt time by that same gap so interval durations
+    // remain intact without treating a stale trace as fresh.
+    final receiptOffset = receivedUtc.difference(
+      recentSamples[lastTrustedIndex].timestamp.toUtc(),
+    );
+    for (final sample in recentSamples.take(lastTrustedIndex + 1)) {
+      observe(sample, observedAt: sample.timestamp.toUtc().add(receiptOffset));
     }
   }
 

@@ -731,19 +731,12 @@ void main() {
     );
   });
 
-  test('rebuild uses only fresh recent samples', () {
+  test('rebuild keeps a high-speed trace ending at the 30-second boundary', () {
     final guard = SessionGuard();
-    final observedAt = start.add(const Duration(minutes: 10));
+    final observedAt = start.add(const Duration(seconds: 90));
     final samples = <LocationSample>[
       for (var second = 0; second <= 60; second += 10)
         movingFix(start.add(Duration(seconds: second)), second * 8.0),
-      for (var second = 0; second <= 60; second += 10)
-        movingFix(
-          observedAt
-              .subtract(const Duration(seconds: 30))
-              .add(Duration(seconds: second)),
-          second * 8.0,
-        ),
     ];
 
     guard.rebuildHighSpeedState(
@@ -753,9 +746,31 @@ void main() {
 
     expect(
       guard.evaluate(startedAt: start, now: observedAt).event,
-      SessionGuardEvent.none,
+      SessionGuardEvent.highSpeedWarning,
     );
   });
+
+  test(
+    'rebuild rejects a high-speed trace ending 31 seconds before recovery',
+    () {
+      final guard = SessionGuard();
+      final observedAt = start.add(const Duration(seconds: 91));
+      final samples = <LocationSample>[
+        for (var second = 0; second <= 60; second += 10)
+          movingFix(start.add(Duration(seconds: second)), second * 8.0),
+      ];
+
+      guard.rebuildHighSpeedState(
+        samples: samples.reversed,
+        observedAt: observedAt,
+      );
+
+      expect(
+        guard.evaluate(startedAt: start, now: observedAt).event,
+        SessionGuardEvent.none,
+      );
+    },
+  );
 
   test(
     'returns events in duration, stationary, warning, then high-speed priority',
@@ -788,48 +803,30 @@ void main() {
         SessionGuardEvent.stationaryLimit,
       );
 
-      final deferredHighSpeed = SessionGuard(
+      final durationWinsOverHighSpeed = SessionGuard(
         policy: const SessionGuardPolicy(
-          durationLimit: Duration(days: 1),
+          durationLimit: Duration(seconds: 60),
           stationaryLimit: Duration(days: 1),
-          durationWarningAfter: Duration.zero,
-          stationaryWarningAfter: Duration.zero,
+          durationWarningAfter: Duration(days: 1),
+          stationaryWarningAfter: Duration(days: 1),
         ),
       );
-      deferredHighSpeed.observe(movingFix(start, 0), observedAt: start);
+      durationWinsOverHighSpeed.observe(movingFix(start, 0), observedAt: start);
       for (var second = 10; second <= 60; second += 10) {
         final now = start.add(Duration(seconds: second));
-        deferredHighSpeed.observe(
+        durationWinsOverHighSpeed.observe(
           movingFix(now, second * 8.0),
           observedAt: now,
         );
       }
       expect(
-        deferredHighSpeed
+        durationWinsOverHighSpeed
             .evaluate(
               startedAt: start,
               now: start.add(const Duration(seconds: 60)),
             )
             .event,
-        SessionGuardEvent.durationWarning,
-      );
-      expect(
-        deferredHighSpeed
-            .evaluate(
-              startedAt: start,
-              now: start.add(const Duration(seconds: 60)),
-            )
-            .event,
-        SessionGuardEvent.stationaryWarning,
-      );
-      expect(
-        deferredHighSpeed
-            .evaluate(
-              startedAt: start,
-              now: start.add(const Duration(seconds: 60)),
-            )
-            .event,
-        SessionGuardEvent.highSpeedWarning,
+        SessionGuardEvent.durationLimit,
       );
     },
   );

@@ -218,6 +218,60 @@ void main() {
   });
 
   test(
+    'pending notification tap hook is a no-op before native wiring',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.restorePendingNotificationTap();
+      expect(
+        container.read(sessionControllerProvider),
+        isA<LiveSessionState>(),
+      );
+    },
+  );
+
+  test(
+    'recovery invokes the pending notification tap hook after state restore',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      await repo.startSession(mode: TrackingMode.balanced);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionControllerProvider.overrideWith(_HookSessionController.new),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller =
+          container.read(sessionControllerProvider.notifier)
+              as _HookSessionController;
+      await controller.restoreIfNeeded();
+      expect(controller.restoreCalls, 1);
+      expect(controller.wasRecoveryStateVisible, isTrue);
+    },
+  );
+
+  test(
     'HomeScreen + discard_confirm ship recovery confirm and busy hierarchy',
     () {
       final home = File(
@@ -244,6 +298,17 @@ void main() {
       expect(confirm, contains('기록 지우기'));
     },
   );
+}
+
+class _HookSessionController extends SessionController {
+  int restoreCalls = 0;
+  bool wasRecoveryStateVisible = false;
+
+  @override
+  Future<void> restorePendingNotificationTap() async {
+    restoreCalls++;
+    wasRecoveryStateVisible = state.needsRecovery;
+  }
 }
 
 List<LocationSample> _highSpeedSamples(DateTime start) {

@@ -285,6 +285,7 @@ class SessionController extends Notifier<LiveSessionState> {
             ? '이전에 끝내지 못한 산책이 있어요.'
             : '이전에 끝내지 못한 산책이 있어요. 위치 ${existing.length}개가 저장되어 있습니다.',
       );
+      await restorePendingNotificationTap();
     } catch (_) {
       // A storage failure must be visible: silently treating it as "no active
       // session" can make a user believe an in-progress walk disappeared.
@@ -309,6 +310,9 @@ class SessionController extends Notifier<LiveSessionState> {
       statusMessage: state.statusMessage,
     );
   }
+
+  /// Task 7 attaches pending native notification-tap restoration here.
+  Future<void> restorePendingNotificationTap() async {}
 
   void _startTicker(DateTime startedAt) {
     _ticker?.cancel();
@@ -553,7 +557,9 @@ class SessionController extends Notifier<LiveSessionState> {
     final marked = _liveFilter.apply(probe).last;
     double? segmentSpeed;
     SessionGuardObservation? observation;
+    var acceptedByIncrementalFilter = false;
     if (ordered && !marked.isFilteredOut) {
+      acceptedByIncrementalFilter = true;
       if (prev != null) {
         final dtMs = marked.timestamp.difference(prev.timestamp).inMilliseconds;
         if (dtMs > 0) {
@@ -619,7 +625,7 @@ class SessionController extends Notifier<LiveSessionState> {
     if (clearVisibleStationaryWarning) {
       unawaited(_notifications.cancelWarning());
     }
-    if (observation?.acceptedForHighSpeed == true) {
+    if (acceptedByIncrementalFilter) {
       unawaited(
         _evaluateSessionGuard(_clock(), generation: _sessionGeneration),
       );
