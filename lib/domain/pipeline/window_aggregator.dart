@@ -302,6 +302,7 @@ class WindowAggregator {
       endLat: window.endLat,
       endLon: window.endLon,
       gapReason: window.gapReason,
+      userExclusionId: window.userExclusionId,
       hypothesisLabel: hypothesis.label,
       hypothesisConfidence: hypothesis.confidence,
       evidence: hypothesis.evidence,
