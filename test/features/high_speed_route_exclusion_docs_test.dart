@@ -112,7 +112,7 @@ void main() {
         'required DateTime observedAt,',
         'void rebuildHighSpeedState({',
         'required Iterable<LocationSample> samples,',
-        'void dismissHighSpeedWarning()',
+        'void dismissHighSpeedWarning();',
         'bool get startsFragment => pointIndex == 0;',
         'static List<RoutePlaybackPoint> flatten(RoutePartitionResult route)',
         'static List<LocationSample> playableSamples(',
