@@ -128,6 +128,7 @@ class SessionGuard {
     final previousObservedAt = _lastObservedAt;
     if (previousObservedAt != null &&
         receivedUtc.isBefore(previousObservedAt)) {
+      _interruptHighSpeedContinuity();
       return const SessionGuardObservation();
     }
     _lastObservedAt = receivedUtc;
@@ -136,6 +137,8 @@ class SessionGuard {
         _freshAtReceipt(sample, receivedUtc) && _trustedForHighSpeed(sample);
     if (acceptedForHighSpeed) {
       _observeHighSpeed(sample, receivedUtc);
+    } else {
+      _interruptHighSpeedContinuity();
     }
 
     return SessionGuardObservation(
@@ -198,15 +201,11 @@ class SessionGuard {
     final startAt = previous.timestamp.toUtc();
     final endAt = sample.timestamp.toUtc();
     final interval = endAt.difference(startAt);
-    if (interval <= Duration.zero) {
-      _lowSpeedSince = null;
+    if (interval <= Duration.zero || interval > trustedLocationGap) {
+      _interruptHighSpeedContinuity();
       return;
     }
     _lastHighSpeedSample = sample;
-    if (interval > trustedLocationGap) {
-      _lowSpeedSince = null;
-      return;
-    }
 
     final distance = haversineMeters(
       lat1: previous.latitude,
@@ -216,7 +215,10 @@ class SessionGuard {
     );
     final speed =
         distance / (interval.inMicroseconds / Duration.microsecondsPerSecond);
-    if (!speed.isFinite) return;
+    if (!speed.isFinite) {
+      _interruptHighSpeedContinuity();
+      return;
+    }
 
     _speedSpans.add(
       _TrustedSpeedSpan(startAt: startAt, endAt: endAt, speedMps: speed),
@@ -273,6 +275,12 @@ class SessionGuard {
       _highSpeedPending = false;
       _highSpeedPendingAt = null;
     }
+  }
+
+  void _interruptHighSpeedContinuity() {
+    _speedSpans.clear();
+    _lastHighSpeedSample = null;
+    _lowSpeedSince = null;
   }
 
   bool _observeStationary(LocationSample sample, DateTime receivedAt) {

@@ -556,6 +556,162 @@ void main() {
     expect(gapped.highSpeedArmed, isFalse);
   });
 
+  test('every invalid high-speed input restarts low-speed recovery', () {
+    final invalidInputs =
+        <
+          ({
+            String name,
+            LocationSample sample,
+            DateTime observedAt,
+            DateTime nextAt,
+          })
+        >[
+          (
+            name: 'stale fix',
+            sample: movingFix(start.add(const Duration(seconds: 60)), 480),
+            observedAt: start.add(const Duration(seconds: 91)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'future fix',
+            sample: movingFix(start.add(const Duration(seconds: 97)), 600),
+            observedAt: start.add(const Duration(seconds: 91)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'filtered fix',
+            sample: movingFix(
+              start.add(const Duration(seconds: 91)),
+              581,
+              isFilteredOut: true,
+            ),
+            observedAt: start.add(const Duration(seconds: 91)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'inaccurate fix',
+            sample: movingFix(
+              start.add(const Duration(seconds: 91)),
+              581,
+              accuracy: 81,
+            ),
+            observedAt: start.add(const Duration(seconds: 91)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'invalid coordinate',
+            sample: LocationSample(
+              timestamp: start.add(const Duration(seconds: 91)),
+              latitude: 91,
+              longitude: 126.9780,
+              accuracyM: 5,
+            ),
+            observedAt: start.add(const Duration(seconds: 91)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'timestamp regression',
+            sample: movingFix(start.add(const Duration(seconds: 85)), 575),
+            observedAt: start.add(const Duration(seconds: 91)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'zero interval',
+            sample: movingFix(start.add(const Duration(seconds: 90)), 580),
+            observedAt: start.add(const Duration(seconds: 91)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'observedAt regression',
+            sample: movingFix(start.add(const Duration(seconds: 91)), 581),
+            observedAt: start.add(const Duration(seconds: 89)),
+            nextAt: start.add(const Duration(seconds: 100)),
+          ),
+          (
+            name: 'untrusted GPS gap',
+            sample: movingFix(start.add(const Duration(seconds: 151)), 591),
+            observedAt: start.add(const Duration(seconds: 151)),
+            nextAt: start.add(const Duration(seconds: 160)),
+          ),
+        ];
+
+    for (final invalid in invalidInputs) {
+      final guard = warnedGuard(start);
+      guard.dismissHighSpeedWarning();
+      guard.observe(
+        movingFix(start.add(const Duration(seconds: 70)), 560),
+        observedAt: start.add(const Duration(seconds: 70)),
+      );
+      guard.observe(
+        movingFix(start.add(const Duration(seconds: 90)), 580),
+        observedAt: start.add(const Duration(seconds: 90)),
+      );
+      guard.observe(invalid.sample, observedAt: invalid.observedAt);
+
+      guard.observe(movingFix(invalid.nextAt, 600), observedAt: invalid.nextAt);
+      guard.observe(
+        movingFix(invalid.nextAt.add(const Duration(seconds: 29)), 629),
+        observedAt: invalid.nextAt.add(const Duration(seconds: 29)),
+      );
+      expect(guard.highSpeedArmed, isFalse, reason: invalid.name);
+
+      guard.observe(
+        movingFix(invalid.nextAt.add(const Duration(seconds: 30)), 630),
+        observedAt: invalid.nextAt.add(const Duration(seconds: 30)),
+      );
+      expect(guard.highSpeedArmed, isTrue, reason: invalid.name);
+    }
+  });
+
+  test('an invalid input discards speed spans on both sides of its gap', () {
+    final guard = SessionGuard();
+    guard.observe(movingFix(start, 0), observedAt: start);
+    guard.observe(
+      movingFix(start.add(const Duration(seconds: 30)), 240),
+      observedAt: start.add(const Duration(seconds: 30)),
+    );
+    guard.observe(
+      movingFix(
+        start.add(const Duration(seconds: 31)),
+        248,
+        isFilteredOut: true,
+      ),
+      observedAt: start.add(const Duration(seconds: 31)),
+    );
+    guard.observe(
+      movingFix(start.add(const Duration(seconds: 60)), 480),
+      observedAt: start.add(const Duration(seconds: 60)),
+    );
+    guard.observe(
+      movingFix(start.add(const Duration(seconds: 90)), 720),
+      observedAt: start.add(const Duration(seconds: 90)),
+    );
+
+    expect(
+      guard
+          .evaluate(
+            startedAt: start,
+            now: start.add(const Duration(seconds: 90)),
+          )
+          .event,
+      SessionGuardEvent.none,
+    );
+
+    guard.observe(
+      movingFix(start.add(const Duration(seconds: 120)), 960),
+      observedAt: start.add(const Duration(seconds: 120)),
+    );
+    expect(
+      guard
+          .evaluate(
+            startedAt: start,
+            now: start.add(const Duration(seconds: 120)),
+          )
+          .event,
+      SessionGuardEvent.highSpeedWarning,
+    );
+  });
+
   test('reset starts a new high-speed warning state machine', () {
     final guard = warnedGuard(start);
     guard.reset();
