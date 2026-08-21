@@ -49,7 +49,7 @@ class SessionPipeline {
       exclusions: const [],
       endedAt: endedAt,
     );
-    final segments = segmentMerger.merge(windows);
+    final segments = segmentMerger.merge(windows, sessionId: session.id);
     return SessionProcessResult(
       filteredSamples: markedSamples,
       fragments: partition.fragments,

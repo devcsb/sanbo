@@ -14,6 +14,7 @@ class ActivitySegment {
     required this.durationS,
     required this.userConfirmed,
     required this.windows,
+    this.sessionId,
     this.avgSpeedMps = 0,
     this.quality = WindowQuality.medium,
   });
@@ -35,6 +36,10 @@ class ActivitySegment {
 
   /// Underlying minute windows (ordered).
   final List<MinuteWindow> windows;
+
+  /// Source session when the caller knows it. Repository commands require it
+  /// so a timestamp-equivalent segment cannot edit another walk.
+  final String? sessionId;
 
   String? get userExclusionId =>
       windows.isEmpty ? null : windows.first.userExclusionId;
@@ -58,7 +63,7 @@ class SegmentMerger {
 
   final double minConfidence;
 
-  List<ActivitySegment> merge(List<MinuteWindow> windows) {
+  List<ActivitySegment> merge(List<MinuteWindow> windows, {String? sessionId}) {
     if (windows.isEmpty) return const [];
 
     final sorted = [...windows]
@@ -73,11 +78,11 @@ class SegmentMerger {
       if (_canMerge(prev, cur)) {
         bucket.add(cur);
       } else {
-        segments.add(_toSegment(bucket));
+        segments.add(_toSegment(bucket, sessionId));
         bucket = [cur];
       }
     }
-    segments.add(_toSegment(bucket));
+    segments.add(_toSegment(bucket, sessionId));
     return segments;
   }
 
@@ -147,7 +152,7 @@ class SegmentMerger {
     };
   }
 
-  ActivitySegment _toSegment(List<MinuteWindow> bucket) {
+  ActivitySegment _toSegment(List<MinuteWindow> bucket, String? sessionId) {
     assert(bucket.isNotEmpty);
     final first = bucket.first;
     final last = bucket.last;
@@ -185,6 +190,7 @@ class SegmentMerger {
       avgSpeedMps: avgSpeed,
       quality: worstQuality,
       windows: List.unmodifiable(bucket),
+      sessionId: sessionId,
     );
   }
 

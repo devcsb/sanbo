@@ -24,7 +24,7 @@ class SessionExport {
     );
     final kmh = ((session.avgSpeedMps ?? 0) * 3.6).toStringAsFixed(1);
     final pace = pacePerKmLabel(session.avgSpeedMps);
-    final segments = SegmentMerger().merge(windows);
+    final segments = SegmentMerger().merge(windows, sessionId: session.id);
     final buf = StringBuffer()
       ..writeln('산보 산책 요약')
       ..writeln('시작: $date')

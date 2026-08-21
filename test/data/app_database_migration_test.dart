@@ -10,6 +10,21 @@ import '../helpers/route_exclusion_fixture.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('fresh v4 database passes quick and foreign key checks', () async {
+    ensureSqfliteFfi();
+    final path =
+        '${Directory.systemTemp.path}/sanbo_v4_fresh_${DateTime.now().microsecondsSinceEpoch}.db';
+    addTearDown(() => databaseFactory.deleteDatabase(path));
+
+    final db = await openAppDatabase(path: path);
+    addTearDown(db.close);
+
+    expect(await db.rawQuery('PRAGMA quick_check(1)'), [
+      {'quick_check': 'ok'},
+    ]);
+    expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+  });
+
   test('schema v1 upgrades with places and place_id intact', () async {
     ensureSqfliteFfi();
     final path =
@@ -228,6 +243,9 @@ CREATE TABLE minute_windows (
         )).map((row) => row['is_filtered_out']),
         [0, 1],
       );
+      expect(await db.rawQuery('PRAGMA quick_check(1)'), [
+        {'quick_check': 'ok'},
+      ]);
       expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
     },
   );

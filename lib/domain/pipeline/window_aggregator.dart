@@ -163,7 +163,12 @@ class WindowAggregator {
     DateTime sessionEnd,
   ) {
     final result = <DateTime, String>{};
-    for (final exclusion in exclusions) {
+    final ordered = [...exclusions]
+      ..sort((a, b) {
+        final byStart = a.startAt.compareTo(b.startAt);
+        return byStart != 0 ? byStart : a.id.compareTo(b.id);
+      });
+    for (final exclusion in ordered) {
       final start = _later(exclusion.startAt, sessionStart);
       final end = _earlier(exclusion.endAt, sessionEnd);
       if (!start.isBefore(end)) continue;
@@ -173,10 +178,10 @@ class WindowAggregator {
         final windowEnd = cursor.add(const Duration(minutes: 1));
         if (exclusion.overlaps(cursor, windowEnd)) {
           final prior = result[cursor];
-          if (prior != null && prior != exclusion.id) {
-            throw ArgumentError('하나의 분에 겹치는 제외 범위가 있습니다');
-          }
-          result[cursor] = exclusion.id;
+          // A minute can contain multiple non-overlapping exclusions. Keep
+          // the earliest range's ID as a stable representative for the
+          // single `user_exclusion_id` column.
+          if (prior == null) result[cursor] = exclusion.id;
         }
         cursor = windowEnd;
       }

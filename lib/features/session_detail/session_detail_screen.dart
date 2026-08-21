@@ -36,7 +36,7 @@ final sessionDetailProvider = FutureProvider.autoDispose
       ]);
       final samples = loaded[0] as List<LocationSample>;
       var windows = loaded[1] as List<MinuteWindow>;
-      var segments = SegmentMerger().merge(windows);
+      var segments = SegmentMerger().merge(windows, sessionId: id);
 
       // Reuse only places the user previously named. This is a local DB
       // lookup; opening a detail never triggers geocoding or network work.
@@ -67,7 +67,7 @@ final sessionDetailProvider = FutureProvider.autoDispose
       }
       if (attachedKnownPlace) {
         windows = await repo.getWindows(id);
-        segments = SegmentMerger().merge(windows);
+        segments = SegmentMerger().merge(windows, sessionId: id);
       }
       return SessionDetailData(
         session: session,
@@ -203,7 +203,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
           final points = _pointCache;
           final segments = data.segments.isNotEmpty
               ? data.segments
-              : SegmentMerger().merge(data.windows);
+              : SegmentMerger().merge(data.windows, sessionId: session.id);
           final playbackIndex = playbackSamples.isEmpty
               ? 0
               : _playbackIndex < 0

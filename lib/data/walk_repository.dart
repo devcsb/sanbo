@@ -327,6 +327,13 @@ ORDER BY day ASC
   }) {
     return _db.transaction((txn) async {
       final snapshot = await _loadRouteEditSnapshot(txn, sessionId);
+      if (segment.sessionId != sessionId) {
+        throw StateError('다른 산책의 구간은 제외할 수 없습니다');
+      }
+      if (segment.durationS <= 0 ||
+          segment.windows.any((window) => window.durationS <= 0)) {
+        throw StateError('제외할 구간 길이가 올바르지 않습니다');
+      }
       final candidate = RouteExclusion(
         id: _uuid.v4(),
         sessionId: sessionId,

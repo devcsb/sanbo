@@ -32,6 +32,15 @@ MinuteWindow _w({
 }
 
 void main() {
+  test('propagates an explicit source session id to every segment', () {
+    final start = DateTime(2026, 8, 21, 9);
+    final segments = SegmentMerger().merge([
+      _w(start: start, label: ActivityLabel.walkSteady),
+    ], sessionId: 'walk-1');
+
+    expect(segments.single.sessionId, 'walk-1');
+  });
+
   test('merges consecutive same-label walk minutes into one segment', () {
     final t0 = DateTime(2026, 7, 12, 14, 0);
     final windows = [

@@ -2,10 +2,53 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
+import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/pipeline/route_partitioner.dart';
 import 'package:sanbo/domain/pipeline/window_aggregator.dart';
 
 void main() {
+  test('uses the first touching exclusion id for a shared minute', () {
+    final start = DateTime.utc(2026, 8, 21);
+    final sample = LocationSample(
+      timestamp: start,
+      latitude: 37.5,
+      longitude: 127,
+      accuracyM: 5,
+    );
+    final exclusions = [
+      RouteExclusion(
+        id: 'first',
+        sessionId: 'walk-1',
+        startAt: start.add(const Duration(seconds: 10)),
+        endAt: start.add(const Duration(seconds: 30)),
+        reason: RouteExclusionReason.vehicle,
+        createdAt: start,
+      ),
+      RouteExclusion(
+        id: 'second',
+        sessionId: 'walk-1',
+        startAt: start.add(const Duration(seconds: 30)),
+        endAt: start.add(const Duration(minutes: 1)),
+        reason: RouteExclusionReason.vehicle,
+        createdAt: start,
+      ),
+    ];
+    final partition = RoutePartitioner.partition(
+      samples: [sample],
+      exclusions: exclusions,
+    );
+
+    final windows = WindowAggregator().aggregate(
+      partition: partition,
+      rawSamples: [sample],
+      exclusions: exclusions,
+      sessionStart: start,
+      sessionEnd: start.add(const Duration(minutes: 1)),
+    );
+
+    expect(windows.single.userExclusionId, 'first');
+  });
+
   test('buckets samples into minute windows with walk hypothesis', () {
     final start = DateTime(2026, 7, 12, 14, 0, 10);
     final samples = <LocationSample>[];

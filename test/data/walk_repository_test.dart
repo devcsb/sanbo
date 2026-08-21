@@ -207,6 +207,8 @@ void main() {
       final segment = _segment(
         start: fixture.session.startedAt.subtract(const Duration(minutes: 1)),
         endInclusive: fixture.session.endedAt!,
+        durationS: 120,
+        sessionId: fixture.session.id,
         windows: fixture.windows,
       );
 
@@ -231,6 +233,8 @@ void main() {
       final offsetEquivalent = _segment(
         start: DateTime.parse('2026-08-20T20:01:00-04:00'),
         endInclusive: DateTime.parse('2026-08-20T20:01:00-04:00'),
+        durationS: 60,
+        sessionId: fixture.session.id,
         windows: [lastWindow],
       );
 
@@ -291,6 +295,8 @@ void main() {
       final firstWindow = (await repo.getWindows(session.id)).first;
       final segment = _segment(
         start: DateTime.parse('2026-11-01T01:00:00-04:00'),
+        durationS: 60,
+        sessionId: session.id,
         windows: [firstWindow],
       );
 
@@ -301,6 +307,92 @@ void main() {
 
       expect(exclusion.startAt, start.toUtc());
       expect(exclusion.endAt, start.toUtc().add(const Duration(minutes: 1)));
+    },
+  );
+
+  test(
+    'touching exclusions in one minute keep the first id then restore to the second',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      final window = fixture.windows.first;
+      final firstSegment = _segment(
+        start: window.windowStart.add(const Duration(seconds: 10)),
+        endInclusive: window.windowStart.subtract(const Duration(seconds: 30)),
+        durationS: 20,
+        sessionId: fixture.session.id,
+        windows: [window],
+      );
+      final secondSegment = _segment(
+        start: window.windowStart.add(const Duration(seconds: 30)),
+        endInclusive: window.windowStart,
+        durationS: 30,
+        sessionId: fixture.session.id,
+        windows: [window],
+      );
+
+      final first = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: firstSegment,
+      );
+      final second = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: secondSegment,
+      );
+
+      expect(
+        (await repo.getWindows(fixture.session.id)).first.userExclusionId,
+        first.id,
+      );
+      await repo.restoreRouteExclusion(
+        sessionId: fixture.session.id,
+        exclusionId: first.id,
+      );
+      expect(
+        (await repo.getWindows(fixture.session.id)).first.userExclusionId,
+        second.id,
+      );
+    },
+  );
+
+  test(
+    'route exclusion rejects a segment from another session at the same instant',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final target = await seedCompletedTwoMinuteWalk(repo);
+      final foreign = await seedCompletedTwoMinuteWalk(repo);
+
+      await expectLater(
+        repo.excludeRouteSegment(
+          sessionId: target.session.id,
+          segment: foreign.segments.last,
+        ),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
+
+  test(
+    'route exclusion rejects a segment with zero declared duration',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+
+      await expectLater(
+        repo.excludeRouteSegment(
+          sessionId: fixture.session.id,
+          segment: _segment(
+            start: fixture.windows.first.windowStart,
+            durationS: 0,
+            sessionId: fixture.session.id,
+            windows: [fixture.windows.first],
+          ),
+        ),
+        throwsA(isA<StateError>()),
+      );
     },
   );
 
@@ -705,6 +797,8 @@ Future<void> _completeSession(
 ActivitySegment _segment({
   required DateTime start,
   DateTime? endInclusive,
+  int durationS = 0,
+  String? sessionId,
   required List<MinuteWindow> windows,
 }) => ActivitySegment(
   start: start,
@@ -713,9 +807,10 @@ ActivitySegment _segment({
   confidenceMin: 0,
   distanceM: 0,
   sampleCount: 0,
-  durationS: 0,
+  durationS: durationS,
   userConfirmed: false,
   windows: windows,
+  sessionId: sessionId,
 );
 
 List<String> _sampleSnapshot(List<LocationSample> samples) => samples

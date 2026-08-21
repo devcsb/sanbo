@@ -72,7 +72,7 @@ Future<CompletedRouteFixture> seedCompletedTwoMinuteWalk(
     session: (await repo.getSession(session.id)) ?? completed,
     samples: await repo.getSamples(session.id),
     windows: windows,
-    segments: pipeline.segmentMerger.merge(windows),
+    segments: pipeline.segmentMerger.merge(windows, sessionId: session.id),
   );
 }
 
