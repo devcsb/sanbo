@@ -1165,13 +1165,23 @@ ORDER BY w.window_start ASC
           if (exclusion == null || exclusion['session_id'] != sessionId) {
             throw const FormatException('구간 제외 참조가 올바르지 않습니다');
           }
+          final session = importedSessionRows[sessionId]!;
+          final sessionStart = _requiredDate(session, 'started_at').toUtc();
+          final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
           final exclusionStart = _requiredDate(exclusion, 'start_at').toUtc();
           final exclusionEnd = _requiredDate(exclusion, 'end_at').toUtc();
-          final windowEnd = windowStart.toUtc().add(
-            Duration(seconds: durationS),
-          );
-          if (windowStart.toUtc().isBefore(exclusionStart) ||
-              windowEnd.isAfter(exclusionEnd)) {
+          final minuteStart = windowStart.toUtc();
+          final minuteEnd = minuteStart.add(const Duration(minutes: 1));
+          final actualWindowStart = minuteStart.isAfter(sessionStart)
+              ? minuteStart
+              : sessionStart;
+          final actualWindowEnd = minuteEnd.isBefore(sessionEnd)
+              ? minuteEnd
+              : sessionEnd;
+          final overlaps =
+              actualWindowStart.isBefore(exclusionEnd) &&
+              exclusionStart.isBefore(actualWindowEnd);
+          if (!overlaps) {
             throw const FormatException('제외 범위 밖의 구간이 있습니다');
           }
         }

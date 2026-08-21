@@ -962,7 +962,7 @@ and minute windows including user_exclusion_id
 
 ### 9.3 전체 백업 포맷
 
-전체 백업 출력의 리터럴 버전은 `backup_schema_version: 2`다. 입력은 v1과 v2를 지원하며 v1을 읽을 때 `route_exclusions`는 빈 목록으로, `minute_windows.user_exclusion_id`는 null로 정규화한다. v2 출력은 `sessions`, `location_samples`, `minute_windows`, `places`, `route_exclusions`를 담고 원시 샘플의 `is_filtered_out`과 분 기록의 `user_exclusion_id`를 보존한다. 자동 증가 샘플/윈도우 ID는 내보내지 않고 복원 시 새로 부여하며, 장소와 제외 ID 참조는 백업 내부에서 매핑한다. 진행 중 세션은 복제 복구를 막기 위해 제외한다.
+전체 백업 출력의 리터럴 버전은 `backup_schema_version: 2`다. 입력은 v1과 v2를 지원하며 v1을 읽을 때 `route_exclusions`는 빈 목록으로, `minute_windows.user_exclusion_id`는 null로 정규화한다. v2 출력은 `sessions`, `location_samples`, `minute_windows`, `places`, `route_exclusions`를 담고 원시 샘플의 `is_filtered_out`과 분 기록의 `user_exclusion_id`를 보존한다. 가져올 때 분 기록의 실제 범위는 `[max(windowStart, session.startedAt), min(windowStart + 1분, session.endedAt))`로 계산하며, 같은 세션의 대표 제외 ID가 이 범위와 겹쳐야 한다. 같은 분의 비중첩 제외가 여러 개인 기존 백업은 겹치는 대표 ID 하나를 유지할 수 있다. 자동 증가 샘플/윈도우 ID는 내보내지 않고 복원 시 새로 부여하며, 장소와 제외 ID 참조는 백업 내부에서 매핑한다. 진행 중 세션은 복제 복구를 막기 위해 제외한다.
 
 ---
 

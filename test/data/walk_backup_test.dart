@@ -3,11 +3,13 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/data/app_database.dart';
+import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/services/app_backup.dart';
+import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../helpers/test_db.dart';
@@ -355,6 +357,101 @@ void main() {
     },
   );
 
+  test('first partial minute exclusion exports imports and restores', () async {
+    final source = await openTestRepository();
+    final target = await openTestRepository();
+    addTearDown(source.close);
+    addTearDown(target.close);
+    final fixture = await _seedCompletedPartialMinuteWalk(source);
+    final exclusion = await source.excludeRouteSegment(
+      sessionId: fixture.session.id,
+      segment: fixture.segments.single,
+    );
+
+    final result = await target.importBackupJson(
+      await source.createBackupJson(),
+    );
+
+    expect(result.importedSessions, 1);
+    expect(
+      (await target.getRouteExclusions(fixture.session.id)).single.id,
+      exclusion.id,
+    );
+    expect(
+      (await target.getWindows(fixture.session.id)).single.userExclusionId,
+      exclusion.id,
+    );
+
+    await target.restoreRouteExclusion(
+      sessionId: fixture.session.id,
+      exclusionId: exclusion.id,
+    );
+
+    expect(await target.getRouteExclusions(fixture.session.id), isEmpty);
+    expect((await target.getSession(fixture.session.id))!.durationS, 10);
+    expect(
+      (await target.getWindows(fixture.session.id)).single.userExclusionId,
+      isNull,
+    );
+  });
+
+  test('same-minute disjoint exclusions export and import together', () async {
+    final path =
+        '${Directory.systemTemp.path}/sanbo_disjoint_exclusions_${DateTime.now().microsecondsSinceEpoch}.db';
+    final source = await openTestRepository(path: path);
+    final target = await openTestRepository();
+    addTearDown(source.close);
+    addTearDown(target.close);
+    final fixture = await seedCompletedTwoMinuteWalk(source);
+    final minute = fixture.windows.first.windowStart.toUtc();
+    final legacyDb = await databaseFactory.openDatabase(
+      path,
+      options: OpenDatabaseOptions(singleInstance: false),
+    );
+    addTearDown(legacyDb.close);
+    await legacyDb.insert('route_exclusions', {
+      'id': 'same-minute-a',
+      'session_id': fixture.session.id,
+      'start_at': minute.add(const Duration(seconds: 10)).toIso8601String(),
+      'end_at': minute.add(const Duration(seconds: 20)).toIso8601String(),
+      'reason': 'vehicle',
+      'created_at': minute.toIso8601String(),
+    });
+    await legacyDb.insert('route_exclusions', {
+      'id': 'same-minute-b',
+      'session_id': fixture.session.id,
+      'start_at': minute.add(const Duration(seconds: 30)).toIso8601String(),
+      'end_at': minute.add(const Duration(seconds: 40)).toIso8601String(),
+      'reason': 'vehicle',
+      'created_at': minute.add(const Duration(seconds: 1)).toIso8601String(),
+    });
+    await legacyDb.update(
+      'minute_windows',
+      {'user_exclusion_id': 'same-minute-a'},
+      where: 'session_id = ? AND window_start = ?',
+      whereArgs: [
+        fixture.session.id,
+        fixture.windows.first.windowStart.toIso8601String(),
+      ],
+    );
+
+    final result = await target.importBackupJson(
+      await source.createBackupJson(),
+    );
+
+    expect(result.importedSessions, 1);
+    expect(
+      (await target.getRouteExclusions(
+        fixture.session.id,
+      )).map((item) => item.id),
+      ['same-minute-a', 'same-minute-b'],
+    );
+    expect(
+      (await target.getWindows(fixture.session.id)).first.userExclusionId,
+      'same-minute-a',
+    );
+  });
+
   test('corrupt v2 exclusions reject the full import', () async {
     final source = await openTestRepository();
     addTearDown(source.close);
@@ -484,4 +581,63 @@ String _downgradeFixtureToBackupV1(String raw) {
     (row as Map<String, dynamic>).remove('user_exclusion_id');
   }
   return jsonEncode(backup);
+}
+
+Future<CompletedRouteFixture> _seedCompletedPartialMinuteWalk(
+  WalkRepository repo,
+) async {
+  final minute = DateTime.utc(2026, 8, 21);
+  final start = minute.add(const Duration(seconds: 50));
+  final end = minute.add(const Duration(minutes: 1));
+  final session = await repo.startSession(startedAt: start);
+  final samples = [
+    LocationSample(
+      timestamp: start,
+      latitude: 37.5,
+      longitude: 127,
+      accuracyM: 5,
+    ),
+    LocationSample(
+      timestamp: start.add(const Duration(seconds: 5)),
+      latitude: 37.5001,
+      longitude: 127,
+      accuracyM: 5,
+    ),
+    LocationSample(
+      timestamp: end,
+      latitude: 37.5002,
+      longitude: 127,
+      accuracyM: 5,
+    ),
+  ];
+  final pipeline = SessionPipeline();
+  final result = pipeline.process(
+    session: session,
+    rawSamples: samples,
+    endedAt: end,
+  );
+  final completed = await repo.finalizeSession(
+    session: session,
+    samples: result.filteredSamples,
+    windows: result.windows,
+    endedAt: end,
+    totalDistanceM: result.metrics.totalDistanceM,
+    durationS: result.metrics.durationS,
+    movingTimeS: result.metrics.movingTimeS,
+    stationaryTimeS: result.metrics.stationaryTimeS,
+    avgSpeedMps: result.metrics.avgSpeedMps,
+    validSampleCount: result.metrics.validSampleCount,
+  );
+  final windows = await repo.getWindows(session.id);
+  return (
+    session: completed,
+    samples: await repo.getSamples(session.id),
+    windows: windows,
+    segments: pipeline.segmentMerger.merge(
+      windows,
+      sessionId: session.id,
+      sessionStart: completed.startedAt,
+      sessionEnd: completed.endedAt,
+    ),
+  );
 }
