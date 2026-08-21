@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:sanbo/app.dart';
 import 'package:sanbo/app/router.dart';
 import 'package:sanbo/data/walk_repository.dart';
@@ -14,6 +15,7 @@ import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sanbo/features/history/history_providers.dart';
 import 'package:sanbo/features/home/session_controller.dart';
+import 'package:sanbo/features/home/home_screen.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/synthetic_location_engine.dart';
 import 'package:sanbo/platform/notifications/session_notification_service.dart';
@@ -24,7 +26,12 @@ class _FakeSessionNotifications implements SessionNotificationService {
   final warnings = <String>[];
   final completions = <String>[];
   int cancelCalls = 0;
-  final _tapController = StreamController<SessionNotificationTap>.broadcast();
+  int tapDeliveries = 0;
+  SessionNotificationTap? _pendingColdTap;
+  late final _tapController =
+      StreamController<SessionNotificationTap>.broadcast(
+        onListen: _flushPendingColdTap,
+      );
 
   @override
   Future<void> cancel({required SessionWarningKind kind}) async {
@@ -53,10 +60,23 @@ class _FakeSessionNotifications implements SessionNotificationService {
   }
 
   @override
-  Stream<SessionNotificationTap> get taps => _tapController.stream;
+  Stream<SessionNotificationTap> get taps => _tapController.stream.map((tap) {
+    tapDeliveries++;
+    return tap;
+  });
 
   void emitTap(SessionWarningKind kind) {
     _tapController.add(SessionNotificationTap(kind));
+  }
+
+  void emitColdTap(SessionWarningKind kind) {
+    _pendingColdTap = SessionNotificationTap(kind);
+  }
+
+  void _flushPendingColdTap() {
+    final tap = _pendingColdTap;
+    _pendingColdTap = null;
+    if (tap != null) _tapController.add(tap);
   }
 
   void dispose() {
@@ -522,6 +542,201 @@ void main() {
 
       expect(container.read(sessionControllerProvider).activeWarning, isNull);
     },
+  );
+
+  test('cold recovered high-speed stop finalizes once', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final session = await repo.startSession(mode: TrackingMode.balanced);
+    await repo.insertSamples(
+      session.id,
+      _highSpeedTrace(session.startedAt, seconds: 60),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+
+    controller.handleNotificationTap(
+      const SessionNotificationTap(SessionWarningKind.highSpeed),
+    );
+    await controller.restoreIfNeeded();
+
+    expect(controller.state.isTracking, isFalse);
+    expect(controller.state.activeWarning?.kind, SessionWarningKind.highSpeed);
+    expect(await controller.stopFromHighSpeedWarning(), isNotNull);
+    expect(await controller.stopFromHighSpeedWarning(), isNull);
+    expect(await repo.getActiveSession(), isNull);
+    expect(await repo.listCompleted(), hasLength(1));
+  });
+
+  test(
+    'cold recovered high-speed continue preserves warning on resume failure',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final session = await repo.startSession(mode: TrackingMode.balanced);
+      await repo.insertSamples(
+        session.id,
+        _highSpeedTrace(session.startedAt, seconds: 60),
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.deniedForever,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+
+      controller.handleNotificationTap(
+        const SessionNotificationTap(SessionWarningKind.highSpeed),
+      );
+      await controller.restoreIfNeeded();
+      await controller.continueAfterWarning();
+
+      expect(controller.state.isTracking, isFalse);
+      expect(controller.state.needsRecovery, isTrue);
+      expect(
+        controller.state.activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+      expect(controller.state.errorMessage, contains('위치 권한'));
+    },
+  );
+
+  testWidgets(
+    'cold high-speed tap routes home, shows recovered warning, and resumes once',
+    (tester) async {
+      final fixture = await _coldWarningFixture(tester);
+      addTearDown(fixture.dispose);
+
+      expect(fixture.router.routeInformationProvider.value.uri.path, '/');
+      expect(fixture.notifications.tapDeliveries, 1);
+      expect(find.text('산책 기록을 계속할까요?'), findsOneWidget);
+      expect(find.widgetWithText(TextButton, '계속 기록'), findsOneWidget);
+      expect(find.widgetWithText(FilledButton, '기록 종료'), findsOneWidget);
+
+      final continueButton = find.widgetWithText(TextButton, '계속 기록');
+      final continueAction = tester
+          .widget<TextButton>(continueButton)
+          .onPressed!;
+      await tester.runAsync(() async {
+        continueAction.call();
+        for (var attempt = 0; attempt < 20; attempt++) {
+          if (fixture.controller.state.isTracking) return;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        fail('Recovered session did not resume tracking.');
+      });
+      await tester.pump();
+
+      final live = fixture.container.read(sessionControllerProvider);
+      expect(live.isTracking, isTrue);
+      expect(live.activeWarning, isNull);
+      expect(fixture.notifications.tapDeliveries, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('cold recovered high-speed warning exposes one stop action', (
+    tester,
+  ) async {
+    final fixture = await _coldWarningFixture(tester);
+    addTearDown(fixture.dispose);
+
+    final stop = find.widgetWithText(FilledButton, '기록 종료');
+    expect(tester.widget<FilledButton>(stop).onPressed, isNotNull);
+
+    expect(
+      fixture.container.read(sessionControllerProvider).activeWarning,
+      isNotNull,
+    );
+    expect(fixture.notifications.tapDeliveries, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+}
+
+class _ColdWarningFixture {
+  const _ColdWarningFixture({
+    required this.repo,
+    required this.container,
+    required this.controller,
+    required this.notifications,
+    required this.router,
+  });
+
+  final WalkRepository repo;
+  final ProviderContainer container;
+  final SessionController controller;
+  final _FakeSessionNotifications notifications;
+  final GoRouter router;
+
+  Future<void> dispose() async {
+    router.dispose();
+    container.dispose();
+    notifications.dispose();
+    await repo.close();
+  }
+}
+
+Future<_ColdWarningFixture> _coldWarningFixture(WidgetTester tester) async {
+  final repo = (await tester.runAsync<WalkRepository>(openTestRepository))!;
+  final session = (await tester.runAsync<WalkSession>(
+    () => repo.startSession(mode: TrackingMode.balanced),
+  ))!;
+  await tester.runAsync(
+    () => repo.insertSamples(
+      session.id,
+      _highSpeedTrace(session.startedAt, seconds: 60),
+    ),
+  );
+  final notifications = _FakeSessionNotifications();
+  notifications.emitColdTap(SessionWarningKind.highSpeed);
+  final router = GoRouter(
+    initialLocation: '/settings',
+    routes: [
+      GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
+      GoRoute(path: '/settings', builder: (context, state) => const Scaffold()),
+    ],
+  );
+  final container = ProviderContainer(
+    overrides: [
+      walkRepositoryProvider.overrideWithValue(repo),
+      locationEngineProvider.overrideWithValue(
+        SyntheticLocationEngine(permission: LocationPermissionState.granted),
+      ),
+      sessionNotificationServiceProvider.overrideWithValue(notifications),
+      routerProvider.overrideWithValue(router),
+    ],
+  );
+  final controller = container.read(sessionControllerProvider.notifier);
+
+  await tester.pumpWidget(
+    UncontrolledProviderScope(container: container, child: const SanboApp()),
+  );
+  await tester.pump();
+  await tester.runAsync(controller.restoreIfNeeded);
+  await tester.pump();
+
+  return _ColdWarningFixture(
+    repo: repo,
+    container: container,
+    controller: controller,
+    notifications: notifications,
+    router: router,
   );
 }
 

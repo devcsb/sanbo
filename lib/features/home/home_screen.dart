@@ -118,14 +118,19 @@ class HomeScreen extends ConsumerWidget {
                               .clearNotice(),
                         ),
                       ],
-                      if (tracking && live.activeWarning != null) ...[
+                      if ((tracking || recovery) &&
+                          live.activeWarning != null) ...[
                         const SizedBox(height: 14),
                         _SessionWarningBanner(
                           warning: live.activeWarning!,
                           busy: busy,
-                          onContinue: () => ref
-                              .read(sessionControllerProvider.notifier)
-                              .continueAfterWarning(),
+                          onContinue: () {
+                            unawaited(
+                              ref
+                                  .read(sessionControllerProvider.notifier)
+                                  .continueAfterWarning(),
+                            );
+                          },
                           onStop: () => ref
                               .read(sessionControllerProvider.notifier)
                               .stopFromHighSpeedWarning(),

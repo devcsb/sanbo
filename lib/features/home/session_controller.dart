@@ -776,9 +776,20 @@ class SessionController extends Notifier<LiveSessionState> {
     }
   }
 
-  void continueAfterWarning() {
+  Future<void> continueAfterWarning() async {
     final warning = state.activeWarning;
-    if (!state.isTracking || warning == null) return;
+    if (warning == null) return;
+    if (warning.kind == SessionWarningKind.highSpeed &&
+        !state.isTracking &&
+        state.needsRecovery &&
+        state.session != null) {
+      await start(mode: state.session!.trackingMode);
+      if (state.isTracking) {
+        await _notifications.cancel(kind: warning.kind);
+      }
+      return;
+    }
+    if (!state.isTracking) return;
     switch (warning.kind) {
       case SessionWarningKind.stationary:
         _sessionGuard.continueStationaryTracking(_clock());
@@ -790,7 +801,7 @@ class SessionController extends Notifier<LiveSessionState> {
         return;
     }
     state = state.copyWith(clearActiveWarning: true, statusMessage: '기록 중');
-    unawaited(_notifications.cancel(kind: warning.kind));
+    await _notifications.cancel(kind: warning.kind);
   }
 
   Future<WalkSession?> stopFromHighSpeedWarning() async {
