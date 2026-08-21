@@ -366,6 +366,45 @@ void main() {
     expect(live.liveDistanceM, lessThan(100));
   });
 
+  test(
+    'live route keeps micro-jitter samples without adding distance',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final start = controller.state.session!.startedAt;
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: start,
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+        LocationSample(
+          timestamp: start.add(const Duration(seconds: 10)),
+          latitude: 37.5,
+          longitude: 127.00001,
+          accuracyM: 5,
+        ),
+      ]);
+
+      expect(controller.state.validSampleCount, 2);
+      expect(controller.state.liveDistanceM, 0);
+    },
+  );
+
   test('live distance does not bridge a long GPS gap', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
@@ -462,6 +501,52 @@ void main() {
     expect(live.liveDistanceM, greaterThan(100));
     expect(live.liveDistanceM, lessThan(300));
   });
+
+  test(
+    'recovery ending on a minute boundary keeps the endpoint sample',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final minute = DateTime.utc(2026, 8, 21);
+      final start = minute.add(const Duration(seconds: 50));
+      final end = minute.add(const Duration(minutes: 1));
+      final session = await repo.startSession(startedAt: start);
+      await repo.insertSamples(session.id, [
+        LocationSample(
+          timestamp: start,
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+        LocationSample(
+          timestamp: end,
+          latitude: 37.5002,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+      ]);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => end),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.restoreIfNeeded();
+
+      final completed = await controller.stop();
+
+      expect(completed, isNotNull);
+      expect(completed!.validSampleCount, 2);
+      expect((await repo.getWindows(session.id)).single.sampleCount, 2);
+    },
+  );
 
   test(
     'background fixes are checkpointed without rebuilding live UI state',

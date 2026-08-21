@@ -69,6 +69,10 @@
 삼아 샘플 시각 구간과 겹치는 부분만 합산한다. 합계가 60초에 도달하면
 `highSpeedWarning`을 한 번 반환하고 고속 경고 latch를 잠근다.
 
+라이브 `SampleFilter`가 거부한 fix는 `SessionGuard.interruptHighSpeedContinuity()`로 기존
+고속 누적을 끊는다. 복구 시에는 저장된 샘플에 `SampleFilter.apply`를 적용한 marked
+결과를 `rebuildHighSpeedState`에 전달해 라이브와 같은 필터 경계를 유지한다.
+
 `SessionController`는 해당 결정을 받아 화면 경고 상태를 `highSpeed` 종류로 저장한다.
 화면에 있을 때는 경고 배너를 갱신하고, 백그라운드일 때는 시스템 알림도 보낸다.
 고속 경고는 자동 종료 경로를 호출하지 않는다. 기존 30분 정지 제한과 5시간 전체
@@ -82,6 +86,10 @@
 받을 때 즉시 실행하고, 기존 ticker와 maintenance 평가는 시간 제한 보호용으로 유지한다.
 경고 latch는 종류별로 독립적이며 고속 경고를 닫아도 정지 경고나 전체 시간 경고의
 발행 여부는 바뀌지 않는다.
+
+세션 종료와 discard는 현재 화면에 보이는 경고 종류와 무관하게 4101과 4103을 모두
+취소한다. 고속 경고에서 종료한 경우에도 일반 종료와 같이 기록 갱신 tick을 올리고
+성공한 세션 상세 화면으로 이동한다.
 
 ### 3.2 사용자 제외 모델
 
@@ -114,13 +122,16 @@ enum RouteExclusionReason { vehicle }
 `ActivitySegment`를 선택 단위로 사용한다. 하나의 segment는 하나 이상의 연속된 분
 기록이므로 사용자는 한 번의 동작으로 합쳐진 차량 이동 구간 전체를 제외할 수 있다.
 범위 시작은 `max(firstWindowStart, session.startedAt)`, 범위 끝은
-`min(lastWindowEnd, session.endedAt)`으로 clamp한다. `lastWindowEnd`는 마지막 분의
-실제 `durationS`를 반영한 배타적 끝이다. 모든 비교는 파싱한 `DateTime`의 절대 시각으로
+`min(lastWindowStart + 1분, session.endedAt)`으로 clamp한다. `ActivitySegment`는 분 키와
+별도로 실제 `startAt`, `endExclusive`를 가지며 저장소 검증과 지도 강조가 함께 쓴다.
+모든 비교는 파싱한 `DateTime`의 절대 시각으로
 수행하며 문자열이나 로컬 달력 표시값을 직접 비교하지 않는다. `route_exclusions`의
 모든 시각은 저장 전에 UTC로 바꾸고 ISO 8601 문자열로 기록한다.
 
 임의의 초 단위 핸들 편집은 제공하지 않는다. 사용자가 더 넓은 범위를 제거하려면
-인접 segment를 각각 제외한다. 저장소는 새 범위가 기존 제외 범위와 겹치면 거부하고,
+인접 segment를 각각 제외한다. 저장소는 transaction snapshot의 분 기록에서
+authoritative segment를 다시 만들고 요청이 정확히 하나와 일치하는지 확인한다. 임의의
+같은 분 부분 범위와 불연속 분 선택은 거부한다. 새 범위가 기존 제외 범위와 겹치면 거부하고,
 정확히 맞닿은 범위는 별도 제외 레코드로 유지한다. 따라서 각 편집을 독립적으로
 취소할 수 있다.
 
@@ -147,6 +158,9 @@ DB, Flutter, 플랫폼 API에 의존하지 않는다.
   않는다. 두 끝점이 모두 제외 밖이어도 사이에 제외 범위가 있으면 새 fragment를 만든다.
 - 인접 샘플 시각 차이가 0 이하이거나 `trustedLocationGap`보다 크면 새 fragment를 만든다.
 - 좌표, 시각, 거리 계산값이 유효하지 않으면 해당 연결을 만들지 않는다.
+- 양수인 1ms 미만 시각 차이는 microseconds로 속도를 계산하며 유한 속도만 연결한다.
+- 1.5m 미만 선분은 fragment와 관측 시간에는 남기되 거리에는 더하지 않는다.
+- 세션 종료 시각과 같은 샘플은 마지막 실제 분에 포함한다.
 
 `RoutePartitionResult`는 fragments 외에 포함된 유효 샘플 목록과 분 단위 집계가 사용할
 유효 선분 목록을 제공한다. 지도와 재생은 fragments를 그대로 쓰고,
@@ -377,8 +391,9 @@ upgrade 트랜잭션 안에서 수행하고, 열린 뒤 `quick_check`와 테스�
 
 1. 대상 완료 세션, 전체 원시 샘플, 기존 분 기록, 전체 제외 레코드를 같은 transaction
    executor로 읽는다.
-2. segment 경계를 세션 범위로 clamp하고 절대 시각으로 유효성과 겹침을 검사한 뒤,
-   제외 또는 복원 후의 `RouteExclusion` 목록을 메모리에서 구성한다.
+2. snapshot의 분 기록과 세션 경계로 authoritative segment를 재구성하고 요청과 정확히
+   일치하는지 확인한 뒤 절대 시각으로 유효성과 겹침을 검사하고, 제외 또는 복원 후의
+   `RouteExclusion` 목록을 메모리에서 구성한다.
 3. 저장된 `is_filtered_out`을 바꾸지 않은 샘플과 새 제외 목록을 `SessionPipeline`에
    전달해 분 기록, 경로 조각, 세션 집계를 다시 계산한다.
 4. 제외 명령이면 UTC ISO 시각을 가진 새 `route_exclusions` 행을 삽입한다.

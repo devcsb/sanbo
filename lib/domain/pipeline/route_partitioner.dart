@@ -14,7 +14,9 @@ class RouteSegment {
   final double distanceM;
 
   Duration get duration => end.timestamp.difference(start.timestamp);
-  double get speedMps => distanceM / (duration.inMilliseconds / 1000);
+  double get speedMps =>
+      distanceM /
+      (duration.inMicroseconds / Duration.microsecondsPerSecond);
 }
 
 class RouteFragment {
@@ -90,11 +92,15 @@ abstract final class RoutePartitioner {
         lat2: sample.latitude,
         lon2: sample.longitude,
       );
+      final speed =
+          distance /
+          (duration.inMicroseconds / Duration.microsecondsPerSecond);
       final connect =
           duration > Duration.zero &&
           duration <= maxGap &&
           !crossesExclusion &&
-          distance.isFinite;
+          distance.isFinite &&
+          speed.isFinite;
       if (!connect) {
         flush();
         current = [sample];

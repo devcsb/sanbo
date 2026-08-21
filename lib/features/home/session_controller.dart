@@ -190,7 +190,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _firstFixTimer?.cancel();
       _firstFixTimer = null;
       unawaited(_maintenanceQueue.close());
-      unawaited(_cancelCurrentNotification());
+      unawaited(_notifications.cancelAllWarnings());
       unawaited(_sampleSub?.cancel() ?? Future<void>.value());
       _sampleSub = null;
     });
@@ -271,7 +271,8 @@ class SessionController extends Notifier<LiveSessionState> {
           lon2: current.longitude,
         );
         if (distance >= _minLiveSegmentDistanceM) {
-          return distance / (dt.inMilliseconds / 1000.0);
+          return distance /
+              (dt.inMicroseconds / Duration.microsecondsPerSecond);
         }
       }
     }
@@ -293,7 +294,7 @@ class SessionController extends Notifier<LiveSessionState> {
 
       _recomputeLiveMetricsFromBuffer();
       _sessionGuard.rebuildHighSpeedState(
-        samples: existing,
+        samples: _liveFilter.apply(existing),
         observedAt: _clock(),
       );
       state = LiveSessionState(
@@ -388,14 +389,7 @@ class SessionController extends Notifier<LiveSessionState> {
 
   void _cancelSessionGuard() {
     _sessionGuard.reset();
-    unawaited(_cancelCurrentNotification());
-  }
-
-  Future<void> _cancelCurrentNotification() {
-    final kind = state.activeWarning?.kind;
-    return kind == null
-        ? Future<void>.value()
-        : _notifications.cancel(kind: kind);
+    unawaited(_notifications.cancelAllWarnings());
   }
 
   Future<void> _runMaintenance() async {
@@ -621,8 +615,8 @@ class SessionController extends Notifier<LiveSessionState> {
     if (ordered && !marked.isFilteredOut) {
       acceptedByIncrementalFilter = true;
       if (prev != null) {
-        final dtMs = marked.timestamp.difference(prev.timestamp).inMilliseconds;
-        if (dtMs > 0) {
+        final dtUs = marked.timestamp.difference(prev.timestamp).inMicroseconds;
+        if (dtUs > 0) {
           final d = haversineMeters(
             lat1: prev.latitude,
             lon1: prev.longitude,
@@ -630,16 +624,18 @@ class SessionController extends Notifier<LiveSessionState> {
             lon2: marked.longitude,
           );
           // Match pathDistanceMeters jitter floor (1.5 m).
-          if (dtMs <= _maxObservedLiveGap.inMilliseconds &&
+          if (dtUs <= _maxObservedLiveGap.inMicroseconds &&
               d >= _minLiveSegmentDistanceM) {
             _liveDistanceM += d;
-            segmentSpeed = d / (dtMs / 1000.0);
+            segmentSpeed = d / (dtUs / Duration.microsecondsPerSecond);
           }
         }
       }
       _lastValidSample = marked;
       _validSampleCount += 1;
       observation = _sessionGuard.observe(marked, observedAt: _clock());
+    } else {
+      _sessionGuard.interruptHighSpeedContinuity();
     }
 
     final providerSpeed = sample.speedMps;

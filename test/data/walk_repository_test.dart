@@ -199,63 +199,55 @@ void main() {
   );
 
   test(
-    'route exclusion clamps an out-of-range selection to completed bounds',
+    'route exclusion rejects an arbitrary range that is not an authoritative segment',
     () async {
       final repo = await openTestRepository();
       addTearDown(repo.close);
       final fixture = await seedCompletedTwoMinuteWalk(repo);
       final segment = _segment(
-        start: fixture.session.startedAt.subtract(const Duration(minutes: 1)),
-        endInclusive: fixture.session.endedAt!,
-        durationS: 120,
+        start: fixture.windows.first.windowStart.add(
+          const Duration(seconds: 10),
+        ),
+        endInclusive: fixture.windows.first.windowStart,
+        durationS: 20,
         sessionId: fixture.session.id,
-        windows: fixture.windows,
+        windows: [fixture.windows.first],
       );
 
-      final exclusion = await repo.excludeRouteSegment(
-        sessionId: fixture.session.id,
-        segment: segment,
+      await expectLater(
+        repo.excludeRouteSegment(
+          sessionId: fixture.session.id,
+          segment: segment,
+        ),
+        throwsA(isA<StateError>()),
       );
-
-      expect(exclusion.startAt, fixture.session.startedAt.toUtc());
-      expect(exclusion.endAt, fixture.session.endedAt!.toUtc());
     },
   );
 
-  test(
-    'touching route exclusions are accepted, including offset-equivalent instants',
-    () async {
-      final repo = await openTestRepository();
-      addTearDown(repo.close);
-      final fixture = await seedCompletedTwoMinuteWalk(repo);
-      final first = fixture.segments.first;
-      final lastWindow = fixture.windows.last;
-      final offsetEquivalent = _segment(
-        start: DateTime.parse('2026-08-20T20:01:00-04:00'),
-        endInclusive: DateTime.parse('2026-08-20T20:01:00-04:00'),
-        durationS: 60,
-        sessionId: fixture.session.id,
-        windows: [lastWindow],
-      );
+  test('touching authoritative route exclusions are accepted', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final fixture = await seedCompletedTwoMinuteWalk(repo);
+    final first = fixture.segments.first;
+    final last = fixture.segments.last;
 
-      final firstExclusion = await repo.excludeRouteSegment(
-        sessionId: fixture.session.id,
-        segment: first,
-      );
-      final secondExclusion = await repo.excludeRouteSegment(
-        sessionId: fixture.session.id,
-        segment: offsetEquivalent,
-      );
+    final firstExclusion = await repo.excludeRouteSegment(
+      sessionId: fixture.session.id,
+      segment: first,
+    );
+    final secondExclusion = await repo.excludeRouteSegment(
+      sessionId: fixture.session.id,
+      segment: last,
+    );
 
-      expect(firstExclusion.endAt, secondExclusion.startAt);
-      expect(
-        (await repo.getRouteExclusions(
-          fixture.session.id,
-        )).map((item) => item.id),
-        [firstExclusion.id, secondExclusion.id],
-      );
-    },
-  );
+    expect(firstExclusion.endAt, secondExclusion.startAt);
+    expect(
+      (await repo.getRouteExclusions(
+        fixture.session.id,
+      )).map((item) => item.id),
+      [firstExclusion.id, secondExclusion.id],
+    );
+  });
 
   test(
     'DST offset instant selects the same persisted completed minute',
@@ -292,13 +284,20 @@ void main() {
         validSampleCount: result.metrics.validSampleCount,
         medianAccuracyM: result.metrics.medianAccuracyM,
       );
-      final firstWindow = (await repo.getWindows(session.id)).first;
-      final segment = _segment(
-        start: DateTime.parse('2026-11-01T01:00:00-04:00'),
-        durationS: 60,
+      await repo.updateWindowUserLabel(
         sessionId: session.id,
-        windows: [firstWindow],
+        windowStart: result.windows.first.windowStart,
+        userLabel: ActivityLabel.vehicle,
       );
+      final windows = await repo.getWindows(session.id);
+      final segment = pipeline.segmentMerger
+          .merge(
+            windows,
+            sessionId: session.id,
+            sessionStart: session.startedAt,
+            sessionEnd: start.add(const Duration(minutes: 2)),
+          )
+          .first;
 
       final exclusion = await repo.excludeRouteSegment(
         sessionId: session.id,
@@ -310,51 +309,207 @@ void main() {
     },
   );
 
-  test(
-    'touching exclusions in one minute keep the first id then restore to the second',
-    () async {
-      final repo = await openTestRepository();
-      addTearDown(repo.close);
-      final fixture = await seedCompletedTwoMinuteWalk(repo);
-      final window = fixture.windows.first;
-      final firstSegment = _segment(
-        start: window.windowStart.add(const Duration(seconds: 10)),
-        endInclusive: window.windowStart.subtract(const Duration(seconds: 30)),
-        durationS: 20,
-        sessionId: fixture.session.id,
-        windows: [window],
-      );
-      final secondSegment = _segment(
-        start: window.windowStart.add(const Duration(seconds: 30)),
-        endInclusive: window.windowStart,
-        durationS: 30,
-        sessionId: fixture.session.id,
-        windows: [window],
-      );
+  test('route exclusion rejects a discontinuous window selection', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final start = DateTime.utc(2026, 8, 21);
+    final session = await repo.startSession(startedAt: start);
+    final samples = [
+      for (var second = 0; second <= 180; second += 20)
+        LocationSample(
+          timestamp: start.add(Duration(seconds: second)),
+          latitude: 37.5,
+          longitude: 127 + second * 0.00001,
+          accuracyM: 5,
+        ),
+    ];
+    final result = SessionPipeline().process(
+      session: session,
+      rawSamples: samples,
+      endedAt: start.add(const Duration(minutes: 3)),
+    );
+    await repo.finalizeSession(
+      session: session,
+      samples: result.filteredSamples,
+      windows: result.windows,
+      endedAt: start.add(const Duration(minutes: 3)),
+      totalDistanceM: result.metrics.totalDistanceM,
+      durationS: result.metrics.durationS,
+      movingTimeS: result.metrics.movingTimeS,
+      stationaryTimeS: result.metrics.stationaryTimeS,
+      avgSpeedMps: result.metrics.avgSpeedMps,
+      validSampleCount: result.metrics.validSampleCount,
+    );
+    final windows = await repo.getWindows(session.id);
+    final discontinuous = _segment(
+      start: windows.first.windowStart,
+      endInclusive: windows.last.windowStart,
+      durationS: 120,
+      sessionId: session.id,
+      windows: [windows.first, windows.last],
+    );
 
-      final first = await repo.excludeRouteSegment(
-        sessionId: fixture.session.id,
-        segment: firstSegment,
-      );
-      final second = await repo.excludeRouteSegment(
-        sessionId: fixture.session.id,
-        segment: secondSegment,
-      );
+    await expectLater(
+      repo.excludeRouteSegment(sessionId: session.id, segment: discontinuous),
+      throwsA(isA<StateError>()),
+    );
+  });
 
-      expect(
-        (await repo.getWindows(fixture.session.id)).first.userExclusionId,
-        first.id,
-      );
-      await repo.restoreRouteExclusion(
-        sessionId: fixture.session.id,
-        exclusionId: first.id,
-      );
-      expect(
-        (await repo.getWindows(fixture.session.id)).first.userExclusionId,
-        second.id,
-      );
-    },
-  );
+  test('first partial minute can be excluded and restored exactly', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final minute = DateTime.utc(2026, 8, 21);
+    final start = minute.add(const Duration(seconds: 50));
+    final end = minute.add(const Duration(minutes: 1));
+    final session = await repo.startSession(startedAt: start);
+    final samples = [
+      LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: start.add(const Duration(seconds: 5)),
+        latitude: 37.5001,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: end,
+        latitude: 37.5002,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+    ];
+    final pipeline = SessionPipeline();
+    final result = pipeline.process(
+      session: session,
+      rawSamples: samples,
+      endedAt: end,
+    );
+    final completed = await repo.finalizeSession(
+      session: session,
+      samples: result.filteredSamples,
+      windows: result.windows,
+      endedAt: end,
+      totalDistanceM: result.metrics.totalDistanceM,
+      durationS: result.metrics.durationS,
+      movingTimeS: result.metrics.movingTimeS,
+      stationaryTimeS: result.metrics.stationaryTimeS,
+      avgSpeedMps: result.metrics.avgSpeedMps,
+      validSampleCount: result.metrics.validSampleCount,
+    );
+    final windows = await repo.getWindows(session.id);
+    final segment = pipeline.segmentMerger
+        .merge(
+          windows,
+          sessionId: session.id,
+          sessionStart: completed.startedAt,
+          sessionEnd: completed.endedAt,
+        )
+        .single;
+
+    final exclusion = await repo.excludeRouteSegment(
+      sessionId: session.id,
+      segment: segment,
+    );
+    expect(exclusion.startAt, start);
+    expect(exclusion.endAt, end);
+    expect((await repo.getSession(session.id))!.durationS, 0);
+
+    await repo.restoreRouteExclusion(
+      sessionId: session.id,
+      exclusionId: exclusion.id,
+    );
+    expect(await repo.getRouteExclusions(session.id), isEmpty);
+    expect((await repo.getSession(session.id))!.durationS, 10);
+    expect((await repo.getWindows(session.id)).single.userExclusionId, isNull);
+  });
+
+  test('exclude and restore never reintroduce micro-jitter distance', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final start = DateTime.utc(2026, 8, 21);
+    final end = start.add(const Duration(minutes: 2));
+    final session = await repo.startSession(startedAt: start);
+    const degreesPerMeter = 1 / 111320.0;
+    final samples = [
+      LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: start.add(const Duration(seconds: 10)),
+        latitude: 37.5 + 0.8 * degreesPerMeter,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: start.add(const Duration(minutes: 1, seconds: 11)),
+        latitude: 37.5 + 100 * degreesPerMeter,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: end,
+        latitude: 37.5 + 200 * degreesPerMeter,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+    ];
+    final pipeline = SessionPipeline();
+    final result = pipeline.process(
+      session: session,
+      rawSamples: samples,
+      endedAt: end,
+    );
+    final completed = await repo.finalizeSession(
+      session: session,
+      samples: result.filteredSamples,
+      windows: result.windows,
+      endedAt: end,
+      totalDistanceM: result.metrics.totalDistanceM,
+      durationS: result.metrics.durationS,
+      movingTimeS: result.metrics.movingTimeS,
+      stationaryTimeS: result.metrics.stationaryTimeS,
+      avgSpeedMps: result.metrics.avgSpeedMps,
+      validSampleCount: result.metrics.validSampleCount,
+    );
+    await repo.updateWindowUserLabel(
+      sessionId: session.id,
+      windowStart: start.add(const Duration(minutes: 1)),
+      userLabel: ActivityLabel.vehicle,
+    );
+    final windows = await repo.getWindows(session.id);
+    expect(windows.first.distanceM, 0);
+    final segment = pipeline.segmentMerger
+        .merge(
+          windows,
+          sessionId: session.id,
+          sessionStart: completed.startedAt,
+          sessionEnd: completed.endedAt,
+        )
+        .last;
+
+    final exclusion = await repo.excludeRouteSegment(
+      sessionId: session.id,
+      segment: segment,
+    );
+    expect((await repo.getSession(session.id))!.totalDistanceM, 0);
+
+    await repo.restoreRouteExclusion(
+      sessionId: session.id,
+      exclusionId: exclusion.id,
+    );
+    expect(
+      (await repo.getSession(session.id))!.totalDistanceM,
+      closeTo(completed.totalDistanceM!, 0.001),
+    );
+    expect((await repo.getWindows(session.id)).first.distanceM, 0);
+  });
 
   test(
     'route exclusion rejects a segment from another session at the same instant',

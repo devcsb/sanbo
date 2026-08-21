@@ -126,6 +126,9 @@ class _NeverCompletingPermissionNotifications
   Future<void> cancel({required SessionWarningKind kind}) async {}
 
   @override
+  Future<void> cancelAllWarnings() async {}
+
+  @override
   Future<void> initialize() async {}
 
   @override

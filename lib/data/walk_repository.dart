@@ -334,25 +334,27 @@ ORDER BY day ASC
           segment.windows.any((window) => window.durationS <= 0)) {
         throw StateError('제외할 구간 길이가 올바르지 않습니다');
       }
+      final authoritative = SegmentMerger().merge(
+        snapshot.windows,
+        sessionId: sessionId,
+        sessionStart: snapshot.session.startedAt,
+        sessionEnd: snapshot.session.endedAt,
+      );
+      final matches = authoritative.where(
+        (candidate) => _sameSegmentSelection(candidate, segment),
+      );
+      if (matches.length != 1) {
+        throw StateError('현재 산책에서 제외할 수 있는 구간을 찾지 못했습니다');
+      }
+      final selected = matches.single;
       final candidate = RouteExclusion(
         id: _uuid.v4(),
         sessionId: sessionId,
-        startAt: segment.start,
-        endAt: segment.endExclusive,
+        startAt: selected.startAt,
+        endAt: selected.endExclusive,
         reason: reason,
         createdAt: createdAt ?? DateTime.now(),
-      ).clampedTo(snapshot.session);
-      final storedWindowKeys = snapshot.windows
-          .map((window) => window.windowStart.toUtc())
-          .toSet();
-      final selectedWindowKeys = segment.windows
-          .map((window) => window.windowStart.toUtc())
-          .toSet();
-      if (selectedWindowKeys.isEmpty ||
-          selectedWindowKeys.length != segment.windows.length ||
-          !storedWindowKeys.containsAll(selectedWindowKeys)) {
-        throw StateError('제외할 구간을 찾을 수 없습니다');
-      }
+      );
       if (snapshot.exclusions.any(
         (existing) => existing.overlaps(candidate.startAt, candidate.endAt),
       )) {
@@ -376,6 +378,32 @@ ORDER BY day ASC
       await _updateRollupIn(txn, snapshot.session, result.metrics);
       return candidate;
     });
+  }
+
+  bool _sameSegmentSelection(
+    ActivitySegment authoritative,
+    ActivitySegment requested,
+  ) {
+    if (requested.sessionId != authoritative.sessionId ||
+        requested.label != authoritative.label ||
+        requested.durationS != authoritative.durationS ||
+        !requested.start.isAtSameMomentAs(authoritative.start) ||
+        !requested.endInclusive.isAtSameMomentAs(authoritative.endInclusive) ||
+        !requested.startAt.isAtSameMomentAs(authoritative.startAt) ||
+        !requested.endExclusive.isAtSameMomentAs(authoritative.endExclusive) ||
+        requested.windows.length != authoritative.windows.length) {
+      return false;
+    }
+    for (var index = 0; index < requested.windows.length; index++) {
+      final left = requested.windows[index];
+      final right = authoritative.windows[index];
+      if (!left.windowStart.isAtSameMomentAs(right.windowStart) ||
+          left.displayLabel != right.displayLabel ||
+          left.userExclusionId != right.userExclusionId) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /// Removes one exclusion after reconstructing the completed route without

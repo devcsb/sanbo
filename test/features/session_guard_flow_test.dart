@@ -26,6 +26,7 @@ class _FakeSessionNotifications implements SessionNotificationService {
   final warnings = <String>[];
   final completions = <String>[];
   int cancelCalls = 0;
+  int cancelAllCalls = 0;
   int tapDeliveries = 0;
   SessionNotificationTap? _pendingColdTap;
   late final _tapController =
@@ -36,6 +37,11 @@ class _FakeSessionNotifications implements SessionNotificationService {
   @override
   Future<void> cancel({required SessionWarningKind kind}) async {
     cancelCalls++;
+  }
+
+  @override
+  Future<void> cancelAllWarnings() async {
+    cancelAllCalls++;
   }
 
   @override
@@ -428,6 +434,129 @@ void main() {
     },
   );
 
+  test('a live filter rejection breaks high-speed accumulation', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    var now = DateTime(2026, 8, 21, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final start = controller.state.session!.startedAt;
+    const degreesPerMeter = 1 / 111320.0;
+
+    for (final second in [0, 10, 20, 30]) {
+      now = start.add(Duration(seconds: second));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.5 + second * 10 * degreesPerMeter,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+      ]);
+    }
+    now = start.add(const Duration(seconds: 35));
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: now,
+        latitude: double.nan,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+    ]);
+    for (final second in [40, 50, 60, 70]) {
+      now = start.add(Duration(seconds: second));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.5 + second * 10 * degreesPerMeter,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+      ]);
+    }
+    await _pumpGuard();
+    expect(controller.state.activeWarning, isNull);
+
+    for (final second in [80, 90, 100]) {
+      now = start.add(Duration(seconds: second));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.5 + second * 10 * degreesPerMeter,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+      ]);
+    }
+    await _pumpGuard();
+    expect(controller.state.activeWarning?.kind, SessionWarningKind.highSpeed);
+  });
+
+  test(
+    'recovery rebuild uses filter-marked samples for guard continuity',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime(2026, 8, 21, 9);
+      final session = await repo.startSession(startedAt: start);
+      const degreesPerMeter = 1 / 111320.0;
+      final samples = <LocationSample>[
+        for (final second in [0, 10, 20, 30])
+          LocationSample(
+            timestamp: start.add(Duration(seconds: second)),
+            latitude: 37.5 + second * 10 * degreesPerMeter,
+            longitude: 127,
+            accuracyM: 5,
+          ),
+        LocationSample(
+          timestamp: start.add(const Duration(seconds: 35)),
+          latitude: 37.5 + 1300 * degreesPerMeter,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+        for (final second in [40, 50, 60, 70])
+          LocationSample(
+            timestamp: start.add(Duration(seconds: second)),
+            latitude: 37.5 + second * 10 * degreesPerMeter,
+            longitude: 127,
+            accuracyM: 5,
+          ),
+      ];
+      await repo.insertSamples(session.id, samples);
+      final now = start.add(const Duration(seconds: 70));
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+
+      await controller.restoreIfNeeded();
+      await controller.start();
+      await _pumpGuard();
+
+      expect(controller.state.activeWarning, isNull);
+    },
+  );
+
   test('high-speed stop action invokes the user stop flow once', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
@@ -464,6 +593,81 @@ void main() {
     expect(await repo.listCompleted(), hasLength(1));
     expect(container.read(historyTickProvider), 0);
   });
+
+  test('ending after a warning replacement clears every warning id', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final notifications = _FakeSessionNotifications();
+    var now = DateTime(2026, 8, 21, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionNotificationServiceProvider.overrideWithValue(notifications),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final start = controller.state.session!.startedAt;
+    now = start.add(const Duration(hours: 4, minutes: 45));
+    await controller.debugEvaluateSessionGuard();
+    expect(controller.state.activeWarning?.kind, SessionWarningKind.duration);
+
+    for (final sample in _highSpeedTrace(now, seconds: 60)) {
+      now = sample.timestamp;
+      controller.debugIngestSamples([sample]);
+    }
+    await _pumpGuard();
+    expect(controller.state.activeWarning?.kind, SessionWarningKind.highSpeed);
+
+    await controller.stop();
+    expect(notifications.cancelAllCalls, greaterThanOrEqualTo(1));
+  });
+
+  test(
+    'discarding after a high-speed warning clears every warning id',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final notifications = _FakeSessionNotifications();
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      for (final sample in _highSpeedTrace(
+        controller.state.session!.startedAt,
+        seconds: 60,
+      )) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await _pumpGuard();
+      expect(
+        controller.state.activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+
+      await controller.discardActive();
+
+      expect(notifications.cancelAllCalls, greaterThanOrEqualTo(1));
+    },
+  );
 
   testWidgets(
     'warm high-speed tap routes home and keeps the active warning actions',
@@ -667,6 +871,34 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
+
+  testWidgets(
+    'high-speed stop refreshes history and opens the completed summary',
+    (tester) async {
+      final fixture = await _coldWarningFixture(tester);
+      addTearDown(fixture.dispose);
+      final sessionId = fixture.controller.state.session!.id;
+
+      await tester.tap(find.widgetWithText(FilledButton, '기록 종료'));
+      await tester.runAsync(() async {
+        for (var attempt = 0; attempt < 100; attempt++) {
+          if (fixture.router.routeInformationProvider.value.uri.path ==
+              '/history/$sessionId') {
+            return;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
+        fail('High-speed stop did not open its summary.');
+      });
+      await tester.pumpAndSettle();
+
+      expect(fixture.container.read(historyTickProvider), 1);
+      expect(
+        fixture.router.routeInformationProvider.value.uri.path,
+        '/history/$sessionId',
+      );
+    },
+  );
 }
 
 class _ColdWarningFixture {
@@ -710,6 +942,10 @@ Future<_ColdWarningFixture> _coldWarningFixture(WidgetTester tester) async {
     routes: [
       GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
       GoRoute(path: '/settings', builder: (context, state) => const Scaffold()),
+      GoRoute(
+        path: '/history/:sessionId',
+        builder: (context, state) => const Scaffold(),
+      ),
     ],
   );
   final container = ProviderContainer(

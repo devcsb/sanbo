@@ -210,4 +210,76 @@ void main() {
     expect(partition.segments, isEmpty);
     expect(windows.fold<double>(0, (sum, window) => sum + window.distanceM), 0);
   });
+
+  test('keeps micro-jitter samples but contributes zero window distance', () {
+    final start = DateTime.utc(2026, 8, 21);
+    final samples = [
+      LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: start.add(const Duration(seconds: 10)),
+        latitude: 37.5,
+        longitude: 127.00001,
+        accuracyM: 5,
+      ),
+    ];
+    final partition = RoutePartitioner.partition(
+      samples: samples,
+      exclusions: const [],
+    );
+
+    final windows = WindowAggregator().aggregate(
+      partition: partition,
+      rawSamples: samples,
+      exclusions: const [],
+      sessionStart: start,
+      sessionEnd: start.add(const Duration(seconds: 11)),
+    );
+
+    expect(partition.segments, hasLength(1));
+    expect(partition.fragments.single.samples, hasLength(2));
+    expect(partition.segments.single.distanceM, lessThan(1.5));
+    expect(windows.single.sampleCount, 2);
+    expect(windows.single.distanceM, 0);
+  });
+
+  test('assigns a session-end boundary sample to the last actual minute', () {
+    final start = DateTime.utc(2026, 8, 21);
+    final end = start.add(const Duration(minutes: 1));
+    final samples = [
+      LocationSample(
+        timestamp: start.add(const Duration(seconds: 50)),
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: end,
+        latitude: 37.5001,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+    ];
+    final partition = RoutePartitioner.partition(
+      samples: samples,
+      exclusions: const [],
+    );
+
+    final windows = WindowAggregator().aggregate(
+      partition: partition,
+      rawSamples: samples,
+      exclusions: const [],
+      sessionStart: start,
+      sessionEnd: end,
+    );
+
+    expect(windows, hasLength(1));
+    expect(windows.single.sampleCount, 2);
+    expect(windows.single.rawSampleCount, 2);
+    expect(windows.single.endLat, 37.5001);
+  });
 }

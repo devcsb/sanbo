@@ -90,6 +90,32 @@ void main() {
     expect(result.movingTimeS, 10);
   });
 
+  test('micro-jitter keeps observed time but contributes zero distance', () {
+    final start = DateTime.utc(2026, 8, 21);
+    final session = _session(id: 'micro-jitter', start: start);
+    final samples = [
+      LocationSample(timestamp: start, latitude: 37.5, longitude: 127),
+      LocationSample(
+        timestamp: start.add(const Duration(seconds: 10)),
+        latitude: 37.5,
+        longitude: 127.00001,
+      ),
+    ];
+
+    final result = SessionRollup().compute(
+      session: session,
+      partition: RoutePartitioner.partition(
+        samples: samples,
+        exclusions: const [],
+      ),
+      exclusions: const [],
+      endedAt: start.add(const Duration(seconds: 10)),
+    );
+
+    expect(result.totalDistanceM, 0);
+    expect(result.movingTimeS + result.stationaryTimeS, 10);
+  });
+
   test(
     'keeps the full duration for completed sessions longer than seven days',
     () {

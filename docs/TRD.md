@@ -209,11 +209,11 @@ DB 스키마 버전은 `4`다. v4는 완료 기록의 가역적 사용자 제외
 
 ### 3.7 고속 guard와 경로 제외 계약
 
-고속 판단은 `SessionGuard`가 저장 시각이 아니라 앱 수신 시각 `observedAt`으로 freshness를 확인해 수행한다. 신뢰 가능한 샘플은 정확도 80m 이하, 자동 필터 제외 아님, 좌표가 유효함을 만족해야 한다. receipt는 최대 30초 전, 최대 5초 미래까지 허용한다. 최근 120초에서 8.0m/s(28.8km/h) 이상 구간이 누적 60초면 `SessionGuardEvent.highSpeedWarning`을 낸다. 4.0m/s(14.4km/h) 이하가 연속 30초가 되어야 다시 무장한다. 고속 이동만으로 세션을 자동 종료하지 않는다.
+고속 판단은 `SessionGuard`가 저장 시각이 아니라 앱 수신 시각 `observedAt`으로 freshness를 확인해 수행한다. 신뢰 가능한 샘플은 정확도 80m 이하, 자동 필터 제외 아님, 좌표가 유효함을 만족해야 한다. receipt는 최대 30초 전, 최대 5초 미래까지 허용한다. 최근 120초에서 8.0m/s(28.8km/h) 이상 구간이 누적 60초면 `SessionGuardEvent.highSpeedWarning`을 낸다. 4.0m/s(14.4km/h) 이하가 연속 30초가 되어야 다시 무장한다. 라이브 `SampleFilter`가 거부한 fix는 guard에 전달하지 않는 대신 `interruptHighSpeedContinuity()`로 누적 연속성을 끊는다. 복구에서는 저장된 샘플에 `SampleFilter.apply`를 먼저 적용한 marked 결과로 guard 상태를 재구축한다. 고속 이동만으로 세션을 자동 종료하지 않는다.
 
 `SessionGuard.evaluate`의 경고 우선순위는 duration limit, stationary limit, duration warning, stationary warning, high-speed warning 순서다. 고속 경고는 `SessionWarningKind.highSpeed`로 표현하며 `기록 종료`는 `SessionController.stopFromHighSpeedWarning()`, `계속 기록`은 `SessionController.continueAfterWarning()`으로 처리한다.
 
-완료 세션의 사용자 제외 원본은 UTC ISO 8601으로 저장한 반개구간 `[startAt, endAt)`인 `route_exclusions`다. 범위는 세션 경계로 clamp하며 겹치는 범위는 거부하고, 맞닿은 범위는 별도 레코드로 보존한다. 원시 `location_samples.is_filtered_out` 값과 행은 제외와 복원에서 절대 변경하지 않으며, `location_samples.user_exclusion_id` 열은 만들지 않는다.
+완료 세션의 사용자 제외 원본은 UTC ISO 8601으로 저장한 반개구간 `[startAt, endAt)`인 `route_exclusions`다. 저장소는 transaction snapshot의 분 기록으로 authoritative `ActivitySegment`를 다시 만들고 요청이 그중 정확히 하나와 일치할 때만 허용한다. 첫 부분 분의 시작은 `max(first.windowStart, session.startedAt)`, 마지막 분의 끝은 `min(last.windowStart + 1분, session.endedAt)`이다. 임의의 같은 분 부분 범위와 불연속 분 선택은 거부한다. 겹치는 범위는 거부하고 맞닿은 authoritative 범위는 별도 레코드로 보존한다. 원시 `location_samples.is_filtered_out` 값과 행은 제외와 복원에서 절대 변경하지 않으며, `location_samples.user_exclusion_id` 열은 만들지 않는다.
 
 DB v4는 `route_exclusions`와 `minute_windows.user_exclusion_id`를 추가한다.
 
@@ -232,7 +232,7 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
   REFERENCES route_exclusions(id) ON DELETE SET NULL;
 ```
 
-`RoutePartitioner.partition`은 필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다. 즉 필터된 샘플, 유효하지 않은 좌표, 사용자 제외 내부 샘플, 제외 범위를 가로지르는 두 endpoint와 `trustedLocationGap`보다 긴 공백을 지나 선분을 잇지 않는다. 포함 샘플만 fragments에 두며, fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다.
+`RoutePartitioner.partition`은 필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다. 즉 필터된 샘플, 유효하지 않은 좌표, 사용자 제외 내부 샘플, 제외 범위를 가로지르는 두 endpoint와 `trustedLocationGap`보다 긴 공백을 지나 선분을 잇지 않는다. 포함 샘플만 fragments에 두며, fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 양수인 1ms 미만 간격도 microseconds로 유한 속도를 계산한다. 1.5m 미만 선분은 fragment와 관측 시간 분류에는 남기되 거리에는 더하지 않는다. `timestamp == sessionEnd` 샘플은 마지막 실제 분이 소유한다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다.
 
 `SessionGuard`의 observedAt 수신 시각은 최대 과거 30초와 미래 5초만 허용한다. `WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 분 기록 전체 교체, 세션 집계 갱신, 제외 레코드 삭제 마지막 순서로 쓴다. 같은 SQLite transaction은 원본과 파생 상태를 함께 rollback한다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
 
@@ -303,6 +303,55 @@ abstract final class RoutePartitioner {
 class MinuteWindow {
   final String? userExclusionId;
   bool get isUserExcluded;
+}
+
+class ActivitySegment {
+  const ActivitySegment({
+    required DateTime start,
+    required DateTime endInclusive,
+    required ActivityLabel label,
+    required double confidenceMin,
+    required double distanceM,
+    required int sampleCount,
+    required int durationS,
+    required bool userConfirmed,
+    required List<MinuteWindow> windows,
+    String? sessionId,
+    double avgSpeedMps = 0,
+    WindowQuality quality = WindowQuality.medium,
+    DateTime? actualStart,
+    DateTime? actualEndExclusive,
+  });
+  final DateTime start;
+  final DateTime endInclusive;
+  final ActivityLabel label;
+  final double confidenceMin;
+  final double distanceM;
+  final int sampleCount;
+  final int durationS;
+  final bool userConfirmed;
+  final double avgSpeedMps;
+  final WindowQuality quality;
+  final DateTime? actualStart;
+  final DateTime? actualEndExclusive;
+  final List<MinuteWindow> windows;
+  final String? sessionId;
+  String? get userExclusionId;
+  int get minuteCount;
+  DateTime get startAt;
+  DateTime get endExclusive;
+  bool get isMultiMinute;
+}
+
+class SegmentMerger {
+  SegmentMerger({double minConfidence = 0.4});
+  final double minConfidence;
+  List<ActivitySegment> merge(
+    List<MinuteWindow> windows, {
+    String? sessionId,
+    DateTime? sessionStart,
+    DateTime? sessionEnd,
+  });
 }
 
 class WindowAggregator {
@@ -426,6 +475,7 @@ class SessionGuard {
     required DateTime observedAt,
   });
   void dismissHighSpeedWarning();
+  void interruptHighSpeedContinuity();
   SessionGuardDecision evaluate({required DateTime startedAt, required DateTime now});
   void continueStationaryTracking(DateTime now);
 }
@@ -483,6 +533,7 @@ abstract class SessionNotificationService {
   Future<void> showWarning(SessionWarning warning);
   Future<void> showCompletion({required String title, required String body});
   Future<void> cancel({required SessionWarningKind kind});
+  Future<void> cancelAllWarnings();
 }
 
 class PlatformSessionNotificationService implements SessionNotificationService {
@@ -492,6 +543,7 @@ class PlatformSessionNotificationService implements SessionNotificationService {
   Future<void> showWarning(SessionWarning warning);
   Future<void> showCompletion({required String title, required String body});
   Future<void> cancel({required SessionWarningKind kind});
+  Future<void> cancelAllWarnings();
 }
 
 class RoutePlaybackPoint {
@@ -543,7 +595,7 @@ Future<void> WalkRepository.restoreRouteExclusion({
 });
 ```
 
-알림 권한 거부와 notification API 실패는 비치명이다. 위치 권한, location engine 시작, 세션 생성과 기록을 지연하거나 실패시키지 않는다. native payload는 `kind: highSpeed`이고 Dart 전달은 `notificationTapped({kind: highSpeed})`다. warm start에서는 tap을 받은 즉시 홈으로 이동해 활성 고속 경고를 표시한다. cold start에서는 native의 한 항목 버퍼를 `initialize()` 뒤 전달하고, 세션 복구가 끝난 뒤 `rebuildHighSpeedState`로 고속 상태와 경고를 재구성한다.
+알림 권한 거부와 notification API 실패는 비치명이다. 위치 권한, location engine 시작, 세션 생성과 기록을 지연하거나 실패시키지 않는다. native payload는 `kind: highSpeed`이고 Dart 전달은 `notificationTapped({kind: highSpeed})`다. warm start에서는 tap을 받은 즉시 홈으로 이동해 활성 고속 경고를 표시한다. cold start에서는 native의 한 항목 버퍼를 `initialize()` 뒤 전달하고, 세션 복구가 끝난 뒤 `rebuildHighSpeedState`로 고속 상태와 경고를 재구성한다. 일반 종료, 고속 경고 종료와 discard는 `cancelAllWarnings()`로 4101과 4103을 모두 지운다. 고속 경고의 종료 성공도 `historyTickProvider`를 갱신하고 완료 상세 화면으로 이동한다.
 
 ---
 
@@ -727,8 +779,8 @@ LocationSample 수집
 
 **매핑**: FR-15, 레퍼런스 요약 카드 패리티.
 
-실시간 홈 지표와 미완료 세션 복구 지표도 `trustedLocationGap = 60초`와
-`minMeaningfulSegmentDistanceM = 1.5m`을 동일하게 적용한다. 60초를 넘긴 두 fix를
+실시간 홈 지표, 완료 분 집계, 세션 롤업과 미완료 세션 복구 지표도 `trustedLocationGap = 60초`와
+`minMeaningfulSegmentDistanceM = 1.5m`을 동일하게 적용한다. 경로 fragment에는 1.5m 미만 선분을 유지하지만 거리 기여는 0이다. 60초를 넘긴 두 fix를
 직선으로 연결하지 않아 화면상의 누적 거리와 종료 후 롤업이 서로 달라지지 않게 한다.
 OS가 `speed_mps = 0` 또는 값을 생략한 경우에는 인접한 신뢰 fix의 좌표·시간으로
 속도를 파생하고, 필터된 fix의 공급자 속도는 UI에 반영하지 않는다.
@@ -755,6 +807,7 @@ OS가 `speed_mps = 0` 또는 값을 생략한 경우에는 인접한 신뢰 fix�
 
 - 표시 라벨(`user_label ?? hypothesis_label`)이 동일하고 연속이며 둘 다 conf ≥ 0.4 (또는 user 확정)이면 병합.  
 - `unknown` 단독 분 끼면 분리 유지.
+- 세션 경계를 받은 경우 `startAt`과 `endExclusive`는 첫 분과 마지막 분의 실제 세션 범위로 clamp한다. 저장소와 지도 강조는 이 실제 반개구간을 함께 사용한다.
 
 **매핑**: FR-13.
 

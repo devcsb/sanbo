@@ -40,6 +40,25 @@ void main() {
     expect(calls[1].arguments, containsPair('id', 4103));
   });
 
+  test('cancel all warnings clears every distinct warning id', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    final service = PlatformSessionNotificationService();
+    await service.initialize();
+
+    await service.cancelAllWarnings();
+
+    expect(calls.map((call) => call.method), ['cancel', 'cancel']);
+    expect(calls.map((call) => call.arguments), [
+      {'id': 4101},
+      {'id': 4103},
+    ]);
+  });
+
   test('notificationTapped is emitted exactly once', () async {
     final service = PlatformSessionNotificationService();
     await service.initialize();

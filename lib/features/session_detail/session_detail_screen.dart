@@ -44,7 +44,12 @@ final sessionDetailProvider = FutureProvider.autoDispose
         samples: samples,
         exclusions: exclusions,
       );
-      var segments = SegmentMerger().merge(windows, sessionId: id);
+      var segments = SegmentMerger().merge(
+        windows,
+        sessionId: id,
+        sessionStart: session.startedAt,
+        sessionEnd: session.endedAt,
+      );
 
       // Reuse only places the user previously named. This is a local DB
       // lookup; opening a detail never triggers geocoding or network work.
@@ -75,7 +80,12 @@ final sessionDetailProvider = FutureProvider.autoDispose
       }
       if (attachedKnownPlace) {
         windows = await repo.getWindows(id);
-        segments = SegmentMerger().merge(windows, sessionId: id);
+        segments = SegmentMerger().merge(
+          windows,
+          sessionId: id,
+          sessionStart: session.startedAt,
+          sessionEnd: session.endedAt,
+        );
       }
       return SessionDetailData(
         session: session,
@@ -210,7 +220,12 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
           final fragments = _fragmentCache;
           final segments = data.segments.isNotEmpty
               ? data.segments
-              : SegmentMerger().merge(data.windows, sessionId: session.id);
+              : SegmentMerger().merge(
+                  data.windows,
+                  sessionId: session.id,
+                  sessionStart: session.startedAt,
+                  sessionEnd: session.endedAt,
+                );
           final playbackIndex = playbackPoints.isEmpty
               ? 0
               : _playbackIndex < 0
@@ -551,7 +566,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
           (fragment) => fragment.samples
               .where(
                 (sample) =>
-                    !sample.timestamp.isBefore(segment.start) &&
+                    !sample.timestamp.isBefore(segment.startAt) &&
                     sample.timestamp.isBefore(segment.endExclusive),
               )
               .map((sample) => (lat: sample.latitude, lon: sample.longitude))
@@ -1238,7 +1253,7 @@ class _PlaceEditorSheetState extends ConsumerState<_PlaceEditorSheet> {
 }
 
 String _formatSegmentRange(ActivitySegment segment) {
-  final start = DateFormat('HH:mm').format(segment.start);
+  final start = DateFormat('HH:mm').format(segment.startAt);
   if (!segment.isMultiMinute) return start;
   final end = DateFormat('HH:mm').format(segment.endExclusive);
   return '$start–$end';
@@ -1254,7 +1269,7 @@ ActivitySegment? _segmentAt(
   DateTime timestamp,
 ) {
   for (final segment in segments) {
-    if (!timestamp.isBefore(segment.start) &&
+    if (!timestamp.isBefore(segment.startAt) &&
         timestamp.isBefore(segment.endExclusive)) {
       return segment;
     }

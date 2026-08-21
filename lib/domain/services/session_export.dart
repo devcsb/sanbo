@@ -25,7 +25,12 @@ class SessionExport {
     );
     final kmh = ((session.avgSpeedMps ?? 0) * 3.6).toStringAsFixed(1);
     final pace = pacePerKmLabel(session.avgSpeedMps);
-    final segments = SegmentMerger().merge(windows, sessionId: session.id);
+    final segments = SegmentMerger().merge(
+      windows,
+      sessionId: session.id,
+      sessionStart: session.startedAt,
+      sessionEnd: session.endedAt,
+    );
     final buf = StringBuffer()
       ..writeln('산보 산책 요약')
       ..writeln('시작: $date')
@@ -49,7 +54,7 @@ class SessionExport {
     if (segments.isNotEmpty) {
       buf.writeln('활동 구간:');
       for (final seg in segments.take(12)) {
-        final start = _hhmm(seg.start);
+        final start = _hhmm(seg.startAt);
         final end = _hhmm(seg.endExclusive);
         final range = seg.isMultiMinute ? '$start–$end' : start;
         final placeName = segmentPlaceName(seg);

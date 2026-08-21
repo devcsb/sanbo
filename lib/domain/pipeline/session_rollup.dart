@@ -1,5 +1,6 @@
 import '../models/route_exclusion.dart';
 import '../models/walk_session.dart';
+import 'geo.dart';
 import 'route_partitioner.dart';
 
 class SessionRollupResult {
@@ -70,7 +71,9 @@ class SessionRollup {
       if (!segment.distanceM.isFinite || !segment.speedMps.isFinite) {
         throw StateError('유효하지 않은 경로 선분이 있습니다');
       }
-      distance += segment.distanceM;
+      if (segment.distanceM >= minMeaningfulSegmentDistanceM) {
+        distance += segment.distanceM;
+      }
       final seconds =
           segment.duration.inMicroseconds / Duration.microsecondsPerSecond;
       if (segment.speedMps < stationarySpeedMps) {

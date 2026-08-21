@@ -107,10 +107,13 @@ class WindowAggregator {
     final result = <DateTime, List<LocationSample>>{};
     for (final sample in samples) {
       if (sample.timestamp.isBefore(sessionStart) ||
-          !sample.timestamp.isBefore(sessionEnd)) {
+          sample.timestamp.isAfter(sessionEnd)) {
         continue;
       }
-      final key = floorToMinute(asLocal(sample.timestamp));
+      final timestampForBucket = sample.timestamp.isAtSameMomentAs(sessionEnd)
+          ? sample.timestamp.subtract(const Duration(microseconds: 1))
+          : sample.timestamp;
+      final key = floorToMinute(asLocal(timestampForBucket));
       result.putIfAbsent(key, () => []).add(sample);
     }
     return result;
@@ -141,7 +144,9 @@ class WindowAggregator {
         if (overlapUs > 0) {
           final bucket = motionByMinute.putIfAbsent(cursor, _WindowMotion.new);
           final overlapSeconds = overlapUs / Duration.microsecondsPerSecond;
-          bucket.distanceM += segment.distanceM * overlapUs / durationUs;
+          if (segment.distanceM >= minMeaningfulSegmentDistanceM) {
+            bucket.distanceM += segment.distanceM * overlapUs / durationUs;
+          }
           if (segment.speedMps < config.stationarySpeedMps) {
             bucket.stationarySeconds += overlapSeconds;
           } else {

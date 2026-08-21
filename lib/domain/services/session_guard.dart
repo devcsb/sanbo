@@ -184,6 +184,12 @@ class SessionGuard {
     _highSpeedPendingAt = null;
   }
 
+  /// Breaks speed accumulation when the caller rejects a provider fix before
+  /// it reaches [observe]. The next trusted fix becomes a fresh anchor.
+  void interruptHighSpeedContinuity() {
+    _interruptHighSpeedContinuity();
+  }
+
   bool _freshAtReceipt(LocationSample sample, DateTime observedAt) {
     final age = observedAt.difference(sample.timestamp.toUtc());
     return age <= policy.maxSampleAge && age >= -policy.maxSampleFutureSkew;

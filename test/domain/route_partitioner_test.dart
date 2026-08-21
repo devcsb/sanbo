@@ -94,6 +94,31 @@ void main() {
     expect(result.segments, isEmpty);
   });
 
+  test('computes a finite speed for a positive sub-millisecond segment', () {
+    final start = DateTime.utc(2026, 8, 21);
+    final result = RoutePartitioner.partition(
+      samples: [
+        LocationSample(
+          timestamp: start,
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+        LocationSample(
+          timestamp: start.add(const Duration(microseconds: 500)),
+          latitude: 37.5,
+          longitude: 127.000001,
+          accuracyM: 5,
+        ),
+      ],
+      exclusions: const [],
+    );
+
+    expect(result.segments, hasLength(1));
+    expect(result.segments.single.duration, const Duration(microseconds: 500));
+    expect(result.segments.single.speedMps.isFinite, isTrue);
+  });
+
   test(
     'normalizes instants to UTC and rejects invalid identities and ranges',
     () {

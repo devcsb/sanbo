@@ -131,9 +131,13 @@ class HomeScreen extends ConsumerWidget {
                                   .continueAfterWarning(),
                             );
                           },
-                          onStop: () => ref
-                              .read(sessionControllerProvider.notifier)
-                              .stopFromHighSpeedWarning(),
+                          onStop: () => _finishAndOpenSummary(
+                            context,
+                            ref,
+                            ref
+                                .read(sessionControllerProvider.notifier)
+                                .stopFromHighSpeedWarning,
+                          ),
                         ),
                       ],
                       if (recovery) ...[
@@ -148,18 +152,11 @@ class HomeScreen extends ConsumerWidget {
                                   .start(mode: startMode),
                             );
                           },
-                          onSaveAndEnd: () async {
-                            final ended = await ref
-                                .read(sessionControllerProvider.notifier)
-                                .stop();
-                            if (!context.mounted) return;
-                            ref.read(historyTickProvider.notifier).state++;
-                            if (ended != null) {
-                              await _celebrateMilestones(context, ref, ended);
-                              if (!context.mounted) return;
-                              context.go('/history/${ended.id}');
-                            }
-                          },
+                          onSaveAndEnd: () => _finishAndOpenSummary(
+                            context,
+                            ref,
+                            ref.read(sessionControllerProvider.notifier).stop,
+                          ),
                           onDiscard: () => _confirmDiscard(context, ref),
                         ),
                       ],
@@ -210,28 +207,20 @@ class HomeScreen extends ConsumerWidget {
                           child: FilledButton(
                             onPressed: busy
                                 ? null
-                                : () async {
+                                : () {
                                     unawaited(HapticFeedback.mediumImpact());
-                                    final ended = await ref
-                                        .read(
-                                          sessionControllerProvider.notifier,
-                                        )
-                                        .stop();
-                                    if (!context.mounted) return;
-                                    ref
-                                        .read(historyTickProvider.notifier)
-                                        .state++;
-                                    if (ended != null) {
-                                      await _celebrateMilestones(
+                                    unawaited(
+                                      _finishAndOpenSummary(
                                         context,
                                         ref,
-                                        ended,
-                                      );
-                                      if (!context.mounted) return;
-                                      context.go('/history/${ended.id}');
-                                    }
-                                    // ended == null: empty GPS walk discarded;
-                                    // error banner stays on home.
+                                        ref
+                                            .read(
+                                              sessionControllerProvider
+                                                  .notifier,
+                                            )
+                                            .stop,
+                                      ),
+                                    );
                                   },
                             style: FilledButton.styleFrom(
                               backgroundColor: theme.colorScheme.tertiary,
@@ -333,6 +322,18 @@ class HomeScreen extends ConsumerWidget {
       LocationPermissionState.unknown => '',
     };
   }
+}
+
+Future<void> _finishAndOpenSummary(
+  BuildContext context,
+  WidgetRef ref,
+  Future<WalkSession?> Function() stop,
+) async {
+  final ended = await stop();
+  if (ended == null || !context.mounted) return;
+  ref.read(historyTickProvider.notifier).state++;
+  context.go('/history/${ended.id}');
+  unawaited(_celebrateMilestones(context, ref, ended));
 }
 
 Future<void> _celebrateMilestones(

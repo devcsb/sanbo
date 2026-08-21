@@ -415,6 +415,37 @@ void main() {
     }
   });
 
+  test(
+    'a window referencing another completed session exclusion rolls back all imports',
+    () async {
+      final source = await openTestRepository();
+      final target = await openTestRepository();
+      addTearDown(source.close);
+      addTearDown(target.close);
+      final first = await seedCompletedTwoMinuteWalk(source);
+      final exclusion = await source.excludeRouteSegment(
+        sessionId: first.session.id,
+        segment: first.segments.last,
+      );
+      final second = await seedCompletedTwoMinuteWalk(source);
+      final backup =
+          jsonDecode(await source.createBackupJson()) as Map<String, dynamic>;
+      final windows = _tables(backup)['minute_windows'] as List<dynamic>;
+      final foreignWindow = windows.cast<Map<String, dynamic>>().firstWhere(
+        (window) => window['session_id'] == second.session.id,
+      );
+      foreignWindow['user_exclusion_id'] = exclusion.id;
+
+      await expectLater(
+        target.importBackupJson(jsonEncode(backup)),
+        throwsFormatException,
+      );
+      expect(await target.listCompleted(), isEmpty);
+      expect(await target.getRouteExclusions(first.session.id), isEmpty);
+      expect(await target.getRouteExclusions(second.session.id), isEmpty);
+    },
+  );
+
   test('empty v2 backup imports without writing rows', () async {
     final target = await openTestRepository();
     addTearDown(target.close);

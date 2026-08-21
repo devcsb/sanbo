@@ -24,6 +24,8 @@ abstract class SessionNotificationService {
   Future<void> showCompletion({required String title, required String body});
 
   Future<void> cancel({required SessionWarningKind kind});
+
+  Future<void> cancelAllWarnings();
 }
 
 class PlatformSessionNotificationService implements SessionNotificationService {
@@ -86,6 +88,19 @@ class PlatformSessionNotificationService implements SessionNotificationService {
       // Desktop, web, and widget tests do not install a native handler.
     } on PlatformException {
       // Notification failures must never interrupt an active walk.
+    }
+  }
+
+  @override
+  Future<void> cancelAllWarnings() async {
+    for (final id in const {_warningId, _highSpeedWarningId}) {
+      try {
+        await _channel.invokeMethod<void>('cancel', {'id': id});
+      } on MissingPluginException {
+        // Desktop, web, and widget tests do not install a native handler.
+      } on PlatformException {
+        // Notification failures must never interrupt session cleanup.
+      }
     }
   }
 

@@ -17,6 +17,8 @@ class ActivitySegment {
     this.sessionId,
     this.avgSpeedMps = 0,
     this.quality = WindowQuality.medium,
+    this.actualStart,
+    this.actualEndExclusive,
   });
 
   /// First minute boundary in the segment.
@@ -34,6 +36,11 @@ class ActivitySegment {
   final double avgSpeedMps;
   final WindowQuality quality;
 
+  /// Real session-clamped range. Minute keys remain available through
+  /// [start] and [endInclusive] for stable timeline identity.
+  final DateTime? actualStart;
+  final DateTime? actualEndExclusive;
+
   /// Underlying minute windows (ordered).
   final List<MinuteWindow> windows;
 
@@ -46,12 +53,16 @@ class ActivitySegment {
 
   int get minuteCount => windows.length;
 
-  /// Exclusive end of the last minute (or partial span).
-  DateTime get endExclusive => endInclusive.add(
-    Duration(
-      seconds: windows.isEmpty ? 60 : windows.last.durationS.clamp(1, 60),
-    ),
-  );
+  DateTime get startAt => actualStart ?? start;
+
+  /// Exclusive end of the real segment range.
+  DateTime get endExclusive =>
+      actualEndExclusive ??
+      endInclusive.add(
+        Duration(
+          seconds: windows.isEmpty ? 60 : windows.last.durationS.clamp(1, 60),
+        ),
+      );
 
   /// True when this segment spans more than one wall-clock minute.
   bool get isMultiMinute => minuteCount > 1;
@@ -63,7 +74,12 @@ class SegmentMerger {
 
   final double minConfidence;
 
-  List<ActivitySegment> merge(List<MinuteWindow> windows, {String? sessionId}) {
+  List<ActivitySegment> merge(
+    List<MinuteWindow> windows, {
+    String? sessionId,
+    DateTime? sessionStart,
+    DateTime? sessionEnd,
+  }) {
     if (windows.isEmpty) return const [];
 
     final sorted = [...windows]
@@ -78,11 +94,11 @@ class SegmentMerger {
       if (_canMerge(prev, cur)) {
         bucket.add(cur);
       } else {
-        segments.add(_toSegment(bucket, sessionId));
+        segments.add(_toSegment(bucket, sessionId, sessionStart, sessionEnd));
         bucket = [cur];
       }
     }
-    segments.add(_toSegment(bucket, sessionId));
+    segments.add(_toSegment(bucket, sessionId, sessionStart, sessionEnd));
     return segments;
   }
 
@@ -152,7 +168,12 @@ class SegmentMerger {
     };
   }
 
-  ActivitySegment _toSegment(List<MinuteWindow> bucket, String? sessionId) {
+  ActivitySegment _toSegment(
+    List<MinuteWindow> bucket,
+    String? sessionId,
+    DateTime? sessionStart,
+    DateTime? sessionEnd,
+  ) {
     assert(bucket.isNotEmpty);
     final first = bucket.first;
     final last = bucket.last;
@@ -191,6 +212,15 @@ class SegmentMerger {
       quality: worstQuality,
       windows: List.unmodifiable(bucket),
       sessionId: sessionId,
+      actualStart: sessionStart == null
+          ? null
+          : _later(first.windowStart, sessionStart),
+      actualEndExclusive: sessionEnd == null
+          ? null
+          : _earlier(
+              last.windowStart.add(const Duration(minutes: 1)),
+              sessionEnd,
+            ),
     );
   }
 
@@ -204,3 +234,6 @@ class SegmentMerger {
     return rank(a) >= rank(b) ? a : b;
   }
 }
+
+DateTime _later(DateTime a, DateTime b) => a.isAfter(b) ? a : b;
+DateTime _earlier(DateTime a, DateTime b) => a.isBefore(b) ? a : b;

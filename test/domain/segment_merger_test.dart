@@ -41,6 +41,38 @@ void main() {
     expect(segments.single.sessionId, 'walk-1');
   });
 
+  test('exposes the real bounds of partial edge minutes', () {
+    final minute = DateTime.utc(2026, 8, 21);
+    final sessionStart = minute.add(const Duration(seconds: 50));
+    final sessionEnd = minute.add(const Duration(minutes: 1));
+    final segment = SegmentMerger()
+        .merge(
+          [
+            MinuteWindow(
+              windowStart: minute,
+              durationS: 10,
+              partial: true,
+              sampleCount: 2,
+              rawSampleCount: 2,
+              distanceM: 10,
+              avgSpeedMps: 1,
+              maxSpeedMps: 1,
+              stationaryRatio: 0,
+              quality: WindowQuality.high,
+              hypothesisLabel: ActivityLabel.walkSteady,
+              hypothesisConfidence: 0.8,
+            ),
+          ],
+          sessionId: 'walk-1',
+          sessionStart: sessionStart,
+          sessionEnd: sessionEnd,
+        )
+        .single;
+
+    expect(segment.startAt, sessionStart);
+    expect(segment.endExclusive, sessionEnd);
+  });
+
   test('merges consecutive same-label walk minutes into one segment', () {
     final t0 = DateTime(2026, 7, 12, 14, 0);
     final windows = [
