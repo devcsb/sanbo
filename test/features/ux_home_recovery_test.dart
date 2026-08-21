@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
+import 'package:sanbo/domain/models/session_warning.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
@@ -66,7 +67,9 @@ void main() {
     expect(live.errorMessage, contains('기록을 확인하지 못했어요'));
     expect(live.errorMessage, isNot(contains('DatabaseException')));
 
-    final retry = container.read(sessionControllerProvider.notifier).retryRecovery();
+    final retry = container
+        .read(sessionControllerProvider.notifier)
+        .retryRecovery();
     expect(container.read(sessionControllerProvider).isBusy, isTrue);
     await retry;
     expect(container.read(sessionControllerProvider).isBusy, isFalse);
@@ -151,6 +154,70 @@ void main() {
   });
 
   test(
+    'recovery rebuilds only recent high-speed state before resuming',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final now = DateTime(2026, 8, 21, 9);
+      final recent = await repo.startSession(
+        mode: TrackingMode.balanced,
+        startedAt: now.subtract(const Duration(seconds: 60)),
+      );
+      await repo.insertSamples(recent.id, _highSpeedSamples(recent.startedAt));
+
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.restoreIfNeeded();
+      expect(container.read(sessionControllerProvider).activeWarning, isNull);
+      await controller.start();
+      expect(
+        container.read(sessionControllerProvider).activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+    },
+  );
+
+  test('recovery ignores stale high-speed samples', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final now = DateTime(2026, 8, 21, 9);
+    final staleStart = now.subtract(const Duration(minutes: 10));
+    final session = await repo.startSession(
+      mode: TrackingMode.balanced,
+      startedAt: staleStart,
+    );
+    await repo.insertSamples(session.id, _highSpeedSamples(staleStart));
+
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+    await controller.start();
+    expect(container.read(sessionControllerProvider).activeWarning, isNull);
+  });
+
+  test(
     'HomeScreen + discard_confirm ship recovery confirm and busy hierarchy',
     () {
       final home = File(
@@ -168,7 +235,8 @@ void main() {
       expect(home, contains('설정 열기'));
       expect(home, contains('openSystemSettings'));
       expect(home, contains('계속 기록'));
-      expect(home, contains('autoStopWarning'));
+      expect(home, contains('activeWarning'));
+      expect(home, contains('_SessionWarningBanner'));
       expect(home, contains('canRetryRecovery'));
       expect(home, contains('retryRecovery'));
       expect(home, contains('else if (!recovery)'));
@@ -176,4 +244,17 @@ void main() {
       expect(confirm, contains('기록 지우기'));
     },
   );
+}
+
+List<LocationSample> _highSpeedSamples(DateTime start) {
+  const degreesPerMeter = 1 / 111320.0;
+  return [
+    for (var second = 0; second <= 60; second += 10)
+      LocationSample(
+        timestamp: start.add(Duration(seconds: second)),
+        latitude: 37.5665 + (second * 10 * degreesPerMeter),
+        longitude: 126.9780,
+        accuracyM: 6,
+      ),
+  ];
 }

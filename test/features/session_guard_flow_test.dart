@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
+import 'package:sanbo/domain/models/session_warning.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sanbo/features/history/history_providers.dart';
@@ -87,19 +88,22 @@ void main() {
       now = session.startedAt.add(const Duration(minutes: 21));
       await controller.debugEvaluateSessionGuard();
       var live = container.read(sessionControllerProvider);
-      expect(live.autoStopWarning, contains('20분'));
-      expect(live.canContinueAfterWarning, isTrue);
+      expect(live.activeWarning?.kind, SessionWarningKind.stationary);
+      expect(live.activeWarning?.message, contains('20분'));
+      expect(live.activeWarning?.actions, {
+        SessionWarningAction.continueRecording,
+      });
       expect(notifications.warnings, hasLength(1));
 
-      controller.continueTrackingAfterStay();
+      controller.continueAfterWarning();
       live = container.read(sessionControllerProvider);
-      expect(live.autoStopWarning, isNull);
+      expect(live.activeWarning, isNull);
       expect(live.isTracking, isTrue);
 
       now = now.add(const Duration(minutes: 20));
       await controller.debugEvaluateSessionGuard();
       expect(
-        container.read(sessionControllerProvider).autoStopWarning,
+        container.read(sessionControllerProvider).activeWarning?.message,
         contains('20분'),
       );
       expect(notifications.warnings, hasLength(2));
@@ -175,8 +179,9 @@ void main() {
     await controller.debugEvaluateSessionGuard();
     var live = container.read(sessionControllerProvider);
     expect(live.isTracking, isTrue);
-    expect(live.autoStopWarning, contains('4시간 45분'));
-    expect(live.canContinueAfterWarning, isFalse);
+    expect(live.activeWarning?.kind, SessionWarningKind.duration);
+    expect(live.activeWarning?.message, contains('4시간 45분'));
+    expect(live.activeWarning?.actions, isEmpty);
     expect(notifications.warnings.single, contains('곧 종료'));
 
     now = session.startedAt.add(const Duration(hours: 5));
@@ -230,7 +235,7 @@ void main() {
       expect(live.needsRecovery, isTrue);
       expect(live.session?.id, session.id);
       expect(live.errorMessage, contains('저장에 실패'));
-      expect(live.autoStopWarning, isNull);
+      expect(live.activeWarning, isNull);
       expect(notifications.completions, isEmpty);
       expect(notifications.warnings.last, contains('저장을 마치지 못했어요'));
       expect(container.read(historyTickProvider), 0);
@@ -238,4 +243,190 @@ void main() {
       expect(await repo.listCompleted(), isEmpty);
     },
   );
+
+  test(
+    'foreground high speed warns once and continue only dismisses its presentation',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final notifications = _FakeSessionNotifications();
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final startedAt = container
+          .read(sessionControllerProvider)
+          .session!
+          .startedAt;
+      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await controller.debugEvaluateSessionGuard(now);
+
+      var live = container.read(sessionControllerProvider);
+      expect(live.activeWarning?.kind, SessionWarningKind.highSpeed);
+      expect(live.activeWarning?.actions, {
+        SessionWarningAction.stopRecording,
+        SessionWarningAction.continueRecording,
+      });
+      expect(notifications.warnings, isEmpty);
+
+      controller.continueAfterWarning();
+      live = container.read(sessionControllerProvider);
+      expect(live.activeWarning, isNull);
+
+      for (final sample in _highSpeedTrace(
+        startedAt.add(const Duration(seconds: 70)),
+        seconds: 30,
+      )) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await controller.debugEvaluateSessionGuard(now);
+      expect(container.read(sessionControllerProvider).activeWarning, isNull);
+    },
+  );
+
+  test(
+    'background high speed notifies once and retains the active warning',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final notifications = _FakeSessionNotifications();
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      controller.setAppForeground(false);
+      final startedAt = container
+          .read(sessionControllerProvider)
+          .session!
+          .startedAt;
+      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await controller.debugEvaluateSessionGuard(now);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(
+        container.read(sessionControllerProvider).activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+      expect(notifications.warnings, hasLength(1));
+    },
+  );
+
+  test('high-speed stop action invokes the user stop flow once', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    var now = DateTime(2026, 8, 21, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final startedAt = container
+        .read(sessionControllerProvider)
+        .session!
+        .startedAt;
+    for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+      now = sample.timestamp;
+      controller.debugIngestSamples([sample]);
+    }
+    await controller.debugEvaluateSessionGuard(now);
+
+    final ended = await controller.stopFromHighSpeedWarning();
+    expect(ended, isNotNull);
+    expect(await repo.listCompleted(), hasLength(1));
+    expect(container.read(historyTickProvider), 0);
+  });
+
+  test(
+    'duration auto-stop wins when high-speed warning is also active',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final startedAt = container
+          .read(sessionControllerProvider)
+          .session!
+          .startedAt;
+      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await controller.debugEvaluateSessionGuard(now);
+      expect(
+        container.read(sessionControllerProvider).activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+
+      now = startedAt.add(const Duration(hours: 5));
+      await controller.debugEvaluateSessionGuard(now);
+      expect(container.read(sessionControllerProvider).isTracking, isFalse);
+      expect(await repo.listCompleted(), hasLength(1));
+    },
+  );
+}
+
+List<LocationSample> _highSpeedTrace(DateTime start, {required int seconds}) {
+  const degreesPerMeter = 1 / 111320.0;
+  return [
+    for (var second = 0; second <= seconds; second += 10)
+      LocationSample(
+        timestamp: start.add(Duration(seconds: second)),
+        latitude: 37.5665 + (second * 10 * degreesPerMeter),
+        longitude: 126.9780,
+        accuracyM: 6,
+      ),
+  ];
 }

@@ -162,7 +162,10 @@ class SessionGuard {
           }).toList()
           ..sort((a, b) => a.timestamp.toUtc().compareTo(b.timestamp.toUtc()));
     for (final sample in recentSamples) {
-      observe(sample, observedAt: observedAt);
+      // Replaying with the original receipt times retains a recent contiguous
+      // high-speed span while the outer window prevents stale recovery data
+      // from arming a warning.
+      observe(sample, observedAt: sample.timestamp);
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/walk_repository.dart';
 import '../../domain/models/location_sample.dart';
+import '../../domain/models/session_warning.dart';
 import '../../domain/models/tracking_mode.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/geo.dart';
@@ -30,8 +31,7 @@ class LiveSessionState {
     this.errorMessage,
     this.statusMessage,
     this.notice,
-    this.autoStopWarning,
-    this.canContinueAfterWarning = false,
+    this.activeWarning,
     this.needsRecovery = false,
     this.canRetryRecovery = false,
   });
@@ -58,10 +58,7 @@ class LiveSessionState {
   final String? notice;
 
   /// A time-sensitive warning shown while a walk is still recording.
-  final String? autoStopWarning;
-
-  /// Long-stay warnings can be acknowledged to restart the stationary timer.
-  final bool canContinueAfterWarning;
+  final SessionWarning? activeWarning;
 
   /// Incomplete session recovered from disk (UX-H04).
   final bool needsRecovery;
@@ -83,14 +80,13 @@ class LiveSessionState {
     String? errorMessage,
     String? statusMessage,
     String? notice,
-    String? autoStopWarning,
-    bool? canContinueAfterWarning,
+    SessionWarning? activeWarning,
     bool? needsRecovery,
     bool? canRetryRecovery,
     bool clearError = false,
     bool clearSession = false,
     bool clearNotice = false,
-    bool clearAutoStopWarning = false,
+    bool clearActiveWarning = false,
   }) {
     return LiveSessionState(
       session: clearSession ? null : (session ?? this.session),
@@ -106,11 +102,9 @@ class LiveSessionState {
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
       statusMessage: statusMessage,
       notice: clearNotice ? null : (notice ?? this.notice),
-      autoStopWarning: clearAutoStopWarning
+      activeWarning: clearActiveWarning
           ? null
-          : (autoStopWarning ?? this.autoStopWarning),
-      canContinueAfterWarning:
-          canContinueAfterWarning ?? this.canContinueAfterWarning,
+          : (activeWarning ?? this.activeWarning),
       needsRecovery: needsRecovery ?? this.needsRecovery,
       canRetryRecovery: canRetryRecovery ?? this.canRetryRecovery,
     );
@@ -275,6 +269,10 @@ class SessionController extends Notifier<LiveSessionState> {
       _pendingPersist.clear();
 
       _recomputeLiveMetricsFromBuffer();
+      _sessionGuard.rebuildHighSpeedState(
+        samples: existing,
+        observedAt: _clock(),
+      );
       state = LiveSessionState(
         session: active,
         isTracking: false,
@@ -460,7 +458,9 @@ class SessionController extends Notifier<LiveSessionState> {
       _recomputeLiveMetricsFromBuffer();
 
       await _engine.setMode(mode);
-      _sessionGuard.reset();
+      if (!resuming) {
+        _sessionGuard.reset();
+      }
       // Listen BEFORE start so seed/first GPS fixes are not dropped on the
       // broadcast stream (real-device cold start race).
       await _sampleSub?.cancel();
@@ -552,7 +552,7 @@ class SessionController extends Notifier<LiveSessionState> {
     final probe = prev == null ? [sample] : [prev, sample];
     final marked = _liveFilter.apply(probe).last;
     double? segmentSpeed;
-    var clearedStayWarning = false;
+    SessionGuardObservation? observation;
     if (ordered && !marked.isFilteredOut) {
       if (prev != null) {
         final dtMs = marked.timestamp.difference(prev.timestamp).inMilliseconds;
@@ -573,9 +573,7 @@ class SessionController extends Notifier<LiveSessionState> {
       }
       _lastValidSample = marked;
       _validSampleCount += 1;
-      clearedStayWarning = _sessionGuard
-          .observe(marked, observedAt: _clock())
-          .clearedStationaryWarning;
+      observation = _sessionGuard.observe(marked, observedAt: _clock());
     }
 
     final providerSpeed = sample.speedMps;
@@ -600,12 +598,13 @@ class SessionController extends Notifier<LiveSessionState> {
       _firstFixTimer?.cancel();
       _firstFixTimer = null;
     }
-    final clearVisibleStayWarning =
-        clearedStayWarning && state.canContinueAfterWarning;
+    final clearVisibleStationaryWarning =
+        observation?.clearedStationaryWarning == true &&
+        state.activeWarning?.kind == SessionWarningKind.stationary;
     // Native location recording continues in the background, but rebuilding
     // the Riverpod/UI tree for every GPS fix does not. The latest aggregates
     // are published once when the app returns to the foreground.
-    if (_appForeground || clearVisibleStayWarning) {
+    if (_appForeground || clearVisibleStationaryWarning) {
       state = state.copyWith(
         sampleCount: _sessionSamples.length,
         validSampleCount: _validSampleCount,
@@ -614,14 +613,16 @@ class SessionController extends Notifier<LiveSessionState> {
         lastAccuracyM: _lastAccuracyM,
         statusMessage: _validSampleCount == 0 ? 'GPS 보정 중' : '기록 중',
         clearError: true,
-        clearAutoStopWarning: clearVisibleStayWarning,
-        canContinueAfterWarning: clearedStayWarning
-            ? false
-            : state.canContinueAfterWarning,
+        clearActiveWarning: clearVisibleStationaryWarning,
       );
     }
-    if (clearVisibleStayWarning) {
+    if (clearVisibleStationaryWarning) {
       unawaited(_notifications.cancelWarning());
+    }
+    if (observation?.acceptedForHighSpeed == true) {
+      unawaited(
+        _evaluateSessionGuard(_clock(), generation: _sessionGeneration),
+      );
     }
     // Sample-count checkpoints keep persistence and safety limits moving even
     // when periodic Dart timers are throttled by Android/iOS power management.
@@ -653,15 +654,19 @@ class SessionController extends Notifier<LiveSessionState> {
       case SessionGuardEvent.none:
         return;
       case SessionGuardEvent.stationaryWarning:
-        const message = '한곳에 20분 이상 머물고 있어요. 정지 상태가 30분 이어지면 자동으로 저장하고 종료합니다.';
+        const warning = SessionWarning(
+          kind: SessionWarningKind.stationary,
+          title: '산책을 계속 기록할까요?',
+          message: '한곳에 20분 이상 머물고 있어요. 정지 상태가 30분 이어지면 자동으로 저장하고 종료합니다.',
+          actions: {SessionWarningAction.continueRecording},
+        );
         state = state.copyWith(
-          autoStopWarning: message,
-          canContinueAfterWarning: true,
+          activeWarning: warning,
           statusMessage: '정지 상태 확인 중',
         );
         await _notifications.showWarning(
-          title: '산책을 계속 기록할까요?',
-          body: '$message 계속 머무를 예정이라면 앱에서 ‘계속 기록’을 눌러 주세요.',
+          title: warning.title,
+          body: '${warning.message} 계속 머무를 예정이라면 앱에서 ‘계속 기록’을 눌러 주세요.',
         );
         return;
       case SessionGuardEvent.stationaryLimit:
@@ -674,13 +679,20 @@ class SessionController extends Notifier<LiveSessionState> {
         }
         return;
       case SessionGuardEvent.durationWarning:
-        const message = '산책 기록이 4시간 45분을 넘었어요. 총 5시간이 되면 자동으로 저장하고 종료합니다.';
+        const warning = SessionWarning(
+          kind: SessionWarningKind.duration,
+          title: '산책 기록이 곧 종료돼요',
+          message: '산책 기록이 4시간 45분을 넘었어요. 총 5시간이 되면 자동으로 저장하고 종료합니다.',
+          actions: {},
+        );
         state = state.copyWith(
-          autoStopWarning: message,
-          canContinueAfterWarning: false,
+          activeWarning: warning,
           statusMessage: '자동 종료 예정',
         );
-        await _notifications.showWarning(title: '산책 기록이 곧 종료돼요', body: message);
+        await _notifications.showWarning(
+          title: warning.title,
+          body: warning.message,
+        );
         return;
       case SessionGuardEvent.durationLimit:
         if (deferAutoStop) {
@@ -692,19 +704,51 @@ class SessionController extends Notifier<LiveSessionState> {
         }
         return;
       case SessionGuardEvent.highSpeedWarning:
+        const warning = SessionWarning(
+          kind: SessionWarningKind.highSpeed,
+          title: '산책 기록을 계속할까요?',
+          message: '이동 속도가 매우 빨라요. 산책을 마쳤다면 기록을 종료해 주세요.',
+          actions: {
+            SessionWarningAction.stopRecording,
+            SessionWarningAction.continueRecording,
+          },
+        );
+        state = state.copyWith(
+          activeWarning: warning,
+          statusMessage: '기록 종료 확인 중',
+        );
+        if (!_appForeground) {
+          await _notifications.showWarning(
+            title: warning.title,
+            body: warning.message,
+          );
+        }
         return;
     }
   }
 
-  void continueTrackingAfterStay() {
-    if (!state.isTracking || !state.canContinueAfterWarning) return;
-    _sessionGuard.continueStationaryTracking(_clock());
-    state = state.copyWith(
-      clearAutoStopWarning: true,
-      canContinueAfterWarning: false,
-      statusMessage: '기록 중',
-    );
+  void continueAfterWarning() {
+    final warning = state.activeWarning;
+    if (!state.isTracking || warning == null) return;
+    switch (warning.kind) {
+      case SessionWarningKind.stationary:
+        _sessionGuard.continueStationaryTracking(_clock());
+        break;
+      case SessionWarningKind.highSpeed:
+        _sessionGuard.dismissHighSpeedWarning();
+        break;
+      case SessionWarningKind.duration:
+        return;
+    }
+    state = state.copyWith(clearActiveWarning: true, statusMessage: '기록 중');
     unawaited(_notifications.cancelWarning());
+  }
+
+  Future<WalkSession?> stopFromHighSpeedWarning() async {
+    if (state.activeWarning?.kind != SessionWarningKind.highSpeed) return null;
+    state = state.copyWith(clearActiveWarning: true);
+    await _notifications.cancelWarning();
+    return stop();
   }
 
   Future<void> _autoStop({required String completionNotice}) async {
@@ -807,7 +851,7 @@ class SessionController extends Notifier<LiveSessionState> {
         liveSpeedMps: _liveSpeedMps,
         liveDistanceM: _liveDistanceM,
         lastAccuracyM: _lastAccuracyM,
-        statusMessage: state.autoStopWarning == null
+        statusMessage: state.activeWarning == null
             ? (_validSampleCount == 0 ? 'GPS 보정 중' : '기록 중')
             : state.statusMessage,
       );
@@ -958,8 +1002,7 @@ class SessionController extends Notifier<LiveSessionState> {
         isBusy: false,
         isTracking: false,
         needsRecovery: true,
-        clearAutoStopWarning: true,
-        canContinueAfterWarning: false,
+        clearActiveWarning: true,
         errorMessage: '저장에 실패했습니다. 아래 ‘저장하고 종료’를 다시 눌러 주세요.',
         statusMessage: '기록은 기기에 남아 있습니다.',
       );

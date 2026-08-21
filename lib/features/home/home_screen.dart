@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../platform/location/location_engine.dart';
 import '../../data/walk_repository.dart';
+import '../../domain/models/session_warning.dart';
 import '../../domain/models/walk_session.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
@@ -117,15 +118,17 @@ class HomeScreen extends ConsumerWidget {
                               .clearNotice(),
                         ),
                       ],
-                      if (tracking && live.autoStopWarning != null) ...[
+                      if (tracking && live.activeWarning != null) ...[
                         const SizedBox(height: 14),
-                        _AutoStopBanner(
-                          message: live.autoStopWarning!,
-                          onContinue: live.canContinueAfterWarning && !busy
-                              ? () => ref
-                                    .read(sessionControllerProvider.notifier)
-                                    .continueTrackingAfterStay()
-                              : null,
+                        _SessionWarningBanner(
+                          warning: live.activeWarning!,
+                          busy: busy,
+                          onContinue: () => ref
+                              .read(sessionControllerProvider.notifier)
+                              .continueAfterWarning(),
+                          onStop: () => ref
+                              .read(sessionControllerProvider.notifier)
+                              .stopFromHighSpeedWarning(),
                         ),
                       ],
                       if (recovery) ...[
@@ -500,25 +503,35 @@ class _NoticeBanner extends StatelessWidget {
   }
 }
 
-class _AutoStopBanner extends StatelessWidget {
-  const _AutoStopBanner({required this.message, this.onContinue});
+class _SessionWarningBanner extends StatelessWidget {
+  const _SessionWarningBanner({
+    required this.warning,
+    required this.busy,
+    required this.onContinue,
+    required this.onStop,
+  });
 
-  final String message;
-  final VoidCallback? onContinue;
+  final SessionWarning warning;
+  final bool busy;
+  final VoidCallback onContinue;
+  final Future<void> Function() onStop;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Semantics(
-      liveRegion: true,
-      child: SoftPanel(
-        elevated: false,
-        color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.92),
-        padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Row(
+    return SoftPanel(
+      elevated: false,
+      color: theme.colorScheme.secondaryContainer.withValues(alpha: 0.92),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            container: true,
+            liveRegion: true,
+            label: '${warning.title}. ${warning.message}',
+            excludeSemantics: true,
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Icon(
@@ -528,33 +541,65 @@ class _AutoStopBanner extends StatelessWidget {
                 ),
                 const SizedBox(width: 10),
                 Expanded(
-                  child: Text(
-                    message,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: theme.colorScheme.onSecondaryContainer,
-                      height: 1.4,
-                    ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        warning.title,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.onSecondaryContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        warning.message,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSecondaryContainer,
+                          height: 1.4,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
             ),
-            if (onContinue != null) ...[
-              const SizedBox(height: 6),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton.icon(
-                  onPressed: onContinue,
-                  icon: const Icon(Icons.play_arrow_rounded),
-                  label: const Text('계속 기록'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: theme.colorScheme.onSecondaryContainer,
-                    minimumSize: const Size(48, 48),
+          ),
+          if (warning.actions.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 4,
+              children: [
+                if (warning.actions.contains(
+                  SessionWarningAction.stopRecording,
+                ))
+                  FilledButton(
+                    onPressed: busy
+                        ? null
+                        : () {
+                            unawaited(onStop());
+                          },
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(48, 48),
+                    ),
+                    child: const Text('기록 종료'),
                   ),
-                ),
-              ),
-            ],
+                if (warning.actions.contains(
+                  SessionWarningAction.continueRecording,
+                ))
+                  TextButton(
+                    onPressed: busy ? null : onContinue,
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.onSecondaryContainer,
+                      minimumSize: const Size(48, 48),
+                    ),
+                    child: const Text('계속 기록'),
+                  ),
+              ],
+            ),
           ],
-        ),
+        ],
       ),
     );
   }
