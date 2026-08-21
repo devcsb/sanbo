@@ -6,11 +6,14 @@ import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
+import 'package:sanbo/domain/pipeline/segment_merger.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sanbo/domain/services/walk_stats.dart';
 
 import '../helpers/test_db.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+
+import '../helpers/route_exclusion_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -92,6 +95,266 @@ void main() {
       expect(days.last.walkCount, 0);
     },
   );
+
+  test(
+    'exclude and restore atomically recalculate while preserving source rows and metadata',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      final beforeSamples = await repo.getSamples(fixture.session.id);
+
+      final exclusion = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: fixture.segments.last,
+        createdAt: DateTime.utc(2026, 8, 21, 1),
+      );
+
+      expect(exclusion.startAt.isUtc, isTrue);
+      expect(exclusion.endAt.isUtc, isTrue);
+      expect(
+        _sampleSnapshot(await repo.getSamples(fixture.session.id)),
+        _sampleSnapshot(beforeSamples),
+      );
+      final excludedWindows = await repo.getWindows(fixture.session.id);
+      expect(
+        excludedWindows.where(
+          (window) => window.userExclusionId == exclusion.id,
+        ),
+        isNotEmpty,
+      );
+      expect(excludedWindows.first.userNote, fixture.windows.first.userNote);
+      expect(excludedWindows.first.placeId, fixture.windows.first.placeId);
+      final reduced = await repo.getSession(fixture.session.id);
+      expect(reduced!.durationS, 60);
+
+      await repo.restoreRouteExclusion(
+        sessionId: fixture.session.id,
+        exclusionId: exclusion.id,
+      );
+      expect(await repo.getRouteExclusions(fixture.session.id), isEmpty);
+      expect(
+        _sampleSnapshot(await repo.getSamples(fixture.session.id)),
+        _sampleSnapshot(beforeSamples),
+      );
+      final restored = await repo.getSession(fixture.session.id);
+      expect(restored!.durationS, fixture.session.durationS);
+      expect(
+        restored.totalDistanceM,
+        closeTo(fixture.session.totalDistanceM!, 0.001),
+      );
+    },
+  );
+
+  test(
+    'route exclusion rejects active, unknown, empty, and overlapping selections',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final active = await repo.startSession(
+        startedAt: DateTime.utc(2026, 8, 21),
+      );
+      final empty = _segment(
+        start: DateTime.utc(2026, 8, 21),
+        windows: const [],
+      );
+      await expectLater(
+        repo.excludeRouteSegment(sessionId: active.id, segment: empty),
+        throwsA(isA<StateError>()),
+      );
+      await repo.completeSession(
+        sessionId: active.id,
+        endedAt: DateTime.utc(2026, 8, 21, 0, 1),
+        totalDistanceM: 0,
+        durationS: 60,
+        movingTimeS: 0,
+        stationaryTimeS: 60,
+        avgSpeedMps: 0,
+        validSampleCount: 0,
+      );
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      await expectLater(
+        repo.excludeRouteSegment(sessionId: fixture.session.id, segment: empty),
+        throwsA(isA<StateError>()),
+      );
+      final first = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: fixture.segments.last,
+      );
+      await expectLater(
+        repo.excludeRouteSegment(
+          sessionId: fixture.session.id,
+          segment: fixture.segments.last,
+        ),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        repo.restoreRouteExclusion(
+          sessionId: fixture.session.id,
+          exclusionId: '${first.id}-unknown',
+        ),
+        throwsA(isA<StateError>()),
+      );
+    },
+  );
+
+  test(
+    'route exclusion clamps an out-of-range selection to completed bounds',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      final segment = _segment(
+        start: fixture.session.startedAt.subtract(const Duration(minutes: 1)),
+        endInclusive: fixture.session.endedAt!,
+        windows: fixture.windows,
+      );
+
+      final exclusion = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: segment,
+      );
+
+      expect(exclusion.startAt, fixture.session.startedAt.toUtc());
+      expect(exclusion.endAt, fixture.session.endedAt!.toUtc());
+    },
+  );
+
+  test(
+    'touching route exclusions are accepted, including offset-equivalent instants',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      final first = fixture.segments.first;
+      final lastWindow = fixture.windows.last;
+      final offsetEquivalent = _segment(
+        start: DateTime.parse('2026-08-20T20:01:00-04:00'),
+        endInclusive: DateTime.parse('2026-08-20T20:01:00-04:00'),
+        windows: [lastWindow],
+      );
+
+      final firstExclusion = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: first,
+      );
+      final secondExclusion = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: offsetEquivalent,
+      );
+
+      expect(firstExclusion.endAt, secondExclusion.startAt);
+      expect(
+        (await repo.getRouteExclusions(
+          fixture.session.id,
+        )).map((item) => item.id),
+        [firstExclusion.id, secondExclusion.id],
+      );
+    },
+  );
+
+  test(
+    'DST offset instant selects the same persisted completed minute',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime.parse('2026-11-01T01:00:00-04:00');
+      final session = await repo.startSession(startedAt: start);
+      final samples = [
+        for (var second = 0; second <= 120; second += 20)
+          LocationSample(
+            timestamp: start.add(Duration(seconds: second)),
+            latitude: 37.5,
+            longitude: 127 + second * 0.00001,
+            accuracyM: 5,
+          ),
+      ];
+      final pipeline = SessionPipeline();
+      final result = pipeline.process(
+        session: session,
+        rawSamples: samples,
+        endedAt: start.add(const Duration(minutes: 2)),
+      );
+      await repo.finalizeSession(
+        session: session,
+        samples: result.filteredSamples,
+        windows: result.windows,
+        endedAt: start.add(const Duration(minutes: 2)),
+        totalDistanceM: result.metrics.totalDistanceM,
+        durationS: result.metrics.durationS,
+        movingTimeS: result.metrics.movingTimeS,
+        stationaryTimeS: result.metrics.stationaryTimeS,
+        avgSpeedMps: result.metrics.avgSpeedMps,
+        validSampleCount: result.metrics.validSampleCount,
+        medianAccuracyM: result.metrics.medianAccuracyM,
+      );
+      final firstWindow = (await repo.getWindows(session.id)).first;
+      final segment = _segment(
+        start: DateTime.parse('2026-11-01T01:00:00-04:00'),
+        windows: [firstWindow],
+      );
+
+      final exclusion = await repo.excludeRouteSegment(
+        sessionId: session.id,
+        segment: segment,
+      );
+
+      expect(exclusion.startAt, start.toUtc());
+      expect(exclusion.endAt, start.toUtc().add(const Duration(minutes: 1)));
+    },
+  );
+
+  for (final failure in <({String name, String sql})>[
+    (
+      name: 'exclusion_insert',
+      sql: '''
+CREATE TRIGGER fail_route_exclusion_insert
+BEFORE INSERT ON route_exclusions
+BEGIN SELECT RAISE(ABORT, 'forced exclusion failure'); END
+''',
+    ),
+    (
+      name: 'window_replacement',
+      sql: '''
+CREATE TRIGGER fail_window_insert
+BEFORE INSERT ON minute_windows
+BEGIN SELECT RAISE(ABORT, 'forced window failure'); END
+''',
+    ),
+    (
+      name: 'session_update',
+      sql: '''
+CREATE TRIGGER fail_session_rollup_update
+BEFORE UPDATE OF total_distance_m ON sessions
+BEGIN SELECT RAISE(ABORT, 'forced session failure'); END
+''',
+    ),
+  ]) {
+    test('${failure.name} rolls back every route-edit table', () async {
+      final path =
+          '${Directory.systemTemp.path}/sanbo_route_rollback_${failure.name}_${DateTime.now().microsecondsSinceEpoch}.db';
+      addTearDown(() => databaseFactory.deleteDatabase(path));
+      final repo = await openTestRepository(path: path);
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      final before = await snapshotRouteEditTables(path);
+      final injector = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(singleInstance: false),
+      );
+      await injector.execute(failure.sql);
+      await injector.close();
+
+      await expectLater(
+        repo.excludeRouteSegment(
+          sessionId: fixture.session.id,
+          segment: fixture.segments.last,
+        ),
+        throwsA(isA<DatabaseException>()),
+      );
+      expect(await snapshotRouteEditTables(path), before);
+    });
+  }
 
   test('daily stats rejects an empty or reversed date range', () async {
     final repo = await openTestRepository();
@@ -438,3 +701,33 @@ Future<void> _completeSession(
     validSampleCount: 1,
   );
 }
+
+ActivitySegment _segment({
+  required DateTime start,
+  DateTime? endInclusive,
+  required List<MinuteWindow> windows,
+}) => ActivitySegment(
+  start: start,
+  endInclusive: endInclusive ?? start,
+  label: ActivityLabel.unknown,
+  confidenceMin: 0,
+  distanceM: 0,
+  sampleCount: 0,
+  durationS: 0,
+  userConfirmed: false,
+  windows: windows,
+);
+
+List<String> _sampleSnapshot(List<LocationSample> samples) => samples
+    .map(
+      (sample) => [
+        sample.timestamp.toUtc().toIso8601String(),
+        sample.latitude,
+        sample.longitude,
+        sample.accuracyM,
+        sample.speedMps,
+        sample.altitudeM,
+        sample.isFilteredOut,
+      ].join('|'),
+    )
+    .toList(growable: false);

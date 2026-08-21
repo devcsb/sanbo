@@ -9,11 +9,15 @@ import '../domain/models/activity_label.dart';
 import '../domain/models/location_sample.dart';
 import '../domain/models/minute_window.dart';
 import '../domain/models/place_memory.dart';
+import '../domain/models/route_exclusion.dart';
 import '../domain/models/tracking_mode.dart';
 import '../domain/models/walk_session.dart';
 import '../domain/pipeline/geo.dart';
+import '../domain/pipeline/segment_merger.dart';
+import '../domain/pipeline/session_rollup.dart';
 import '../domain/services/app_backup.dart';
 import '../domain/services/daily_walk_stats.dart';
+import '../domain/services/session_pipeline.dart';
 import '../domain/services/walk_stats.dart';
 import 'app_database.dart';
 
@@ -23,6 +27,7 @@ class WalkRepository {
 
   final Database _db;
   final _uuid = const Uuid();
+  final _pipeline = SessionPipeline();
 
   static Future<WalkRepository> open({String? path}) async {
     final db = await openAppDatabase(path: path);
@@ -299,7 +304,117 @@ ORDER BY day ASC
   }
 
   Future<List<MinuteWindow>> getWindows(String sessionId) async {
-    final rows = await _db.rawQuery(
+    return _getWindowsIn(_db, sessionId);
+  }
+
+  Future<List<RouteExclusion>> getRouteExclusions(String sessionId) async {
+    final rows = await _db.query(
+      'route_exclusions',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      orderBy: 'start_at ASC, id ASC',
+    );
+    return rows.map(_exclusionFromRow).toList(growable: false);
+  }
+
+  /// Saves one user-selected route exclusion and every derived aggregate in
+  /// the same SQLite transaction. Source samples remain immutable.
+  Future<RouteExclusion> excludeRouteSegment({
+    required String sessionId,
+    required ActivitySegment segment,
+    RouteExclusionReason reason = RouteExclusionReason.vehicle,
+    DateTime? createdAt,
+  }) {
+    return _db.transaction((txn) async {
+      final snapshot = await _loadRouteEditSnapshot(txn, sessionId);
+      final candidate = RouteExclusion(
+        id: _uuid.v4(),
+        sessionId: sessionId,
+        startAt: segment.start,
+        endAt: segment.endExclusive,
+        reason: reason,
+        createdAt: createdAt ?? DateTime.now(),
+      ).clampedTo(snapshot.session);
+      final storedWindowKeys = snapshot.windows
+          .map((window) => window.windowStart.toUtc())
+          .toSet();
+      final selectedWindowKeys = segment.windows
+          .map((window) => window.windowStart.toUtc())
+          .toSet();
+      if (selectedWindowKeys.isEmpty ||
+          selectedWindowKeys.length != segment.windows.length ||
+          !storedWindowKeys.containsAll(selectedWindowKeys)) {
+        throw StateError('제외할 구간을 찾을 수 없습니다');
+      }
+      if (snapshot.exclusions.any(
+        (existing) => existing.overlaps(candidate.startAt, candidate.endAt),
+      )) {
+        throw StateError('이미 제외한 범위와 겹칩니다');
+      }
+      final next = [...snapshot.exclusions, candidate]
+        ..sort((a, b) => a.startAt.compareTo(b.startAt));
+      final result = _pipeline.recalculateCompleted(
+        session: snapshot.session,
+        storedSamples: snapshot.samples,
+        exclusions: next,
+        previousWindows: snapshot.windows,
+      );
+      await txn.insert('route_exclusions', _exclusionToRow(candidate));
+      await _replaceWindowsIn(
+        txn,
+        sessionId,
+        result.windows,
+        expectedExistingCount: snapshot.windows.length,
+      );
+      await _updateRollupIn(txn, snapshot.session, result.metrics);
+      return candidate;
+    });
+  }
+
+  /// Removes one exclusion after reconstructing the completed route without
+  /// it. Deletion is deliberately last so any failed rewrite rolls back it.
+  Future<void> restoreRouteExclusion({
+    required String sessionId,
+    required String exclusionId,
+  }) {
+    return _db.transaction((txn) async {
+      final snapshot = await _loadRouteEditSnapshot(txn, sessionId);
+      final target = snapshot.exclusions.where(
+        (item) => item.id == exclusionId,
+      );
+      if (target.length != 1) {
+        throw StateError('복원할 제외 구간을 찾을 수 없습니다');
+      }
+      final next = snapshot.exclusions
+          .where((item) => item.id != exclusionId)
+          .toList(growable: false);
+      final result = _pipeline.recalculateCompleted(
+        session: snapshot.session,
+        storedSamples: snapshot.samples,
+        exclusions: next,
+        previousWindows: snapshot.windows,
+      );
+      await _replaceWindowsIn(
+        txn,
+        sessionId,
+        result.windows,
+        expectedExistingCount: snapshot.windows.length,
+      );
+      await _updateRollupIn(txn, snapshot.session, result.metrics);
+      final deleted = await txn.delete(
+        'route_exclusions',
+        where: 'id = ? AND session_id = ?',
+        whereArgs: [exclusionId, sessionId],
+      );
+      if (deleted != 1) throw StateError('제외 구간을 복원하지 못했습니다');
+    });
+  }
+
+  Future<List<MinuteWindow>> _getWindowsIn(
+    DatabaseExecutor executor,
+    String sessionId,
+  ) async {
+    final rows = await executor.rawQuery(
       '''
 SELECT w.*,
        p.name AS place_name,
@@ -312,6 +427,104 @@ ORDER BY w.window_start ASC
       [sessionId],
     );
     return rows.map(_windowFromRow).toList();
+  }
+
+  Future<_RouteEditSnapshot> _loadRouteEditSnapshot(
+    DatabaseExecutor executor,
+    String sessionId,
+  ) async {
+    final sessionRows = await executor.query(
+      'sessions',
+      where: 'id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    if (sessionRows.isEmpty) throw StateError('세션을 찾을 수 없습니다');
+    final session = _sessionFromRow(sessionRows.single);
+    if (session.status != SessionStatus.completed || session.endedAt == null) {
+      throw StateError('완료된 산책만 경로를 제외할 수 있습니다');
+    }
+    final samples = (await executor.query(
+      'location_samples',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      orderBy: 'ts ASC',
+    )).map(_sampleFromRow).toList(growable: false);
+    final windows = await _getWindowsIn(executor, sessionId);
+    final exclusions = (await executor.query(
+      'route_exclusions',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      orderBy: 'start_at ASC, id ASC',
+    )).map(_exclusionFromRow).toList(growable: false);
+    return _RouteEditSnapshot(
+      session: session,
+      samples: samples,
+      windows: windows,
+      exclusions: exclusions,
+    );
+  }
+
+  Future<void> _replaceWindowsIn(
+    DatabaseExecutor executor,
+    String sessionId,
+    List<MinuteWindow> windows, {
+    required int expectedExistingCount,
+  }) async {
+    final existingPlaceIds = windows
+        .map((window) => window.placeId)
+        .whereType<int>()
+        .toSet();
+    for (final placeId in existingPlaceIds) {
+      final rows = await executor.query(
+        'places',
+        columns: const ['id'],
+        where: 'id = ?',
+        whereArgs: [placeId],
+        limit: 1,
+      );
+      if (rows.length != 1) {
+        throw StateError('연결된 장소를 찾을 수 없습니다');
+      }
+    }
+    final deleted = await executor.delete(
+      'minute_windows',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+    );
+    if (deleted != expectedExistingCount) {
+      throw StateError('기존 시간 구간 수가 일치하지 않습니다');
+    }
+    var inserted = 0;
+    for (final window in windows) {
+      await executor.insert('minute_windows', _windowToRow(sessionId, window));
+      inserted++;
+    }
+    if (inserted != windows.length) {
+      throw StateError('시간 구간을 모두 저장하지 못했습니다');
+    }
+  }
+
+  Future<void> _updateRollupIn(
+    DatabaseExecutor executor,
+    WalkSession session,
+    SessionRollupResult metrics,
+  ) async {
+    final updated = await executor.update(
+      'sessions',
+      {
+        'total_distance_m': metrics.totalDistanceM,
+        'duration_s': metrics.durationS,
+        'moving_time_s': metrics.movingTimeS,
+        'stationary_time_s': metrics.stationaryTimeS,
+        'avg_speed_mps': metrics.avgSpeedMps,
+        'valid_sample_count': metrics.validSampleCount,
+        'median_accuracy_m': metrics.medianAccuracyM,
+      },
+      where: 'id = ?',
+      whereArgs: [session.id],
+    );
+    if (updated != 1) throw StateError('산책 집계를 갱신하지 못했습니다');
   }
 
   Future<WalkSession> completeSession({
@@ -1332,6 +1545,7 @@ ORDER BY w.window_start ASC
     'user_note': w.userNote,
     'user_confirmed': w.userConfirmed ? 1 : 0,
     'place_id': w.placeId,
+    'user_exclusion_id': w.userExclusionId,
   };
 
   MinuteWindow _windowFromRow(Map<String, Object?> r) {
@@ -1367,6 +1581,7 @@ ORDER BY w.window_start ASC
           : ActivityLabelX.fromStorage(r['user_label'] as String?),
       userNote: r['user_note'] as String?,
       userConfirmed: (r['user_confirmed'] as int? ?? 0) == 1,
+      userExclusionId: r['user_exclusion_id'] as String?,
       placeId: r['place_id'] as int?,
       placeName: r['place_name'] as String?,
       placeAddress: r['place_address'] as String?,
@@ -1383,6 +1598,38 @@ ORDER BY w.window_start ASC
       updatedAt: DateTime.parse(r['updated_at']! as String),
     );
   }
+
+  Map<String, Object?> _exclusionToRow(RouteExclusion item) => {
+    'id': item.id,
+    'session_id': item.sessionId,
+    'start_at': item.startAt.toUtc().toIso8601String(),
+    'end_at': item.endAt.toUtc().toIso8601String(),
+    'reason': item.reason.name,
+    'created_at': item.createdAt.toUtc().toIso8601String(),
+  };
+
+  RouteExclusion _exclusionFromRow(Map<String, Object?> row) => RouteExclusion(
+    id: row['id']! as String,
+    sessionId: row['session_id']! as String,
+    startAt: DateTime.parse(row['start_at']! as String),
+    endAt: DateTime.parse(row['end_at']! as String),
+    reason: RouteExclusionReason.values.byName(row['reason']! as String),
+    createdAt: DateTime.parse(row['created_at']! as String),
+  );
+}
+
+class _RouteEditSnapshot {
+  const _RouteEditSnapshot({
+    required this.session,
+    required this.samples,
+    required this.windows,
+    required this.exclusions,
+  });
+
+  final WalkSession session;
+  final List<LocationSample> samples;
+  final List<MinuteWindow> windows;
+  final List<RouteExclusion> exclusions;
 }
 
 /// Overridden in bootstrap with real DB; tests inject via ProviderScope.

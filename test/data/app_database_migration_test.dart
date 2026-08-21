@@ -5,6 +5,7 @@ import 'package:sanbo/data/app_database.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../helpers/test_db.dart';
+import '../helpers/route_exclusion_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -200,6 +201,34 @@ CREATE TABLE minute_windows (
         ),
         hasLength(1),
       );
+    },
+  );
+
+  test(
+    'v3 upgrades to v4 without changing samples or existing aggregates',
+    () async {
+      ensureSqfliteFfi();
+      final path =
+          '${Directory.systemTemp.path}/sanbo_v3_to_v4_${DateTime.now().microsecondsSinceEpoch}.db';
+      addTearDown(() => databaseFactory.deleteDatabase(path));
+      await createV3Fixture(path, sessionId: 'walk-1', filteredFlags: [0, 1]);
+
+      final db = await openAppDatabase(path: path);
+      addTearDown(db.close);
+      expect(await db.query('route_exclusions'), isEmpty);
+      final columns = await db.rawQuery('PRAGMA table_info(minute_windows)');
+      expect(columns.map((row) => row['name']), contains('user_exclusion_id'));
+      expect(
+        (await db.query('minute_windows')).single['user_exclusion_id'],
+        isNull,
+      );
+      expect(
+        (await db.query(
+          'location_samples',
+        )).map((row) => row['is_filtered_out']),
+        [0, 1],
+      );
+      expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
     },
   );
 }

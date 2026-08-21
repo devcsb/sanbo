@@ -2,7 +2,18 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-const schemaVersion = 3;
+const schemaVersion = 4;
+
+const routeExclusionsTableSql = '''
+CREATE TABLE route_exclusions (
+  id TEXT PRIMARY KEY NOT NULL,
+  session_id TEXT NOT NULL,
+  start_at TEXT NOT NULL,
+  end_at TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+)''';
 
 /// Opens the on-device SQLite DB (TRD §3).
 Future<Database> openAppDatabase({String? path}) async {
@@ -41,6 +52,20 @@ CREATE TABLE places (
         await db.execute(
           'CREATE INDEX IF NOT EXISTS idx_sessions_status_started_at '
           'ON sessions(status, started_at DESC)',
+        );
+      }
+      if (oldVersion < 4) {
+        await db.execute(routeExclusionsTableSql);
+        await db.execute(
+          'CREATE INDEX idx_route_exclusions_session_range '
+          'ON route_exclusions(session_id, start_at, end_at)',
+        );
+        await db.execute(
+          'ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT '
+          'REFERENCES route_exclusions(id) ON DELETE SET NULL',
+        );
+        await db.execute(
+          'CREATE INDEX idx_windows_user_exclusion ON minute_windows(user_exclusion_id)',
         );
       }
     },
@@ -101,6 +126,11 @@ CREATE TABLE location_samples (
   await db.execute(
     'CREATE INDEX idx_samples_session ON location_samples(session_id, ts)',
   );
+  await db.execute(routeExclusionsTableSql);
+  await db.execute(
+    'CREATE INDEX idx_route_exclusions_session_range '
+    'ON route_exclusions(session_id, start_at, end_at)',
+  );
   await db.execute('''
 CREATE TABLE minute_windows (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -129,6 +159,7 @@ CREATE TABLE minute_windows (
   user_note TEXT,
   user_confirmed INTEGER NOT NULL DEFAULT 0,
   place_id INTEGER,
+  user_exclusion_id TEXT REFERENCES route_exclusions(id) ON DELETE SET NULL,
   UNIQUE(session_id, window_start),
   FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE,
   FOREIGN KEY(place_id) REFERENCES places(id) ON DELETE SET NULL
@@ -138,6 +169,9 @@ CREATE TABLE minute_windows (
   );
   await db.execute(
     'CREATE INDEX idx_windows_place ON minute_windows(place_id)',
+  );
+  await db.execute(
+    'CREATE INDEX idx_windows_user_exclusion ON minute_windows(user_exclusion_id)',
   );
 }
 
