@@ -401,6 +401,24 @@ class CompletedSessionRecalculation {
   final SessionRollupResult metrics;
 }
 
+enum SessionGuardEvent {
+  none,
+  stationaryWarning,
+  stationaryLimit,
+  durationWarning,
+  durationLimit,
+  highSpeedWarning,
+}
+
+class SessionGuardObservation {
+  const SessionGuardObservation({
+    this.acceptedForHighSpeed = false,
+    this.clearedStationaryWarning = false,
+  });
+  final bool acceptedForHighSpeed;
+  final bool clearedStationaryWarning;
+}
+
 class SessionGuard {
   SessionGuardObservation observe(LocationSample sample, {required DateTime observedAt});
   void rebuildHighSpeedState({
