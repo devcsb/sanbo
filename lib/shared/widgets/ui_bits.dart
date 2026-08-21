@@ -227,21 +227,18 @@ class StatusPill extends StatelessWidget {
       decoration: BoxDecoration(
         color: colors.background,
         borderRadius: BorderRadius.circular(AppTheme.radiusPill),
-        border: Border.all(
-          color: colors.foreground.withValues(alpha: 0.08),
-        ),
+        border: Border.all(color: colors.foreground.withValues(alpha: 0.08)),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Wrap(
+          spacing: icon == null ? 0 : 5,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            if (icon != null) ...[
-              Icon(icon, size: 15, color: colors.foreground),
-              const SizedBox(width: 5),
-            ],
+            if (icon != null) Icon(icon, size: 15, color: colors.foreground),
             Text(
               label,
+              textAlign: TextAlign.center,
               style: theme.textTheme.labelMedium?.copyWith(
                 color: colors.foreground,
                 fontWeight: FontWeight.w700,
@@ -384,7 +381,8 @@ class SoftPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final surfaces = SanboSurfaces.of(context);
-    final bg = color ??
+    final bg =
+        color ??
         (theme.brightness == Brightness.dark
             ? theme.colorScheme.surfaceContainerLow
             : theme.colorScheme.surfaceContainerLowest);

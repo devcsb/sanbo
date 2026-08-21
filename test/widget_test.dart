@@ -13,9 +13,11 @@ void main() {
               Text('산책 시작'),
               RouteMap(
                 offlinePreview: true,
-                points: [
-                  (lat: 37.5665, lon: 126.9780),
-                  (lat: 37.5670, lon: 126.9785),
+                fragments: [
+                  [
+                    (lat: 37.5665, lon: 126.9780),
+                    (lat: 37.5670, lon: 126.9785),
+                  ],
                 ],
               ),
             ],

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
+import 'package:sanbo/domain/pipeline/route_partitioner.dart';
 import 'package:sanbo/domain/services/route_playback.dart';
 
 LocationSample _sample(DateTime timestamp, {bool filtered = false}) {
@@ -82,5 +83,30 @@ void main() {
       RoutePlayback.intervalForSampleCount(501),
       const Duration(milliseconds: 400),
     );
+  });
+
+  test('flatten keeps fragment boundaries during playback', () {
+    final a = _sample(start);
+    final b = _sample(start.add(const Duration(seconds: 10)));
+    final c = _sample(start.add(const Duration(seconds: 20)));
+    final d = _sample(start.add(const Duration(seconds: 30)));
+
+    final points = RoutePlayback.flatten(
+      RoutePartitionResult(
+        includedSamples: [a, b, c, d],
+        segments: [
+          RouteSegment(start: a, end: b, distanceM: 1),
+          RouteSegment(start: c, end: d, distanceM: 1),
+        ],
+        fragments: [
+          RouteFragment([a, b]),
+          RouteFragment([c, d]),
+        ],
+      ),
+    );
+
+    expect(points.map((point) => point.fragmentIndex), [0, 0, 1, 1]);
+    expect(points.map((point) => point.pointIndex), [0, 1, 0, 1]);
+    expect(points[2].startsFragment, isTrue);
   });
 }

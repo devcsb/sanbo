@@ -20,6 +20,9 @@ String timelineWindowSubtitle(MinuteWindow w) {
 
 /// Subtitle for a merged activity segment (readable multi-minute range).
 String timelineSegmentSubtitle(ActivitySegment segment) {
+  if (segment.userExclusionId != null) {
+    return '통계와 경로에서 제외된 구간';
+  }
   if (segment.quality == WindowQuality.gap || segment.sampleCount == 0) {
     return segment.isMultiMinute
         ? '${segment.minuteCount}분 · 위치 기록 없음'

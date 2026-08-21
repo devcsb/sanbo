@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
+import 'package:sanbo/domain/pipeline/segment_merger.dart';
 import 'package:sanbo/features/session_detail/timeline_copy.dart';
 
 void main() {
@@ -9,14 +10,16 @@ void main() {
   // (real HistoryScreen / SessionDetailScreen + go_router).
 
   test('history and detail ship stats notes export helpers', () {
-    final history = File('lib/features/history/history_screen.dart').readAsStringSync();
+    final history = File(
+      'lib/features/history/history_screen.dart',
+    ).readAsStringSync();
     expect(history.contains('나의 흐름'), isTrue);
     expect(history.contains('snapshot.stats'), isTrue);
     expect(history.contains('더 많은 기록 보기'), isTrue);
 
-    final detail =
-        File('lib/features/session_detail/session_detail_screen.dart')
-            .readAsStringSync();
+    final detail = File(
+      'lib/features/session_detail/session_detail_screen.dart',
+    ).readAsStringSync();
     expect(detail.contains('메모 저장'), isTrue);
     expect(detail.contains('_copySummary'), isTrue);
     expect(detail.contains('_exportSession'), isTrue);
@@ -51,4 +54,29 @@ void main() {
     expect(s.contains('speed_band'), isFalse);
     expect(s.contains('추정'), isFalse); // chip on row title, not subtitle
   });
+
+  test(
+    'excluded timeline segment explains that it is outside route statistics',
+    () {
+      final window = MinuteWindow(
+        windowStart: DateTime(2026, 8, 21, 9),
+        durationS: 60,
+        partial: false,
+        sampleCount: 4,
+        rawSampleCount: 4,
+        distanceM: 120,
+        avgSpeedMps: 2,
+        maxSpeedMps: 2,
+        stationaryRatio: 0,
+        quality: WindowQuality.high,
+        hypothesisLabel: ActivityLabel.vehicle,
+        userExclusionId: 'vehicle-1',
+      );
+      final segment = SegmentMerger().merge([
+        window,
+      ], sessionId: 'walk-1').single;
+
+      expect(timelineSegmentSubtitle(segment), '통계와 경로에서 제외된 구간');
+    },
+  );
 }

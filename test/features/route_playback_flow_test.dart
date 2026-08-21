@@ -79,7 +79,11 @@ void main() {
     expect(sliderFinder, findsOneWidget);
     expect(find.byTooltip('경로 재생'), findsOneWidget);
     final initialMap = tester.widget<RouteMap>(find.byType(RouteMap));
-    expect(initialMap.progressPointCount, initialMap.points.length);
+    expect(initialMap.progress, isNotNull);
+    expect(
+      initialMap.fragments.expand((fragment) => fragment).length,
+      greaterThan(1),
+    );
 
     await tester.tap(find.byTooltip('경로 재생'));
     await tester.pump();
@@ -110,7 +114,10 @@ void main() {
     final selectedMap = tester.widget<RouteMap>(
       find.byType(RouteMap, skipOffstage: false),
     );
-    expect(selectedMap.highlightedPoints, isNotEmpty);
+    expect(
+      selectedMap.highlightedFragments.expand((fragment) => fragment),
+      isNotEmpty,
+    );
 
     final editFinder = find.byTooltip(RegExp('구간 편집'));
     await tester.scrollUntilVisible(

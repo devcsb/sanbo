@@ -3,30 +3,29 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../domain/services/route_playback.dart';
 
 /// OSM basemap (Carto) + session path.
 class RouteMap extends StatelessWidget {
   const RouteMap({
     super.key,
-    required this.points,
+    required this.fragments,
     this.height = 220,
     this.offlinePreview = false,
-    this.progressPointCount,
-    this.highlightedPoints = const [],
+    this.progress,
+    this.highlightedFragments = const [],
     this.currentPoint,
   });
 
-  final List<({double lat, double lon})> points;
+  final List<List<({double lat, double lon})>> fragments;
   final double height;
   final bool offlinePreview;
 
-  /// Number of leading route points already visited during playback.
-  ///
-  /// When omitted, the complete route uses the primary color as before.
-  final int? progressPointCount;
+  /// Current playback location, with a fragment-local point position.
+  final RoutePlaybackCursor? progress;
 
   /// A timeline segment currently selected by the user.
-  final List<({double lat, double lon})> highlightedPoints;
+  final List<List<({double lat, double lon})>> highlightedFragments;
 
   /// Current fix shown while scrubbing or replaying the route.
   final ({double lat, double lon})? currentPoint;
@@ -39,13 +38,25 @@ class RouteMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final latLngs = points.map((p) => LatLng(p.lat, p.lon)).toList();
-    final boundedProgressCount = progressPointCount?.clamp(0, latLngs.length);
-    final progressLatLngs = boundedProgressCount == null
-        ? latLngs
-        : latLngs.take(boundedProgressCount).toList(growable: false);
-    final highlightedLatLngs = highlightedPoints
-        .map((point) => LatLng(point.lat, point.lon))
+    final latLngFragments = fragments
+        .map(
+          (fragment) => fragment
+              .map((point) => LatLng(point.lat, point.lon))
+              .toList(growable: false),
+        )
+        .toList(growable: false);
+    final latLngs = latLngFragments
+        .expand((fragment) => fragment)
+        .toList(growable: false);
+    final highlightedLatLngFragments = highlightedFragments
+        .map(
+          (fragment) => fragment
+              .map((point) => LatLng(point.lat, point.lon))
+              .toList(growable: false),
+        )
+        .toList(growable: false);
+    final highlightedLatLngs = highlightedLatLngFragments
+        .expand((fragment) => fragment)
         .toList(growable: false);
     final currentLatLng = currentPoint == null
         ? null
@@ -100,29 +111,55 @@ class RouteMap extends StatelessWidget {
                       )
                     else
                       const ColoredMapBackground(),
-                    if (latLngs.length >= 2)
+                    if (latLngFragments.any((fragment) => fragment.length >= 2))
                       PolylineLayer(
                         polylines: [
-                          Polyline(
-                            points: latLngs,
-                            color: boundedProgressCount == null
-                                ? theme.colorScheme.primary
-                                : theme.colorScheme.outlineVariant,
-                            strokeWidth: 3.5,
-                          ),
-                          if (progressLatLngs.length >= 2 &&
-                              boundedProgressCount != null)
-                            Polyline(
-                              points: progressLatLngs,
-                              color: theme.colorScheme.primary,
-                              strokeWidth: 4,
-                            ),
-                          if (highlightedLatLngs.length >= 2)
-                            Polyline(
-                              points: highlightedLatLngs,
-                              color: theme.colorScheme.tertiary,
-                              strokeWidth: 6,
-                            ),
+                          for (final fragment in latLngFragments)
+                            if (fragment.length >= 2)
+                              Polyline(
+                                points: fragment,
+                                color: progress == null
+                                    ? theme.colorScheme.primary
+                                    : theme.colorScheme.outlineVariant,
+                                strokeWidth: 3.5,
+                              ),
+                          if (progress != null)
+                            for (
+                              var index = 0;
+                              index < latLngFragments.length;
+                              index++
+                            )
+                              if (index <= progress!.fragmentIndex)
+                                if ((index < progress!.fragmentIndex
+                                        ? latLngFragments[index].length
+                                        : (progress!.pointIndex + 1).clamp(
+                                            0,
+                                            latLngFragments[index].length,
+                                          )) >=
+                                    2)
+                                  Polyline(
+                                    points: latLngFragments[index]
+                                        .take(
+                                          index < progress!.fragmentIndex
+                                              ? latLngFragments[index].length
+                                              : (progress!.pointIndex + 1)
+                                                    .clamp(
+                                                      0,
+                                                      latLngFragments[index]
+                                                          .length,
+                                                    ),
+                                        )
+                                        .toList(growable: false),
+                                    color: theme.colorScheme.primary,
+                                    strokeWidth: 4,
+                                  ),
+                          for (final fragment in highlightedLatLngFragments)
+                            if (fragment.length >= 2)
+                              Polyline(
+                                points: fragment,
+                                color: theme.colorScheme.tertiary,
+                                strokeWidth: 6,
+                              ),
                         ],
                       ),
                     if (latLngs.isNotEmpty || currentLatLng != null)

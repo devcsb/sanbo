@@ -1,8 +1,55 @@
 import '../models/location_sample.dart';
+import '../pipeline/route_partitioner.dart';
+
+class RoutePlaybackPoint {
+  const RoutePlaybackPoint({
+    required this.sample,
+    required this.fragmentIndex,
+    required this.pointIndex,
+  });
+
+  final LocationSample sample;
+  final int fragmentIndex;
+  final int pointIndex;
+
+  bool get startsFragment => pointIndex == 0;
+}
+
+class RoutePlaybackCursor {
+  const RoutePlaybackCursor({
+    required this.fragmentIndex,
+    required this.pointIndex,
+  });
+
+  final int fragmentIndex;
+  final int pointIndex;
+}
 
 /// Pure helpers for replaying a recorded route without coupling playback
 /// decisions to the detail-screen widgets.
 abstract final class RoutePlayback {
+  /// Flattens partitioned fragments for timeline controls while preserving the
+  /// fragment and local point coordinates needed to avoid drawing false joins.
+  static List<RoutePlaybackPoint> flatten(RoutePartitionResult route) {
+    return [
+      for (
+        var fragmentIndex = 0;
+        fragmentIndex < route.fragments.length;
+        fragmentIndex++
+      )
+        for (
+          var pointIndex = 0;
+          pointIndex < route.fragments[fragmentIndex].samples.length;
+          pointIndex++
+        )
+          RoutePlaybackPoint(
+            sample: route.fragments[fragmentIndex].samples[pointIndex],
+            fragmentIndex: fragmentIndex,
+            pointIndex: pointIndex,
+          ),
+    ];
+  }
+
   /// Only valid fixes participate in route playback, ordered by recorded time.
   static List<LocationSample> playableSamples(
     Iterable<LocationSample> samples,

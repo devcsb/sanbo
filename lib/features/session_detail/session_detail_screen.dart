@@ -14,6 +14,7 @@ import '../../domain/models/location_sample.dart';
 import '../../domain/models/minute_window.dart';
 import '../../domain/models/route_exclusion.dart';
 import '../../domain/models/walk_session.dart';
+import '../../domain/pipeline/route_partitioner.dart';
 import '../../domain/pipeline/segment_merger.dart';
 import '../../domain/services/place_memory.dart';
 import '../../domain/services/route_playback.dart';
@@ -39,6 +40,10 @@ final sessionDetailProvider = FutureProvider.autoDispose
       final samples = loaded[0] as List<LocationSample>;
       var windows = loaded[1] as List<MinuteWindow>;
       final exclusions = loaded[2] as List<RouteExclusion>;
+      final route = RoutePartitioner.partition(
+        samples: samples,
+        exclusions: exclusions,
+      );
       var segments = SegmentMerger().merge(windows, sessionId: id);
 
       // Reuse only places the user previously named. This is a local DB
@@ -77,6 +82,7 @@ final sessionDetailProvider = FutureProvider.autoDispose
         samples: samples,
         windows: windows,
         exclusions: exclusions,
+        route: route,
         segments: segments,
       );
     });
@@ -90,6 +96,7 @@ class SessionDetailData {
     required this.samples,
     required this.windows,
     required this.exclusions,
+    required this.route,
     this.segments = const [],
   });
 
@@ -97,6 +104,7 @@ class SessionDetailData {
   final List<LocationSample> samples;
   final List<MinuteWindow> windows;
   final List<RouteExclusion> exclusions;
+  final RoutePartitionResult route;
   final List<ActivitySegment> segments;
 }
 
@@ -118,9 +126,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   var _playbackIndex = -1;
   var _isPlaying = false;
   DateTime? _selectedSegmentStart;
-  List<LocationSample>? _playbackSource;
-  List<LocationSample> _playbackCache = const [];
-  List<({double lat, double lon})> _pointCache = const [];
+  RoutePartitionResult? _playbackSource;
+  List<RoutePlaybackPoint> _playbackCache = const [];
+  List<List<({double lat, double lon})>> _fragmentCache = const [];
 
   String get sessionId => widget.sessionId;
 
@@ -128,14 +136,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   void didUpdateWidget(covariant SessionDetailScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.sessionId != widget.sessionId) {
-      _playbackTimer?.cancel();
-      _playbackTimer = null;
-      _playbackIndex = -1;
-      _isPlaying = false;
-      _selectedSegmentStart = null;
-      _playbackSource = null;
-      _playbackCache = const [];
-      _pointCache = const [];
+      _resetRouteInteraction();
     }
   }
 
@@ -205,36 +206,29 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
           final km = (session.totalDistanceM ?? 0) / 1000.0;
           final dur = Duration(seconds: session.durationS ?? 0);
           final kmh = (session.avgSpeedMps ?? 0) * 3.6;
-          final playbackSamples = _samplesForPlayback(data.samples);
-          final points = _pointCache;
+          final playbackPoints = _pointsForPlayback(data.route);
+          final fragments = _fragmentCache;
           final segments = data.segments.isNotEmpty
               ? data.segments
               : SegmentMerger().merge(data.windows, sessionId: session.id);
-          final playbackIndex = playbackSamples.isEmpty
+          final playbackIndex = playbackPoints.isEmpty
               ? 0
               : _playbackIndex < 0
-              ? playbackSamples.length - 1
-              : _playbackIndex.clamp(0, playbackSamples.length - 1);
-          final currentSample = playbackSamples.isEmpty
+              ? playbackPoints.length - 1
+              : _playbackIndex.clamp(0, playbackPoints.length - 1);
+          final currentPlaybackPoint = playbackPoints.isEmpty
               ? null
-              : playbackSamples[playbackIndex];
+              : playbackPoints[playbackIndex];
+          final currentSample = currentPlaybackPoint?.sample;
           final currentSegment = currentSample == null
               ? null
               : _segmentAt(segments, currentSample.timestamp);
           final selectedSegment = _selectedSegmentStart == null
               ? null
               : _segmentStartingAt(segments, _selectedSegmentStart!);
-          final highlightedPoints = selectedSegment == null
-              ? const <({double lat, double lon})>[]
-              : RoutePlayback.samplesInRange(
-                      playbackSamples,
-                      start: selectedSegment.start,
-                      endExclusive: selectedSegment.endExclusive,
-                    )
-                    .map(
-                      (sample) => (lat: sample.latitude, lon: sample.longitude),
-                    )
-                    .toList(growable: false);
+          final highlightedFragments = selectedSegment == null
+              ? const <List<({double lat, double lon})>>[]
+              : _fragmentsForSegment(data.route, selectedSegment);
           final collapsedCount = segments.length;
           final rawCount = data.windows.length;
 
@@ -253,12 +247,15 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                 KeyedSubtree(
                   key: _mapSectionKey,
                   child: RouteMap(
-                    points: points,
+                    fragments: fragments,
                     height: 220,
-                    progressPointCount: playbackSamples.isEmpty
+                    progress: currentPlaybackPoint == null
                         ? null
-                        : playbackIndex + 1,
-                    highlightedPoints: highlightedPoints,
+                        : RoutePlaybackCursor(
+                            fragmentIndex: currentPlaybackPoint.fragmentIndex,
+                            pointIndex: currentPlaybackPoint.pointIndex,
+                          ),
+                    highlightedFragments: highlightedFragments,
                     currentPoint: currentSample == null
                         ? null
                         : (
@@ -270,19 +267,19 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                         Platform.environment.containsKey('FLUTTER_TEST'),
                   ),
                 ),
-                if (playbackSamples.isNotEmpty) ...[
+                if (playbackPoints.isNotEmpty) ...[
                   const SizedBox(height: 12),
                   _RoutePlaybackControls(
                     sample: currentSample!,
-                    firstTimestamp: playbackSamples.first.timestamp,
-                    lastTimestamp: playbackSamples.last.timestamp,
+                    firstTimestamp: playbackPoints.first.sample.timestamp,
+                    lastTimestamp: playbackPoints.last.sample.timestamp,
                     index: playbackIndex,
-                    sampleCount: playbackSamples.length,
+                    sampleCount: playbackPoints.length,
                     isPlaying: _isPlaying,
                     currentSegment: currentSegment,
                     selectedSegment: selectedSegment,
                     onTogglePlayback: () =>
-                        _togglePlayback(playbackSamples.length),
+                        _togglePlayback(playbackPoints.length),
                     onIndexChanged: _setPlaybackIndex,
                   ),
                 ],
@@ -438,7 +435,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                                 ) ??
                                 false,
                             onSelect: () =>
-                                _selectSegment(segments[i], playbackSamples),
+                                _selectSegment(segments[i], playbackPoints),
                             onEdit: commandBusy
                                 ? null
                                 : () => _showSegmentActions(
@@ -512,16 +509,16 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
 
   void _selectSegment(
     ActivitySegment segment,
-    List<LocationSample> playbackSamples,
+    List<RoutePlaybackPoint> playbackPoints,
   ) {
     _playbackTimer?.cancel();
     _playbackTimer = null;
     setState(() {
       _selectedSegmentStart = segment.start;
       _isPlaying = false;
-      if (playbackSamples.isNotEmpty) {
+      if (playbackPoints.isNotEmpty) {
         _playbackIndex = RoutePlayback.nearestIndex(
-          playbackSamples,
+          playbackPoints.map((point) => point.sample).toList(growable: false),
           segment.start,
         );
       }
@@ -531,14 +528,50 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     });
   }
 
-  List<LocationSample> _samplesForPlayback(List<LocationSample> source) {
+  List<RoutePlaybackPoint> _pointsForPlayback(RoutePartitionResult source) {
     if (identical(_playbackSource, source)) return _playbackCache;
     _playbackSource = source;
-    _playbackCache = RoutePlayback.playableSamples(source);
-    _pointCache = _playbackCache
-        .map((sample) => (lat: sample.latitude, lon: sample.longitude))
+    _playbackCache = RoutePlayback.flatten(source);
+    _fragmentCache = source.fragments
+        .map(
+          (fragment) => fragment.samples
+              .map((sample) => (lat: sample.latitude, lon: sample.longitude))
+              .toList(growable: false),
+        )
         .toList(growable: false);
     return _playbackCache;
+  }
+
+  List<List<({double lat, double lon})>> _fragmentsForSegment(
+    RoutePartitionResult route,
+    ActivitySegment segment,
+  ) {
+    return route.fragments
+        .map(
+          (fragment) => fragment.samples
+              .where(
+                (sample) =>
+                    !sample.timestamp.isBefore(segment.start) &&
+                    sample.timestamp.isBefore(segment.endExclusive),
+              )
+              .map((sample) => (lat: sample.latitude, lon: sample.longitude))
+              .toList(growable: false),
+        )
+        .where((fragment) => fragment.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  void _resetRouteInteraction() {
+    _playbackTimer?.cancel();
+    setState(() {
+      _playbackTimer = null;
+      _playbackIndex = -1;
+      _isPlaying = false;
+      _selectedSegmentStart = null;
+      _playbackSource = null;
+      _playbackCache = const [];
+      _fragmentCache = const [];
+    });
   }
 
   Future<void> _revealMap() async {
@@ -656,10 +689,13 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     String sessionId,
     ActivitySegment segment,
   ) async {
+    final excluded = segment.userExclusionId != null;
     final coordinate = placeCoordinate(segment);
-    final canEditPlace = canRememberPlace(segment) && coordinate != null;
+    final canEditPlace =
+        !excluded && canRememberPlace(segment) && coordinate != null;
     final action = await showModalBottomSheet<_SegmentAction>(
       context: context,
+      isScrollControlled: true,
       showDragHandle: true,
       builder: (ctx) {
         final theme = Theme.of(ctx);
@@ -676,21 +712,34 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                   style: theme.textTheme.titleMedium,
                 ),
               ),
-              ListTile(
-                leading: const Icon(Icons.directions_walk_rounded),
-                title: const Text('활동 수정'),
-                subtitle: Text('현재: ${segment.label.labelKo}'),
-                trailing: const Icon(Icons.chevron_right_rounded),
-                onTap: () => Navigator.pop(ctx, _SegmentAction.activity),
-              ),
-              if (canEditPlace)
+              if (excluded)
                 ListTile(
-                  leading: const Icon(Icons.place_outlined),
-                  title: Text(placeName == null ? '장소 이름 남기기' : '장소 이름 수정'),
-                  subtitle: Text(placeName ?? '이 체류 지점을 다음 산책에서도 기억해요.'),
+                  leading: const Icon(Icons.undo_rounded),
+                  title: const Text('제외 취소'),
+                  subtitle: const Text('이 구간을 산책 경로와 통계에 다시 포함합니다.'),
+                  onTap: () => Navigator.pop(ctx, _SegmentAction.restore),
+                )
+              else ...[
+                if (segment.label == ActivityLabel.vehicle)
+                  _excludeSegmentAction(ctx, segment),
+                ListTile(
+                  leading: const Icon(Icons.directions_walk_rounded),
+                  title: const Text('활동 수정'),
+                  subtitle: Text('현재: ${segment.label.labelKo}'),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => Navigator.pop(ctx, _SegmentAction.place),
+                  onTap: () => Navigator.pop(ctx, _SegmentAction.activity),
                 ),
+                if (canEditPlace)
+                  ListTile(
+                    leading: const Icon(Icons.place_outlined),
+                    title: Text(placeName == null ? '장소 이름 남기기' : '장소 이름 수정'),
+                    subtitle: Text(placeName ?? '이 체류 지점을 다음 산책에서도 기억해요.'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.pop(ctx, _SegmentAction.place),
+                  ),
+                if (segment.label != ActivityLabel.vehicle)
+                  _excludeSegmentAction(ctx, segment),
+              ],
               const SizedBox(height: 8),
             ],
           ),
@@ -703,6 +752,113 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
         return _editSegment(context, ref, sessionId, segment);
       case _SegmentAction.place:
         return _editPlace(context, ref, sessionId, segment);
+      case _SegmentAction.exclude:
+        return _confirmExclude(context, ref, sessionId, segment);
+      case _SegmentAction.restore:
+        return _restoreExclusion(context, ref, sessionId, segment);
+    }
+  }
+
+  ListTile _excludeSegmentAction(
+    BuildContext context,
+    ActivitySegment segment,
+  ) {
+    return ListTile(
+      leading: const Icon(Icons.directions_car_outlined),
+      title: const Text('산책에서 제외'),
+      subtitle: Text(
+        segment.label == ActivityLabel.vehicle
+            ? '차량 이동 구간을 산책에서 제외합니다.'
+            : '잘못 포함된 이동을 산책 경로와 통계에서 제외합니다.',
+      ),
+      onTap: () => Navigator.pop(context, _SegmentAction.exclude),
+    );
+  }
+
+  Future<void> _confirmExclude(
+    BuildContext context,
+    WidgetRef ref,
+    String sessionId,
+    ActivitySegment segment,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('산책에서 제외'),
+        content: Text(
+          '${_formatSegmentRange(segment)} 구간(${_formatSegmentDistance(segment.distanceM)})을 산책 경로와 통계에서 제외합니다. 기록 전체 통계를 다시 계산합니다.',
+        ),
+        actions: [
+          TextButton(
+            autofocus: true,
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(ctx).colorScheme.error,
+              foregroundColor: Theme.of(ctx).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('차량 이동 구간 제외'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || ref.read(_detailCommandBusyProvider(sessionId))) {
+      return;
+    }
+
+    ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
+    try {
+      await ref
+          .read(walkRepositoryProvider)
+          .excludeRouteSegment(sessionId: sessionId, segment: segment);
+      if (mounted) _resetRouteInteraction();
+      ref.read(historyTickProvider.notifier).state++;
+      ref.invalidate(sessionDetailProvider(sessionId));
+    } on Object {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('경로를 제외하지 못했어요. 다시 시도해 주세요.')),
+        );
+      }
+    } finally {
+      ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
+    }
+  }
+
+  Future<void> _restoreExclusion(
+    BuildContext context,
+    WidgetRef ref,
+    String sessionId,
+    ActivitySegment segment,
+  ) async {
+    final exclusionId = segment.userExclusionId;
+    if (exclusionId == null ||
+        ref.read(_detailCommandBusyProvider(sessionId))) {
+      return;
+    }
+
+    ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
+    try {
+      await ref
+          .read(walkRepositoryProvider)
+          .restoreRouteExclusion(
+            sessionId: sessionId,
+            exclusionId: exclusionId,
+          );
+      if (mounted) _resetRouteInteraction();
+      ref.read(historyTickProvider.notifier).state++;
+      ref.invalidate(sessionDetailProvider(sessionId));
+    } on Object {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('제외를 취소하지 못했어요. 다시 시도해 주세요.')),
+        );
+      }
+    } finally {
+      ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
     }
   }
 
@@ -875,7 +1031,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   }
 }
 
-enum _SegmentAction { activity, place }
+enum _SegmentAction { activity, place, exclude, restore }
 
 class _PlaceEditorResult {
   const _PlaceEditorResult.save({required this.name, this.address})
@@ -1073,6 +1229,11 @@ String _formatSegmentRange(ActivitySegment segment) {
   if (!segment.isMultiMinute) return start;
   final end = DateFormat('HH:mm').format(segment.endExclusive);
   return '$start–$end';
+}
+
+String _formatSegmentDistance(double meters) {
+  if (meters < 1000) return '${meters.round()} m';
+  return '${(meters / 1000).toStringAsFixed(2)} km';
 }
 
 ActivitySegment? _segmentAt(
@@ -1312,12 +1473,19 @@ class _SegmentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final range = _formatSegmentRange(segment);
+    final excluded = segment.userExclusionId != null;
     final confirmed = segment.userConfirmed;
     final label = segment.label.labelKo;
     final placeName = segmentPlaceName(segment);
     final status = StatusPill(
-      label: confirmed ? '확정' : '추정',
-      color: confirmed
+      label: excluded
+          ? '산책에서 제외됨'
+          : confirmed
+          ? '확정'
+          : '추정',
+      color: excluded
+          ? theme.colorScheme.error
+          : confirmed
           ? theme.colorScheme.primary
           : theme.colorScheme.secondary,
     );
@@ -1371,147 +1539,156 @@ class _SegmentRow extends StatelessWidget {
               )
             : null,
       ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minHeight: 72),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            Expanded(
-              child: Semantics(
-                button: true,
-                selected: selected,
-                label:
-                    '$range $label${confirmed ? ' 확정' : ' 추정'}'
-                    '${placeName == null ? '' : ', 장소 $placeName'}. '
-                    '지도에서 보기',
-                enabled: onSelect != null,
-                excludeSemantics: true,
-                child: InkWell(
-                  key: ValueKey(
-                    'segment-select-${segment.start.toIso8601String()}',
-                  ),
-                  onTap: onSelect,
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        final useStackedLayout =
-                            constraints.maxWidth < 232 ||
-                            MediaQuery.textScalerOf(context).scale(14) > 20;
-                        if (useStackedLayout) {
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 4,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  Text(
-                                    range,
-                                    style: theme.textTheme.titleSmall?.copyWith(
-                                      fontFeatures: const [
-                                        FontFeature.tabularFigures(),
-                                      ],
+      child: Opacity(
+        opacity: excluded ? 0.52 : 1,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 72),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: Semantics(
+                  button: true,
+                  selected: selected,
+                  label: excluded
+                      ? '$range, 산책에서 제외됨, 제외 취소 가능'
+                      : '$range $label${confirmed ? ' 확정' : ' 추정'}'
+                            '${placeName == null ? '' : ', 장소 $placeName'}. '
+                            '지도에서 보기',
+                  enabled: onSelect != null,
+                  excludeSemantics: true,
+                  child: InkWell(
+                    key: ValueKey(
+                      'segment-select-${segment.start.toIso8601String()}',
+                    ),
+                    onTap: onSelect,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 8, 12),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          final useStackedLayout =
+                              constraints.maxWidth < 232 ||
+                              MediaQuery.textScalerOf(context).scale(14) > 20;
+                          if (useStackedLayout) {
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 4,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    Text(
+                                      range,
+                                      style: theme.textTheme.titleSmall
+                                          ?.copyWith(
+                                            fontFeatures: const [
+                                              FontFeature.tabularFigures(),
+                                            ],
+                                          ),
                                     ),
-                                  ),
-                                  status,
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              details,
-                            ],
-                          );
-                        }
-
-                        return Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: segment.isMultiMinute ? 92 : 48,
-                              child: Text(
-                                range,
-                                style: theme.textTheme.titleSmall?.copyWith(
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
+                                    status,
                                   ],
                                 ),
-                              ),
-                            ),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: Text(
-                                          label,
-                                          style: theme.textTheme.titleSmall,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      status,
+                                const SizedBox(height: 6),
+                                details,
+                              ],
+                            );
+                          }
+
+                          return Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: segment.isMultiMinute ? 92 : 48,
+                                child: Text(
+                                  range,
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
                                     ],
                                   ),
-                                  if (placeName != null) ...[
-                                    const SizedBox(height: 3),
+                                ),
+                              ),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
                                     Row(
                                       children: [
-                                        Icon(
-                                          Icons.place_rounded,
-                                          size: 16,
-                                          color: theme.colorScheme.primary,
-                                        ),
-                                        const SizedBox(width: 4),
+                                        status,
+                                        const SizedBox(width: 8),
                                         Expanded(
                                           child: Text(
-                                            placeName,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: theme.textTheme.bodyMedium
-                                                ?.copyWith(
-                                                  color:
-                                                      theme.colorScheme.primary,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
+                                            label,
+                                            style: theme.textTheme.titleSmall,
                                           ),
                                         ),
                                       ],
                                     ),
-                                  ],
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    timelineSegmentSubtitle(segment),
-                                    style: theme.textTheme.bodySmall?.copyWith(
-                                      color: theme.colorScheme.onSurfaceVariant,
+                                    if (placeName != null) ...[
+                                      const SizedBox(height: 3),
+                                      Row(
+                                        children: [
+                                          Icon(
+                                            Icons.place_rounded,
+                                            size: 16,
+                                            color: theme.colorScheme.primary,
+                                          ),
+                                          const SizedBox(width: 4),
+                                          Expanded(
+                                            child: Text(
+                                              placeName,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: theme.textTheme.bodyMedium
+                                                  ?.copyWith(
+                                                    color: theme
+                                                        .colorScheme
+                                                        .primary,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      timelineSegmentSubtitle(segment),
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
                                     ),
-                                  ),
-                                ],
+                                  ],
+                                ),
                               ),
-                            ),
-                          ],
-                        );
-                      },
+                            ],
+                          );
+                        },
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.only(right: 6),
-              child: Center(
-                child: IconButton(
-                  key: ValueKey(
-                    'segment-edit-${segment.start.toIso8601String()}',
+              Padding(
+                padding: const EdgeInsets.only(right: 6),
+                child: Center(
+                  child: IconButton(
+                    key: ValueKey(
+                      'segment-edit-${segment.start.toIso8601String()}',
+                    ),
+                    tooltip: '$range 구간 편집',
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit_outlined),
                   ),
-                  tooltip: '$range 구간 편집',
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit_outlined),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
