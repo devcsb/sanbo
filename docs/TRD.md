@@ -215,6 +215,8 @@ DB 스키마 버전은 `4`다. v4는 완료 기록의 가역적 사용자 제외
 
 완료 세션의 사용자 제외 원본은 UTC ISO 8601으로 저장한 반개구간 `[startAt, endAt)`인 `route_exclusions`다. 범위는 세션 경계로 clamp하며 겹치는 범위는 거부하고, 맞닿은 범위는 별도 레코드로 보존한다. 원시 `location_samples.is_filtered_out` 값과 행은 제외와 복원에서 절대 변경하지 않으며, `location_samples.user_exclusion_id` 열은 만들지 않는다.
 
+DB v4는 `route_exclusions`와 `minute_windows.user_exclusion_id`를 추가한다.
+
 ```sql
 -- DB schemaVersion = 4
 CREATE TABLE route_exclusions (
@@ -237,37 +239,68 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
 정확한 공개 표면은 아래와 같다.
 
 ```dart
-RouteExclusion RouteExclusion.clampedTo(WalkSession session);
-RouteExclusionReason.vehicle;
+abstract final class RoutePartitioner {
+  static RoutePartitionResult partition({
+    required List<LocationSample> samples,
+    required List<RouteExclusion> exclusions,
+    Duration maxGap = trustedLocationGap,
+  });
+}
 
-RoutePartitionResult RoutePartitioner.partition({
-  required List<LocationSample> samples,
-  required List<RouteExclusion> exclusions,
-  Duration maxGap = trustedLocationGap,
-});
-// RoutePartitionResult exposes RouteFragment, RouteSegment, fragments,
-// includedSamples, and segments. MinuteWindow exposes userExclusionId and
-// isUserExcluded.
-List<MinuteWindow> WindowAggregator.aggregate({
-  required RoutePartitionResult partition,
-  required List<LocationSample> rawSamples,
-  required List<RouteExclusion> exclusions,
-  required DateTime sessionStart,
-  required DateTime sessionEnd,
-});
-SessionRollupResult SessionRollup.compute({
-  required WalkSession session,
-  required RoutePartitionResult partition,
-  required List<RouteExclusion> exclusions,
-  required DateTime endedAt,
-});
-CompletedSessionRecalculation SessionPipeline.recalculateCompleted({
-  required WalkSession session,
-  required List<LocationSample> storedSamples,
-  required List<RouteExclusion> exclusions,
-  required List<MinuteWindow> previousWindows,
-});
+class WindowAggregator {
+  List<MinuteWindow> aggregate({
+    required RoutePartitionResult partition,
+    required List<LocationSample> rawSamples,
+    required List<RouteExclusion> exclusions,
+    required DateTime sessionStart,
+    required DateTime sessionEnd,
+  });
+}
 
+class SessionRollup {
+  SessionRollupResult compute({
+    required WalkSession session,
+    required RoutePartitionResult partition,
+    required List<RouteExclusion> exclusions,
+    required DateTime endedAt,
+  });
+}
+
+class SessionPipeline {
+  CompletedSessionRecalculation recalculateCompleted({
+    required WalkSession session,
+    required List<LocationSample> storedSamples,
+    required List<RouteExclusion> exclusions,
+    required List<MinuteWindow> previousWindows,
+  });
+}
+
+class SessionGuard {
+  SessionGuardObservation observe(LocationSample sample, {required DateTime observedAt});
+  void rebuildHighSpeedState({
+    required Iterable<LocationSample> samples,
+    required DateTime observedAt,
+  });
+  void dismissHighSpeedWarning();
+  SessionGuardDecision evaluate({required DateTime startedAt, required DateTime now});
+  void continueStationaryTracking(DateTime now);
+}
+
+abstract class SessionNotificationService {
+  Future<void> initialize();
+  Future<NotificationPermissionResult> requestPermission();
+  Stream<SessionNotificationTap> get taps;
+  Future<void> showWarning(SessionWarning warning);
+  Future<void> showCompletion({required String title, required String body});
+  Future<void> cancel({required SessionWarningKind kind});
+}
+
+// RouteExclusion.clampedTo(WalkSession), RouteExclusionReason.vehicle,
+// RouteFragment, RouteSegment, MinuteWindow.userExclusionId,
+// MinuteWindow.isUserExcluded, SessionWarningKind, SessionWarningAction,
+// SessionWarning, LiveSessionState.activeWarning,
+// SessionController.continueAfterWarning(), and
+// SessionController.stopFromHighSpeedWarning() remain the public UI contract.
 Future<List<RouteExclusion>> WalkRepository.getRouteExclusions(String sessionId);
 Future<RouteExclusion> WalkRepository.excludeRouteSegment({
   required String sessionId,
@@ -279,30 +312,6 @@ Future<void> WalkRepository.restoreRouteExclusion({
   required String sessionId,
   required String exclusionId,
 });
-
-SessionGuardObservation SessionGuard.observe(
-  LocationSample sample, {
-  required DateTime observedAt,
-});
-void SessionGuard.rebuildHighSpeedState({
-  required Iterable<LocationSample> samples,
-  required DateTime observedAt,
-});
-void SessionGuard.dismissHighSpeedWarning();
-
-SessionWarningKind; // stationary, duration, highSpeed
-SessionWarningAction; // stopRecording, continueRecording
-SessionWarning;
-LiveSessionState.activeWarning;
-Future<void> SessionController.continueAfterWarning();
-Future<WalkSession?> SessionController.stopFromHighSpeedWarning();
-NotificationPermissionResult;
-SessionNotificationTap;
-Future<NotificationPermissionResult> SessionNotificationService.requestPermission();
-Future<void> SessionNotificationService.initialize();
-Stream<SessionNotificationTap> SessionNotificationService.taps;
-Future<void> SessionNotificationService.showWarning(SessionWarning warning);
-Future<void> SessionNotificationService.cancel({required SessionWarningKind kind});
 ```
 
 알림 권한 거부와 notification API 실패는 비치명이다. 위치 권한, location engine 시작, 세션 생성과 기록을 지연하거나 실패시키지 않는다. native payload는 `kind: highSpeed`이고 Dart 전달은 `notificationTapped({kind: highSpeed})`다. warm start에서는 tap을 받은 즉시 홈으로 이동해 활성 고속 경고를 표시한다. cold start에서는 native의 한 항목 버퍼를 `initialize()` 뒤 전달하고, 세션 복구가 끝난 뒤 `rebuildHighSpeedState`로 고속 상태와 경고를 재구성한다.

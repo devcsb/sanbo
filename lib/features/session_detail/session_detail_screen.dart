@@ -805,14 +805,16 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
         ],
       ),
     );
-    if (confirmed != true || ref.read(_detailCommandBusyProvider(sessionId))) {
+    if (!mounted ||
+        confirmed != true ||
+        ref.read(_detailCommandBusyProvider(sessionId))) {
       return;
     }
 
     final repository = ref.read(walkRepositoryProvider);
     // The app-level container outlives this detail route, so a completed write
     // still refreshes history if the user leaves while it is in flight.
-    final container = ProviderScope.containerOf(context, listen: false);
+    final container = ProviderScope.containerOf(this.context, listen: false);
     ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
     try {
       await repository.excludeRouteSegment(
@@ -825,7 +827,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
       container.invalidate(sessionDetailProvider(sessionId));
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(this.context).showSnackBar(
           const SnackBar(content: Text('경로를 제외하지 못했어요. 다시 시도해 주세요.')),
         );
       }
@@ -862,7 +864,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
       container.invalidate(sessionDetailProvider(sessionId));
     } on Object {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(this.context).showSnackBar(
           const SnackBar(content: Text('제외를 취소하지 못했어요. 다시 시도해 주세요.')),
         );
       }

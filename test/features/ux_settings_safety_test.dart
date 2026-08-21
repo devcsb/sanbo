@@ -8,7 +8,6 @@ import 'package:sanbo/core/theme/app_theme.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/services/app_backup.dart';
-import 'package:sanbo/features/history/history_providers.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/features/settings/settings_screen.dart';
 import 'package:sanbo/platform/backup/backup_file_service.dart';

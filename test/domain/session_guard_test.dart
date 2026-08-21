@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
-import 'package:sanbo/domain/pipeline/geo.dart';
 import 'package:sanbo/domain/services/session_guard.dart';
 
 void main() {

@@ -71,10 +71,10 @@ adb shell dumpsys activity services | grep -i -E 'geolocator|sanbo'
 | [ ] notification denied | Android | 미기록 | 위치: 허용, 알림: 거부 | 알림 권한 거부가 세션 생성, 위치 수집, 고속 상태 계산을 막지 않는다 | 미기록 | 미판정 |
 | [ ] notification API failure | Android | 미기록 | 위치: 허용, 알림: 허용 또는 API 실패 주입 | 알림 API 실패가 기록, 위치 수집, 세션 저장을 막지 않는다 | 미기록 | 미판정 |
 | [ ] continued background location | Android | 미기록 | 위치: 허용, 알림: 미기록 | 홈 이동과 화면 잠금 뒤 새 위치와 누적값이 계속 저장된다 | 미기록 | 미판정 |
-| [ ] route exclusion | Android | 미기록 | 완료 세션 | 선택한 연속 구간만 `산책에서 제외`되고 지도와 모든 합계가 함께 갱신된다 | 미기록 | 미판정 |
-| [ ] all-points exclusion | Android | 미기록 | 완료 세션 | 모든 점을 제외해도 세션과 원시 샘플은 남고 경로·집계는 0으로 갱신된다 | 미기록 | 미판정 |
-| [ ] restore | Android | 미기록 | 제외된 완료 세션 | `제외 취소` 뒤 지도, 세션, 기록, 일별 합계가 원래 계산으로 함께 돌아온다 | 미기록 | 미판정 |
-| [ ] app restart persistence | Android | 미기록 | 제외된 완료 세션 | 앱 재시작 뒤 제외 범위와 파생 분 기록, 지도와 합계가 유지된다 | 미기록 | 미판정 |
+| [ ] route exclusion | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 완료 세션. 선택한 연속 구간만 `산책에서 제외`되고 지도와 모든 합계가 함께 갱신된다 | 미기록 | 미판정 |
+| [ ] all-points exclusion | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 완료 세션. 모든 점을 제외해도 세션과 원시 샘플은 남고 경로·집계는 0으로 갱신된다 | 미기록 | 미판정 |
+| [ ] restore | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 제외된 완료 세션. `제외 취소` 뒤 지도, 세션, 기록, 일별 합계가 원래 계산으로 함께 돌아온다 | 미기록 | 미판정 |
+| [ ] app restart persistence | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 제외된 완료 세션. 앱 재시작 뒤 제외 범위와 파생 분 기록, 지도와 합계가 유지된다 | 미기록 | 미판정 |
 | [ ] foreground warning without system banner | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 앱 전면에서 28.8km/h 누적 60초 뒤 고속 종료 확인만 보이고 시스템 배너는 없다 | 미기록 | 미판정 |
 | [ ] background notification | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 백그라운드에서 highSpeed 알림이 표시되고 기록은 계속된다 | 미기록 | 미판정 |
 | [ ] screen-off notification | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 화면을 꺼도 highSpeed 알림이 도착하고 위치 수집은 계속된다 | 미기록 | 미판정 |
@@ -83,7 +83,7 @@ adb shell dumpsys activity services | grep -i -E 'geolocator|sanbo'
 | [ ] notification denied | iOS | 미기록 | 위치: 허용, 알림: 거부 | 알림 권한 거부가 세션 생성, 위치 수집, 고속 상태 계산을 막지 않는다 | 미기록 | 미판정 |
 | [ ] notification API failure | iOS | 미기록 | 위치: 허용, 알림: 허용 또는 API 실패 주입 | 알림 API 실패가 기록, 위치 수집, 세션 저장을 막지 않는다 | 미기록 | 미판정 |
 | [ ] continued background location | iOS | 미기록 | 위치: 허용, 알림: 미기록 | 홈 이동과 화면 잠금 뒤 새 위치와 누적값이 계속 저장된다 | 미기록 | 미판정 |
-| [ ] route exclusion | iOS | 미기록 | 완료 세션 | 선택한 연속 구간만 `산책에서 제외`되고 지도와 모든 합계가 함께 갱신된다 | 미기록 | 미판정 |
-| [ ] all-points exclusion | iOS | 미기록 | 완료 세션 | 모든 점을 제외해도 세션과 원시 샘플은 남고 경로·집계는 0으로 갱신된다 | 미기록 | 미판정 |
-| [ ] restore | iOS | 미기록 | 제외된 완료 세션 | `제외 취소` 뒤 지도, 세션, 기록, 일별 합계가 원래 계산으로 함께 돌아온다 | 미기록 | 미판정 |
-| [ ] app restart persistence | iOS | 미기록 | 제외된 완료 세션 | 앱 재시작 뒤 제외 범위와 파생 분 기록, 지도와 합계가 유지된다 | 미기록 | 미판정 |
+| [ ] route exclusion | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 완료 세션. 선택한 연속 구간만 `산책에서 제외`되고 지도와 모든 합계가 함께 갱신된다 | 미기록 | 미판정 |
+| [ ] all-points exclusion | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 완료 세션. 모든 점을 제외해도 세션과 원시 샘플은 남고 경로·집계는 0으로 갱신된다 | 미기록 | 미판정 |
+| [ ] restore | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 제외된 완료 세션. `제외 취소` 뒤 지도, 세션, 기록, 일별 합계가 원래 계산으로 함께 돌아온다 | 미기록 | 미판정 |
+| [ ] app restart persistence | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 전제: 제외된 완료 세션. 앱 재시작 뒤 제외 범위와 파생 분 기록, 지도와 합계가 유지된다 | 미기록 | 미판정 |

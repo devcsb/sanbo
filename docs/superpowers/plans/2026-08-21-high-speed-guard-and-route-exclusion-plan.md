@@ -2061,7 +2061,7 @@
 
   Expected: analyzer reports no issues; all Flutter, Android, and iOS tests PASS; both debug builds succeed; PRD and TRD verification exits 0; `git diff --check` is clean; the legacy API and schema search returns exit code 1 with no matches in active code or tests; status contains only files named in this plan. If no iPhone 16 simulator exists, run `xcrun simctl list devices available`, select one available iOS simulator by its exact name, rerun the same `xcodebuild test`, and record that exact destination in the commit notes.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   ```bash
   git add docs/PRD.md docs/TRD.md docs/DEVICE_VALIDATION.md test/features/high_speed_route_exclusion_docs_test.dart docs/superpowers/plans/2026-08-21-high-speed-guard-and-route-exclusion-plan.md

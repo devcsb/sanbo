@@ -138,7 +138,7 @@ void main() {
       });
       expect(notifications.warnings, hasLength(1));
 
-      controller.continueAfterWarning();
+      await controller.continueAfterWarning();
       live = container.read(sessionControllerProvider);
       expect(live.activeWarning, isNull);
       expect(live.isTracking, isTrue);
@@ -370,7 +370,7 @@ void main() {
       });
       expect(notifications.warnings, isEmpty);
 
-      controller.continueAfterWarning();
+      await controller.continueAfterWarning();
       live = container.read(sessionControllerProvider);
       expect(live.activeWarning, isNull);
 
