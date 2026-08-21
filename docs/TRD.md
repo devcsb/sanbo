@@ -232,13 +232,66 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
   REFERENCES route_exclusions(id) ON DELETE SET NULL;
 ```
 
-`RoutePartitioner.partition`은 필터된 샘플, 유효하지 않은 좌표, 사용자 제외 내부 샘플, `trustedLocationGap`보다 긴 공백을 지나 선분을 잇지 않는다. 포함 샘플만 fragments에 두며, fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다.
+`RoutePartitioner.partition`은 필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다. 즉 필터된 샘플, 유효하지 않은 좌표, 사용자 제외 내부 샘플, 제외 범위를 가로지르는 두 endpoint와 `trustedLocationGap`보다 긴 공백을 지나 선분을 잇지 않는다. 포함 샘플만 fragments에 두며, fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다.
 
-`WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 제외 없는 결과로 분 기록 교체, 세션 집계 갱신, 제외 레코드 삭제 순이며 삭제를 마지막에 둔다. 실패하면 원본과 파생 상태가 함께 rollback된다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
+`SessionGuard`의 observedAt 수신 시각은 최대 과거 30초와 미래 5초만 허용한다. `WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 분 기록 전체 교체, 세션 집계 갱신, 제외 레코드 삭제 마지막 순서로 쓴다. 같은 SQLite transaction은 원본과 파생 상태를 함께 rollback한다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
 
-정확한 공개 표면은 아래와 같다.
+알림 tap에서 warm tap은 즉시 `/`로 이동한다. cold tap은 복구가 끝난 뒤 active session이 있을 때만 경고를 표시한다. 종료됐거나 없는 세션은 tap을 버린다. native와 Dart의 pending buffer는 하나만 저장하고 한 번만 전달한다.
+
+정확한 공개 표면은 아래와 같다. 아래 선언은 완전한 독립 라이브러리가 아니라 실제 Dart 소스의 public type, field, getter, method 선언을 계약으로 옮긴 것이다.
 
 ```dart
+enum RouteExclusionReason { vehicle }
+
+class RouteExclusion {
+  factory RouteExclusion({
+    required String id,
+    required String sessionId,
+    required DateTime startAt,
+    required DateTime endAt,
+    required RouteExclusionReason reason,
+    required DateTime createdAt,
+  });
+  final String id;
+  final String sessionId;
+  final DateTime startAt;
+  final DateTime endAt;
+  final RouteExclusionReason reason;
+  final DateTime createdAt;
+  RouteExclusion clampedTo(WalkSession session);
+  bool contains(DateTime value);
+  bool overlaps(DateTime start, DateTime end);
+}
+
+class RouteSegment {
+  const RouteSegment({
+    required LocationSample start,
+    required LocationSample end,
+    required double distanceM,
+  });
+  final LocationSample start;
+  final LocationSample end;
+  final double distanceM;
+  Duration get duration;
+  double get speedMps;
+}
+
+class RouteFragment {
+  const RouteFragment(List<LocationSample> samples);
+  final List<LocationSample> samples;
+}
+
+class RoutePartitionResult {
+  const RoutePartitionResult({
+    required List<RouteFragment> fragments,
+    required List<LocationSample> includedSamples,
+    required List<RouteSegment> segments,
+  });
+  final List<RouteFragment> fragments;
+  final List<LocationSample> includedSamples;
+  final List<RouteSegment> segments;
+}
+
 abstract final class RoutePartitioner {
   static RoutePartitionResult partition({
     required List<LocationSample> samples,
@@ -247,7 +300,18 @@ abstract final class RoutePartitioner {
   });
 }
 
+class MinuteWindow {
+  final String? userExclusionId;
+  bool get isUserExcluded;
+}
+
 class WindowAggregator {
+  WindowAggregator({
+    WindowAggregatorConfig config = const WindowAggregatorConfig(),
+    ActivityInferencer? inferencer,
+  });
+  final WindowAggregatorConfig config;
+  final ActivityInferencer inferencer;
   List<MinuteWindow> aggregate({
     required RoutePartitionResult partition,
     required List<LocationSample> rawSamples,
@@ -257,7 +321,28 @@ class WindowAggregator {
   });
 }
 
+class SessionRollupResult {
+  const SessionRollupResult({
+    required double totalDistanceM,
+    required int durationS,
+    required int movingTimeS,
+    required int stationaryTimeS,
+    required double avgSpeedMps,
+    required int validSampleCount,
+    double? medianAccuracyM,
+  });
+  final double totalDistanceM;
+  final int durationS;
+  final int movingTimeS;
+  final int stationaryTimeS;
+  final double avgSpeedMps;
+  final int validSampleCount;
+  final double? medianAccuracyM;
+}
+
 class SessionRollup {
+  SessionRollup({double stationarySpeedMps = 0.3});
+  final double stationarySpeedMps;
   SessionRollupResult compute({
     required WalkSession session,
     required RoutePartitionResult partition,
@@ -267,12 +352,53 @@ class SessionRollup {
 }
 
 class SessionPipeline {
+  SessionPipeline({
+    SampleFilter? filter,
+    WindowAggregator? aggregator,
+    SessionRollup? rollup,
+    SegmentMerger? segmentMerger,
+  });
+  final SampleFilter filter;
+  final WindowAggregator aggregator;
+  final SessionRollup rollup;
+  final SegmentMerger segmentMerger;
+  SessionProcessResult process({
+    required WalkSession session,
+    required List<LocationSample> rawSamples,
+    required DateTime endedAt,
+  });
   CompletedSessionRecalculation recalculateCompleted({
     required WalkSession session,
     required List<LocationSample> storedSamples,
     required List<RouteExclusion> exclusions,
     required List<MinuteWindow> previousWindows,
   });
+}
+
+class SessionProcessResult {
+  const SessionProcessResult({
+    required List<LocationSample> filteredSamples,
+    required List<RouteFragment> fragments,
+    required List<MinuteWindow> windows,
+    required SessionRollupResult metrics,
+    List<ActivitySegment> segments = const [],
+  });
+  final List<LocationSample> filteredSamples;
+  final List<RouteFragment> fragments;
+  final List<MinuteWindow> windows;
+  final List<ActivitySegment> segments;
+  final SessionRollupResult metrics;
+}
+
+class CompletedSessionRecalculation {
+  const CompletedSessionRecalculation({
+    required List<MinuteWindow> windows,
+    required List<RouteFragment> fragments,
+    required SessionRollupResult metrics,
+  });
+  final List<MinuteWindow> windows;
+  final List<RouteFragment> fragments;
+  final SessionRollupResult metrics;
 }
 
 class SessionGuard {
@@ -286,6 +412,52 @@ class SessionGuard {
   void continueStationaryTracking(DateTime now);
 }
 
+enum SessionWarningKind { stationary, duration, highSpeed }
+enum SessionWarningAction { stopRecording, continueRecording }
+
+class SessionWarning {
+  const SessionWarning({
+    required SessionWarningKind kind,
+    required String title,
+    required String message,
+    required Set<SessionWarningAction> actions,
+    Duration? remaining,
+  });
+  final SessionWarningKind kind;
+  final String title;
+  final String message;
+  final Set<SessionWarningAction> actions;
+  final Duration? remaining;
+}
+
+class LiveSessionState {
+  final SessionWarning? activeWarning;
+}
+
+class SessionController {
+  Future<void> start({TrackingMode mode = TrackingMode.balanced});
+  Future<void> restoreIfNeeded();
+  Future<void> retryRecovery();
+  void clearError();
+  void clearNotice();
+  Future<void> restorePendingNotificationTap();
+  void handleNotificationTap(SessionNotificationTap tap);
+  Future<void> continueAfterWarning();
+  Future<WalkSession?> stopFromHighSpeedWarning();
+  void debugIngestSamples(List<LocationSample> samples);
+  Future<void> debugEvaluateSessionGuard([DateTime? now]);
+  void setAppForeground(bool foreground);
+  Future<WalkSession?> stop({String? completionNotice});
+  Future<void> discardActive();
+}
+
+enum NotificationPermissionResult { granted, denied, unsupported, failed }
+
+class SessionNotificationTap {
+  const SessionNotificationTap(SessionWarningKind kind);
+  final SessionWarningKind kind;
+}
+
 abstract class SessionNotificationService {
   Future<void> initialize();
   Future<NotificationPermissionResult> requestPermission();
@@ -295,12 +467,51 @@ abstract class SessionNotificationService {
   Future<void> cancel({required SessionWarningKind kind});
 }
 
-// RouteExclusion.clampedTo(WalkSession), RouteExclusionReason.vehicle,
-// RouteFragment, RouteSegment, MinuteWindow.userExclusionId,
-// MinuteWindow.isUserExcluded, SessionWarningKind, SessionWarningAction,
-// SessionWarning, LiveSessionState.activeWarning,
-// SessionController.continueAfterWarning(), and
-// SessionController.stopFromHighSpeedWarning() remain the public UI contract.
+class PlatformSessionNotificationService implements SessionNotificationService {
+  Stream<SessionNotificationTap> get taps;
+  Future<void> initialize();
+  Future<NotificationPermissionResult> requestPermission();
+  Future<void> showWarning(SessionWarning warning);
+  Future<void> showCompletion({required String title, required String body});
+  Future<void> cancel({required SessionWarningKind kind});
+}
+
+class RoutePlaybackPoint {
+  const RoutePlaybackPoint({
+    required LocationSample sample,
+    required int fragmentIndex,
+    required int pointIndex,
+  });
+  final LocationSample sample;
+  final int fragmentIndex;
+  final int pointIndex;
+  bool get startsFragment => pointIndex == 0;
+}
+
+class RoutePlaybackCursor {
+  const RoutePlaybackCursor({
+    required int fragmentIndex,
+    required int pointIndex,
+  });
+  final int fragmentIndex;
+  final int pointIndex;
+}
+
+abstract final class RoutePlayback {
+  static List<RoutePlaybackPoint> flatten(RoutePartitionResult route);
+  static List<LocationSample> playableSamples(
+    Iterable<LocationSample> samples,
+  );
+  static int nearestIndex(List<LocationSample> sortedSamples, DateTime time);
+  static List<LocationSample> samplesInRange(
+    List<LocationSample> sortedSamples, {
+    required DateTime start,
+    required DateTime endExclusive,
+  });
+  static int stepForSampleCount(int sampleCount);
+  static Duration intervalForSampleCount(int sampleCount);
+}
+
 Future<List<RouteExclusion>> WalkRepository.getRouteExclusions(String sessionId);
 Future<RouteExclusion> WalkRepository.excludeRouteSegment({
   required String sessionId,

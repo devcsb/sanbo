@@ -75,6 +75,45 @@ void main() {
   });
 
   test(
+    'TRD keeps route, recovery, notification, and public API contracts scoped',
+    () {
+      final trd = File('docs/TRD.md').readAsStringSync();
+      final guard = _section(trd, '### 3.7 고속 guard와 경로 제외 계약', '---\n\n## 4.');
+
+      for (final contract in [
+        '필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다',
+        'observedAt 수신 시각은 최대 과거 30초와 미래 5초만 허용한다',
+        '복원은 분 기록 전체 교체, 세션 집계 갱신, 제외 레코드 삭제 마지막 순서로 쓴다',
+        '같은 SQLite transaction은 원본과 파생 상태를 함께 rollback한다',
+        'warm tap은 즉시 `/`로 이동한다',
+        'cold tap은 복구가 끝난 뒤 active session이 있을 때만 경고를 표시한다',
+        '종료됐거나 없는 세션은 tap을 버린다',
+        '하나만 저장하고 한 번만 전달한다',
+        'final List<RouteFragment> fragments;',
+        'Future<void> continueAfterWarning()',
+        'Future<WalkSession?> stopFromHighSpeedWarning()',
+        'void handleNotificationTap(SessionNotificationTap tap)',
+        'Future<void> restorePendingNotificationTap()',
+        'final SessionWarning? activeWarning;',
+        'final SessionWarningKind kind;',
+        'final Set<SessionWarningAction> actions;',
+        'final List<LocationSample> filteredSamples;',
+        'final List<ActivitySegment> segments;',
+        'Future<void> start({TrackingMode mode = TrackingMode.balanced})',
+        'bool get startsFragment => pointIndex == 0;',
+        'static List<RoutePlaybackPoint> flatten(RoutePartitionResult route)',
+        'static List<LocationSample> playableSamples(',
+        'static int nearestIndex(List<LocationSample> sortedSamples, DateTime time)',
+        'static List<LocationSample> samplesInRange(',
+        'static int stepForSampleCount(int sampleCount)',
+        'static Duration intervalForSampleCount(int sampleCount)',
+      ]) {
+        expect(guard, contains(contract));
+      }
+    },
+  );
+
+  test(
     'device matrix keeps every Android and iOS scenario unverified and observable',
     () {
       final matrix = File('docs/DEVICE_VALIDATION.md').readAsStringSync();
