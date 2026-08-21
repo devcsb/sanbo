@@ -28,6 +28,7 @@ class MinuteWindow {
     this.userLabel,
     this.userNote,
     this.userConfirmed = false,
+    this.userExclusionId,
     this.placeId,
     this.placeName,
     this.placeAddress,
@@ -56,10 +57,13 @@ class MinuteWindow {
   final ActivityLabel? userLabel;
   final String? userNote;
   final bool userConfirmed;
+  final String? userExclusionId;
   final int? placeId;
   final String? placeName;
   final String? placeAddress;
 
   /// Display label: user override wins (PRD FR-11).
   ActivityLabel get displayLabel => userLabel ?? hypothesisLabel;
+
+  bool get isUserExcluded => userExclusionId != null;
 }

@@ -1,7 +1,9 @@
 import '../models/location_sample.dart';
 import '../models/minute_window.dart';
+import '../models/route_exclusion.dart';
 import 'activity_inferencer.dart';
 import 'geo.dart';
+import 'route_partitioner.dart';
 
 class WindowAggregatorConfig {
   const WindowAggregatorConfig({
@@ -17,7 +19,14 @@ class WindowAggregatorConfig {
   final double medianAccuracyMediumM;
 }
 
-/// Buckets samples into wall-clock minute windows (TRD §4.3).
+class _WindowMotion {
+  double distanceM = 0;
+  double movingSeconds = 0;
+  double stationarySeconds = 0;
+  double maxSpeedMps = 0;
+}
+
+/// Buckets the shared trusted route into wall-clock minute windows.
 class WindowAggregator {
   WindowAggregator({
     this.config = const WindowAggregatorConfig(),
@@ -27,211 +36,275 @@ class WindowAggregator {
   final WindowAggregatorConfig config;
   final ActivityInferencer inferencer;
 
-  /// Aggregate [samples] between [sessionStart] and optional [sessionEnd].
-  ///
-  /// Gap minutes with zero samples are emitted as [WindowQuality.gap].
   List<MinuteWindow> aggregate({
-    required List<LocationSample> samples,
-    required DateTime sessionStart,
-    DateTime? sessionEnd,
-  }) {
-    // Absolute end for range checks (UTC/local instants compare correctly).
-    final endAbs = sessionEnd ?? DateTime.now();
-    if (endAbs.isBefore(sessionStart)) return const [];
-
-    // Local bounds for wall-clock minute cursor keys (PRD: 분 경계).
-    final startLocal = asLocal(sessionStart);
-    final endLocal = asLocal(endAbs);
-
-    final byMinute = <DateTime, List<LocationSample>>{};
-    for (final s in samples) {
-      if (s.timestamp.isBefore(sessionStart) || s.timestamp.isAfter(endAbs)) {
-        continue;
-      }
-      final tsLocal = asLocal(s.timestamp);
-      final key = floorToMinute(tsLocal);
-      final normalized = s.timestamp.isUtc
-          ? LocationSample(
-              timestamp: tsLocal,
-              latitude: s.latitude,
-              longitude: s.longitude,
-              accuracyM: s.accuracyM,
-              speedMps: s.speedMps,
-              altitudeM: s.altitudeM,
-              isFilteredOut: s.isFilteredOut,
-            )
-          : s;
-      byMinute.putIfAbsent(key, () => []).add(normalized);
-    }
-
-    final windows = <MinuteWindow>[];
-    var cursor = floorToMinute(startLocal);
-    final lastMinute = floorToMinute(endLocal);
-
-    while (!cursor.isAfter(lastMinute)) {
-      final bucket = byMinute[cursor] ?? const <LocationSample>[];
-      windows.add(
-        _buildWindow(
-          windowStart: cursor,
-          samples: bucket,
-          sessionStart: startLocal,
-          sessionEnd: endLocal,
-        ),
-      );
-      cursor = cursor.add(const Duration(minutes: 1));
-    }
-    return windows;
-  }
-
-  MinuteWindow _buildWindow({
-    required DateTime windowStart,
-    required List<LocationSample> samples,
+    required RoutePartitionResult partition,
+    required List<LocationSample> rawSamples,
+    required List<RouteExclusion> exclusions,
     required DateTime sessionStart,
     required DateTime sessionEnd,
   }) {
-    final windowEnd = windowStart.add(const Duration(minutes: 1));
-    final spanStart = sessionStart.isAfter(windowStart)
-        ? sessionStart
-        : windowStart;
-    final spanEnd = sessionEnd.isBefore(windowEnd) ? sessionEnd : windowEnd;
-    var durationS = spanEnd.difference(spanStart).inSeconds;
-    if (durationS < 0) durationS = 0;
-    if (durationS > 60) durationS = 60;
-    final partial =
-        durationS < 60 ||
-        sessionStart.isAfter(windowStart) ||
-        sessionEnd.isBefore(windowEnd);
+    if (!sessionEnd.isAfter(sessionStart)) return const [];
 
-    final rawCount = samples.length;
-    final valid = samples.where((s) => !s.isFilteredOut).toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    final startLocal = asLocal(sessionStart);
+    final endLocal = asLocal(sessionEnd);
+    final rawByMinute = _bucketSamples(rawSamples, sessionStart, sessionEnd);
+    final includedByMinute = _bucketSamples(
+      partition.includedSamples,
+      sessionStart,
+      sessionEnd,
+    );
+    final motionByMinute = _allocateMotion(
+      partition.segments,
+      sessionStart,
+      sessionEnd,
+    );
+    final excludedWindows = _excludedWindows(
+      exclusions,
+      sessionStart,
+      sessionEnd,
+    );
 
-    if (valid.isEmpty) {
+    final windows = <MinuteWindow>[];
+    var cursor = floorToMinute(startLocal);
+    while (cursor.isBefore(endLocal)) {
+      final windowEnd = cursor.add(const Duration(minutes: 1));
+      final spanStart = startLocal.isAfter(cursor) ? startLocal : cursor;
+      final spanEnd = endLocal.isBefore(windowEnd) ? endLocal : windowEnd;
+      final durationS = spanEnd.difference(spanStart).inSeconds;
+      final rawSampleCount = rawByMinute[cursor]?.length ?? 0;
+      final exclusionId = excludedWindows[cursor];
+      if (exclusionId != null) {
+        windows.add(
+          _excludedWindow(
+            windowStart: cursor,
+            durationS: durationS,
+            rawSampleCount: rawSampleCount,
+            exclusionId: exclusionId,
+          ),
+        );
+      } else {
+        windows.add(
+          _buildWindow(
+            windowStart: cursor,
+            durationS: durationS,
+            partial: durationS < 60,
+            samples: includedByMinute[cursor] ?? const [],
+            rawSampleCount: rawSampleCount,
+            motion: motionByMinute[cursor] ?? _WindowMotion(),
+          ),
+        );
+      }
+      cursor = windowEnd;
+    }
+    return List.unmodifiable(windows);
+  }
+
+  Map<DateTime, List<LocationSample>> _bucketSamples(
+    List<LocationSample> samples,
+    DateTime sessionStart,
+    DateTime sessionEnd,
+  ) {
+    final result = <DateTime, List<LocationSample>>{};
+    for (final sample in samples) {
+      if (sample.timestamp.isBefore(sessionStart) ||
+          !sample.timestamp.isBefore(sessionEnd)) {
+        continue;
+      }
+      final key = floorToMinute(asLocal(sample.timestamp));
+      result.putIfAbsent(key, () => []).add(sample);
+    }
+    return result;
+  }
+
+  Map<DateTime, _WindowMotion> _allocateMotion(
+    List<RouteSegment> segments,
+    DateTime sessionStart,
+    DateTime sessionEnd,
+  ) {
+    final motionByMinute = <DateTime, _WindowMotion>{};
+    for (final segment in segments) {
+      final segmentStart = segment.start.timestamp;
+      final segmentEnd = segment.end.timestamp;
+      final durationUs = segment.duration.inMicroseconds;
+      if (durationUs <= 0 || !segment.distanceM.isFinite) continue;
+
+      var cursor = floorToMinute(asLocal(segmentStart));
+      final segmentEndLocal = asLocal(segmentEnd);
+      while (cursor.isBefore(segmentEndLocal)) {
+        final windowEnd = cursor.add(const Duration(minutes: 1));
+        final overlapStart = _later(_later(segmentStart, sessionStart), cursor);
+        final overlapEnd = _earlier(
+          _earlier(segmentEnd, sessionEnd),
+          windowEnd,
+        );
+        final overlapUs = overlapEnd.difference(overlapStart).inMicroseconds;
+        if (overlapUs > 0) {
+          final bucket = motionByMinute.putIfAbsent(cursor, _WindowMotion.new);
+          final overlapSeconds = overlapUs / Duration.microsecondsPerSecond;
+          bucket.distanceM += segment.distanceM * overlapUs / durationUs;
+          if (segment.speedMps < config.stationarySpeedMps) {
+            bucket.stationarySeconds += overlapSeconds;
+          } else {
+            bucket.movingSeconds += overlapSeconds;
+          }
+          if (segment.speedMps > bucket.maxSpeedMps) {
+            bucket.maxSpeedMps = segment.speedMps;
+          }
+        }
+        cursor = windowEnd;
+      }
+    }
+    return motionByMinute;
+  }
+
+  Map<DateTime, String> _excludedWindows(
+    List<RouteExclusion> exclusions,
+    DateTime sessionStart,
+    DateTime sessionEnd,
+  ) {
+    final result = <DateTime, String>{};
+    for (final exclusion in exclusions) {
+      final start = _later(exclusion.startAt, sessionStart);
+      final end = _earlier(exclusion.endAt, sessionEnd);
+      if (!start.isBefore(end)) continue;
+      var cursor = floorToMinute(asLocal(start));
+      final endLocal = asLocal(end);
+      while (cursor.isBefore(endLocal)) {
+        final windowEnd = cursor.add(const Duration(minutes: 1));
+        if (exclusion.overlaps(cursor, windowEnd)) {
+          final prior = result[cursor];
+          if (prior != null && prior != exclusion.id) {
+            throw ArgumentError('하나의 분에 겹치는 제외 범위가 있습니다');
+          }
+          result[cursor] = exclusion.id;
+        }
+        cursor = windowEnd;
+      }
+    }
+    return result;
+  }
+
+  MinuteWindow _excludedWindow({
+    required DateTime windowStart,
+    required int durationS,
+    required int rawSampleCount,
+    required String exclusionId,
+  }) => MinuteWindow(
+    windowStart: windowStart,
+    durationS: durationS,
+    partial: durationS < 60,
+    sampleCount: 0,
+    rawSampleCount: rawSampleCount,
+    distanceM: 0,
+    avgSpeedMps: 0,
+    maxSpeedMps: 0,
+    stationaryRatio: 1,
+    quality: WindowQuality.gap,
+    gapReason: 'user_excluded',
+    userExclusionId: exclusionId,
+  );
+
+  MinuteWindow _buildWindow({
+    required DateTime windowStart,
+    required int durationS,
+    required bool partial,
+    required List<LocationSample> samples,
+    required int rawSampleCount,
+    required _WindowMotion motion,
+  }) {
+    final hasMotion =
+        motion.distanceM > 0 ||
+        motion.movingSeconds > 0 ||
+        motion.stationarySeconds > 0;
+    if (samples.isEmpty && !hasMotion) {
       final gap = MinuteWindow(
         windowStart: windowStart,
-        durationS: durationS == 0 ? 60 : durationS,
+        durationS: durationS,
         partial: partial,
         sampleCount: 0,
-        rawSampleCount: rawCount,
+        rawSampleCount: rawSampleCount,
         distanceM: 0,
         avgSpeedMps: 0,
         maxSpeedMps: 0,
         stationaryRatio: 1,
         quality: WindowQuality.gap,
-        gapReason: rawCount == 0 ? 'no_samples' : 'all_filtered',
+        gapReason: rawSampleCount == 0 ? 'no_samples' : 'all_filtered',
       );
-      final hyp = inferencer.infer(gap);
-      return MinuteWindow(
-        windowStart: gap.windowStart,
-        durationS: gap.durationS,
-        partial: gap.partial,
-        sampleCount: gap.sampleCount,
-        rawSampleCount: gap.rawSampleCount,
-        distanceM: gap.distanceM,
-        avgSpeedMps: gap.avgSpeedMps,
-        maxSpeedMps: gap.maxSpeedMps,
-        stationaryRatio: gap.stationaryRatio,
-        quality: gap.quality,
-        gapReason: gap.gapReason,
-        hypothesisLabel: hyp.label,
-        hypothesisConfidence: hyp.confidence,
-        evidence: hyp.evidence,
-      );
+      return _withInference(gap);
     }
 
-    final distance = pathDistanceMeters(
-      valid.map((s) => (lat: s.latitude, lon: s.longitude)),
-    );
-
-    var maxSpeed = 0.0;
-    var stationaryTimeS = 0.0;
-    for (var i = 0; i < valid.length; i++) {
-      final s = valid[i];
-      final spd = s.speedMps;
-      if (spd != null && spd > maxSpeed) maxSpeed = spd;
-
-      if (i > 0) {
-        final prev = valid[i - 1];
-        final dt = s.timestamp.difference(prev.timestamp).inMilliseconds / 1000.0;
-        if (dt <= 0) continue;
-        final segDist = haversineMeters(
-          lat1: prev.latitude,
-          lon1: prev.longitude,
-          lat2: s.latitude,
-          lon2: s.longitude,
-        );
-        final inst = segDist / dt;
-        if (inst > maxSpeed) maxSpeed = inst;
-        if (inst < config.stationarySpeedMps) {
-          stationaryTimeS += dt;
-        }
-      }
-    }
-
-    final movingDenom = mathMax(durationS - stationaryTimeS.round(), 1);
-    final avgSpeed = distance / movingDenom;
-    final stationaryRatio = durationS <= 0
-        ? 1.0
-        : (stationaryTimeS / durationS).clamp(0.0, 1.0);
-
+    final sorted = [...samples]
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     final accuracies =
-        valid.map((s) => s.accuracyM).whereType<double>().toList()..sort();
-    final medianAcc = accuracies.isEmpty
+        sorted
+            .map((sample) => sample.accuracyM)
+            .whereType<double>()
+            .where((accuracy) => accuracy.isFinite)
+            .toList()
+          ..sort();
+    final medianAccuracy = accuracies.isEmpty
         ? null
         : accuracies[accuracies.length ~/ 2];
-
-    final quality = _quality(
-      sampleCount: valid.length,
-      medianAccuracyM: medianAcc,
-    );
-
-    var latSum = 0.0;
-    var lonSum = 0.0;
-    for (final s in valid) {
-      latSum += s.latitude;
-      lonSum += s.longitude;
-    }
-
+    final stationaryRatio = durationS <= 0
+        ? 1.0
+        : (motion.stationarySeconds / durationS).clamp(0.0, 1.0);
+    final distance = motion.distanceM.isFinite ? motion.distanceM : 0.0;
+    final avgSpeed = motion.movingSeconds > 0
+        ? distance / motion.movingSeconds
+        : 0.0;
     final draft = MinuteWindow(
       windowStart: windowStart,
-      durationS: durationS == 0 ? 1 : durationS,
+      durationS: durationS,
       partial: partial,
-      sampleCount: valid.length,
-      rawSampleCount: rawCount,
+      sampleCount: sorted.length,
+      rawSampleCount: rawSampleCount,
       distanceM: distance,
-      avgSpeedMps: avgSpeed,
-      maxSpeedMps: maxSpeed,
+      avgSpeedMps: avgSpeed.isFinite ? avgSpeed : 0.0,
+      maxSpeedMps: motion.maxSpeedMps,
       stationaryRatio: stationaryRatio,
-      quality: quality,
-      centroidLat: latSum / valid.length,
-      centroidLon: lonSum / valid.length,
-      startLat: valid.first.latitude,
-      startLon: valid.first.longitude,
-      endLat: valid.last.latitude,
-      endLon: valid.last.longitude,
+      quality: _quality(
+        sampleCount: sorted.length,
+        medianAccuracyM: medianAccuracy,
+      ),
+      centroidLat: sorted.isEmpty
+          ? null
+          : sorted.map((sample) => sample.latitude).reduce((a, b) => a + b) /
+                sorted.length,
+      centroidLon: sorted.isEmpty
+          ? null
+          : sorted.map((sample) => sample.longitude).reduce((a, b) => a + b) /
+                sorted.length,
+      startLat: sorted.isEmpty ? null : sorted.first.latitude,
+      startLon: sorted.isEmpty ? null : sorted.first.longitude,
+      endLat: sorted.isEmpty ? null : sorted.last.latitude,
+      endLon: sorted.isEmpty ? null : sorted.last.longitude,
     );
+    return _withInference(draft);
+  }
 
-    final hyp = inferencer.infer(draft);
+  MinuteWindow _withInference(MinuteWindow window) {
+    final hypothesis = inferencer.infer(window);
     return MinuteWindow(
-      windowStart: draft.windowStart,
-      durationS: draft.durationS,
-      partial: draft.partial,
-      sampleCount: draft.sampleCount,
-      rawSampleCount: draft.rawSampleCount,
-      distanceM: draft.distanceM,
-      avgSpeedMps: draft.avgSpeedMps,
-      maxSpeedMps: draft.maxSpeedMps,
-      stationaryRatio: draft.stationaryRatio,
-      quality: draft.quality,
-      centroidLat: draft.centroidLat,
-      centroidLon: draft.centroidLon,
-      startLat: draft.startLat,
-      startLon: draft.startLon,
-      endLat: draft.endLat,
-      endLon: draft.endLon,
-      hypothesisLabel: hyp.label,
-      hypothesisConfidence: hyp.confidence,
-      evidence: hyp.evidence,
+      windowStart: window.windowStart,
+      durationS: window.durationS,
+      partial: window.partial,
+      sampleCount: window.sampleCount,
+      rawSampleCount: window.rawSampleCount,
+      distanceM: window.distanceM,
+      avgSpeedMps: window.avgSpeedMps,
+      maxSpeedMps: window.maxSpeedMps,
+      stationaryRatio: window.stationaryRatio,
+      quality: window.quality,
+      centroidLat: window.centroidLat,
+      centroidLon: window.centroidLon,
+      startLat: window.startLat,
+      startLon: window.startLon,
+      endLat: window.endLat,
+      endLon: window.endLon,
+      gapReason: window.gapReason,
+      hypothesisLabel: hypothesis.label,
+      hypothesisConfidence: hypothesis.confidence,
+      evidence: hypothesis.evidence,
     );
   }
 
@@ -251,4 +324,5 @@ class WindowAggregator {
   }
 }
 
-double mathMax(num a, num b) => a > b ? a.toDouble() : b.toDouble();
+DateTime _later(DateTime a, DateTime b) => a.isAfter(b) ? a : b;
+DateTime _earlier(DateTime a, DateTime b) => a.isBefore(b) ? a : b;

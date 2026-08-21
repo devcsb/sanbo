@@ -4,6 +4,7 @@ import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/domain/pipeline/geo.dart';
+import 'package:sanbo/domain/pipeline/route_partitioner.dart';
 import 'package:sanbo/domain/pipeline/window_aggregator.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 
@@ -44,8 +45,14 @@ void main() {
     }
 
     final endedAt = sessionStart.add(const Duration(minutes: 3));
-    final windows = WindowAggregator().aggregate(
+    final partition = RoutePartitioner.partition(
       samples: samples,
+      exclusions: const [],
+    );
+    final windows = WindowAggregator().aggregate(
+      partition: partition,
+      rawSamples: samples,
+      exclusions: const [],
       sessionStart: sessionStart,
       sessionEnd: endedAt,
     );

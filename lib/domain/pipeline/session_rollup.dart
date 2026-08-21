@@ -1,6 +1,6 @@
-import '../models/location_sample.dart';
+import '../models/route_exclusion.dart';
 import '../models/walk_session.dart';
-import 'geo.dart';
+import 'route_partitioner.dart';
 
 class SessionRollupResult {
   const SessionRollupResult({
@@ -22,63 +22,77 @@ class SessionRollupResult {
   final double? medianAccuracyM;
 }
 
-/// Session-level metrics from filtered path (not sum of windows) — TRD §4.7.
+/// Session metrics calculated only from shared trusted route segments.
 class SessionRollup {
-  SessionRollup({
-    this.stationarySpeedMps = 0.3,
-    this.maxObservedGap = trustedLocationGap,
-    this.minSegmentDistanceM = minMeaningfulSegmentDistanceM,
-  });
+  SessionRollup({this.stationarySpeedMps = 0.3});
 
   final double stationarySpeedMps;
-  final Duration maxObservedGap;
-  final double minSegmentDistanceM;
 
   SessionRollupResult compute({
     required WalkSession session,
-    required List<LocationSample> samples,
+    required RoutePartitionResult partition,
+    required List<RouteExclusion> exclusions,
     required DateTime endedAt,
   }) {
-    final valid = samples.where((s) => !s.isFilteredOut).toList()
-      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
-
-    final durationS = endedAt
-        .difference(session.startedAt)
-        .inSeconds
-        .clamp(0, 86400 * 7);
-    var distance = 0.0;
-    var movingS = 0.0;
-    var stationaryS = 0.0;
-    for (var i = 1; i < valid.length; i++) {
-      final prev = valid[i - 1];
-      final s = valid[i];
-      final dt = s.timestamp.difference(prev.timestamp).inMilliseconds / 1000.0;
-      if (dt <= 0 || dt > maxObservedGap.inMilliseconds / 1000.0) {
-        // Time outside trustworthy adjacent fixes is unobserved, not movement.
-        // Do not draw a straight-line distance across a genuine GPS gap.
-        continue;
+    final sessionStart = session.startedAt.toUtc();
+    final sessionEnd = endedAt.toUtc();
+    if (sessionEnd.isBefore(sessionStart)) {
+      throw StateError('종료 시각이 시작 시각보다 빠릅니다');
+    }
+    final ordered = [...exclusions]
+      ..sort((a, b) => a.startAt.compareTo(b.startAt));
+    for (var index = 0; index < ordered.length; index++) {
+      final exclusion = ordered[index];
+      if (exclusion.sessionId != session.id ||
+          exclusion.startAt.isBefore(sessionStart) ||
+          exclusion.endAt.isAfter(sessionEnd)) {
+        throw StateError('세션 범위를 벗어난 제외 구간이 있습니다');
       }
-      final d = haversineMeters(
-        lat1: prev.latitude,
-        lon1: prev.longitude,
-        lat2: s.latitude,
-        lon2: s.longitude,
-      );
-      if (d >= minSegmentDistanceM) distance += d;
-      if (d / dt < stationarySpeedMps) {
-        stationaryS += dt;
+      if (index > 0 && exclusion.startAt.isBefore(ordered[index - 1].endAt)) {
+        throw StateError('겹치는 제외 구간이 있습니다');
+      }
+    }
+    final int fullDurationS = sessionEnd.difference(sessionStart).inSeconds;
+    final excludedSeconds = exclusions.fold<int>(
+      0,
+      (sum, exclusion) =>
+          sum + exclusion.endAt.difference(exclusion.startAt).inSeconds,
+    );
+    if (excludedSeconds < 0 || excludedSeconds > fullDurationS) {
+      throw StateError('제외 시간이 전체 기록 시간을 벗어납니다');
+    }
+    final int durationS = fullDurationS - excludedSeconds;
+
+    var distance = 0.0;
+    var movingSeconds = 0.0;
+    var stationarySeconds = 0.0;
+    for (final segment in partition.segments) {
+      if (!segment.distanceM.isFinite || !segment.speedMps.isFinite) {
+        throw StateError('유효하지 않은 경로 선분이 있습니다');
+      }
+      distance += segment.distanceM;
+      final seconds =
+          segment.duration.inMicroseconds / Duration.microsecondsPerSecond;
+      if (segment.speedMps < stationarySpeedMps) {
+        stationarySeconds += seconds;
       } else {
-        movingS += dt;
+        movingSeconds += seconds;
       }
     }
 
-    final stationaryTimeS = stationaryS.round().clamp(0, durationS);
-    final movingTimeS = movingS.round().clamp(0, durationS);
+    final accuracies =
+        partition.includedSamples
+            .map((sample) => sample.accuracyM)
+            .whereType<double>()
+            .where((accuracy) => accuracy.isFinite)
+            .toList()
+          ..sort();
+    final medianAccuracy = accuracies.isEmpty
+        ? null
+        : accuracies[accuracies.length ~/ 2];
+    final movingTimeS = movingSeconds.round();
+    final stationaryTimeS = stationarySeconds.round();
     final avgSpeed = movingTimeS > 0 ? distance / movingTimeS : 0.0;
-
-    final acc = valid.map((s) => s.accuracyM).whereType<double>().toList()
-      ..sort();
-    final medianAcc = acc.isEmpty ? null : acc[acc.length ~/ 2];
 
     return SessionRollupResult(
       totalDistanceM: distance,
@@ -86,8 +100,8 @@ class SessionRollup {
       movingTimeS: movingTimeS,
       stationaryTimeS: stationaryTimeS,
       avgSpeedMps: avgSpeed,
-      validSampleCount: valid.length,
-      medianAccuracyM: medianAcc,
+      validSampleCount: partition.includedSamples.length,
+      medianAccuracyM: medianAccuracy,
     );
   }
 }

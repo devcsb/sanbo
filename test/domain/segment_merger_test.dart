@@ -148,4 +148,30 @@ void main() {
     expect(segments.length, 1);
     expect(segments.first.label, ActivityLabel.cafeOrShop);
   });
+
+  test('merges only adjacent excluded windows with the same exclusion id', () {
+    final start = DateTime(2026, 8, 21, 9);
+    MinuteWindow excluded(int minute, String id) => MinuteWindow(
+      windowStart: start.add(Duration(minutes: minute)),
+      durationS: 60,
+      partial: false,
+      sampleCount: 0,
+      rawSampleCount: 3,
+      distanceM: 0,
+      avgSpeedMps: 0,
+      maxSpeedMps: 0,
+      stationaryRatio: 1,
+      quality: WindowQuality.gap,
+      gapReason: 'user_excluded',
+      userExclusionId: id,
+    );
+    final segments = SegmentMerger().merge([
+      excluded(0, 'a'),
+      excluded(1, 'a'),
+      excluded(2, 'b'),
+    ]);
+    expect(segments, hasLength(2));
+    expect(segments.first.userExclusionId, 'a');
+    expect(segments.last.userExclusionId, 'b');
+  });
 }

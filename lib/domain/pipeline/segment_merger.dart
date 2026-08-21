@@ -36,6 +36,9 @@ class ActivitySegment {
   /// Underlying minute windows (ordered).
   final List<MinuteWindow> windows;
 
+  String? get userExclusionId =>
+      windows.isEmpty ? null : windows.first.userExclusionId;
+
   int get minuteCount => windows.length;
 
   /// Exclusive end of the last minute (or partial span).
@@ -79,6 +82,12 @@ class SegmentMerger {
   }
 
   bool _canMerge(MinuteWindow a, MinuteWindow b) {
+    if (a.userExclusionId != b.userExclusionId) return false;
+    if (a.isUserExcluded || b.isUserExcluded) {
+      return a.userExclusionId == b.userExclusionId &&
+          b.windowStart == a.windowStart.add(const Duration(minutes: 1));
+    }
+
     // Keep gap minutes separate unless both are gaps with no samples.
     if (a.quality == WindowQuality.gap && b.quality == WindowQuality.gap) {
       return a.displayLabel == b.displayLabel;
