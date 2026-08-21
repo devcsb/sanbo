@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/data/app_database.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
@@ -11,6 +13,7 @@ import 'package:sanbo/domain/services/app_backup.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import '../helpers/test_db.dart';
+import '../helpers/route_exclusion_fixture.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -309,4 +312,147 @@ void main() {
       expect(await target.getActiveSession(), isNull);
     },
   );
+
+  test(
+    'backup v2 round-trips exclusions and v1 imports as unexcluded',
+    () async {
+      final source = await openTestRepository();
+      final target = await openTestRepository();
+      addTearDown(source.close);
+      addTearDown(target.close);
+      final fixture = await seedCompletedTwoMinuteWalk(source);
+      final exclusion = await source.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: fixture.segments.last,
+        createdAt: DateTime.utc(2026, 8, 21, 1),
+      );
+
+      final raw = await source.createBackupJson();
+      final archive = AppBackupCodec.decode(raw);
+      expect(archive.backupSchemaVersion, 2);
+      expect(archive.table('route_exclusions').single['id'], exclusion.id);
+
+      await target.importBackup(archive);
+      expect(
+        (await target.getRouteExclusions(fixture.session.id)).single.id,
+        exclusion.id,
+      );
+      expect(
+        (await target.getWindows(
+          fixture.session.id,
+        )).any((window) => window.userExclusionId == exclusion.id),
+        isTrue,
+      );
+
+      final v1Target = await openTestRepository();
+      addTearDown(v1Target.close);
+      await v1Target.importBackupJson(_downgradeFixtureToBackupV1(raw));
+      expect(await v1Target.getRouteExclusions(fixture.session.id), isEmpty);
+      expect(
+        (await v1Target.getWindows(
+          fixture.session.id,
+        )).every((window) => window.userExclusionId == null),
+        isTrue,
+      );
+    },
+  );
+
+  test('corrupt v2 exclusions reject the full import', () async {
+    final source = await openTestRepository();
+    addTearDown(source.close);
+    final fixture = await seedCompletedTwoMinuteWalk(source);
+    await source.excludeRouteSegment(
+      sessionId: fixture.session.id,
+      segment: fixture.segments.last,
+      createdAt: DateTime.utc(2026, 8, 21, 1),
+    );
+    final raw = await source.createBackupJson();
+
+    final corruptions = <void Function(Map<String, dynamic>)>[
+      (backup) {
+        final exclusions = _tables(backup)['route_exclusions'] as List<dynamic>;
+        (exclusions.single as Map<String, dynamic>)['session_id'] = 'other';
+      },
+      (backup) {
+        final tables = _tables(backup);
+        final exclusions = tables['route_exclusions'] as List<dynamic>;
+        final exclusion = exclusions.single as Map<String, dynamic>;
+        final windows = tables['minute_windows'] as List<dynamic>;
+        final excluded = windows.cast<Map<String, dynamic>>().firstWhere(
+          (window) => window['user_exclusion_id'] == exclusion['id'],
+        );
+        excluded['window_start'] = DateTime.utc(
+          2026,
+          8,
+          21,
+          3,
+        ).toIso8601String();
+      },
+      (backup) {
+        final exclusions = _tables(backup)['route_exclusions'] as List<dynamic>;
+        final duplicate = Map<String, dynamic>.from(
+          exclusions.single as Map<String, dynamic>,
+        )..['id'] = 'overlap';
+        exclusions.add(duplicate);
+      },
+      (backup) {
+        final windows = _tables(backup)['minute_windows'] as List<dynamic>;
+        (windows.first as Map<String, dynamic>).remove('user_exclusion_id');
+      },
+      (backup) => backup['backup_schema_version'] = 3,
+    ];
+
+    for (final corrupt in corruptions) {
+      final target = await openTestRepository();
+      addTearDown(target.close);
+      final backup = jsonDecode(raw) as Map<String, dynamic>;
+      corrupt(backup);
+
+      expect(
+        () => target.importBackupJson(jsonEncode(backup)),
+        throwsFormatException,
+      );
+      expect(await target.listCompleted(), isEmpty);
+      expect(await target.getRouteExclusions(fixture.session.id), isEmpty);
+    }
+  });
+
+  test('empty v2 backup imports without writing rows', () async {
+    final target = await openTestRepository();
+    addTearDown(target.close);
+    final raw = AppBackupCodec.encode(
+      databaseSchemaVersion: 2,
+      tables: const {
+        'sessions': [],
+        'location_samples': [],
+        'minute_windows': [],
+        'places': [],
+        'route_exclusions': [],
+      },
+    );
+    final archive = await compute(
+      AppBackupCodec.decodeBytes,
+      Uint8List.fromList(utf8.encode(raw)),
+    );
+
+    final result = await target.importBackup(archive);
+
+    expect(result.importedSessions, 0);
+    expect(await target.listCompleted(), isEmpty);
+  });
+}
+
+Map<String, dynamic> _tables(Map<String, dynamic> backup) =>
+    backup['tables'] as Map<String, dynamic>;
+
+String _downgradeFixtureToBackupV1(String raw) {
+  final backup = jsonDecode(raw) as Map<String, dynamic>;
+  backup['backup_schema_version'] = 1;
+  backup['database_schema_version'] = 3;
+  final tables = _tables(backup);
+  tables.remove('route_exclusions');
+  for (final row in tables['minute_windows']! as List<dynamic>) {
+    (row as Map<String, dynamic>).remove('user_exclusion_id');
+  }
+  return jsonEncode(backup);
 }

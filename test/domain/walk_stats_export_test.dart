@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
+import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/domain/services/session_export.dart';
@@ -128,7 +131,7 @@ void main() {
       expect(firstWindow['place_address'], '서울특별시');
     });
 
-    test('ndjson starts with session meta and includes samples', () {
+    test('ndjson v2 includes exclusions and window exclusion ids', () {
       final session = _session(id: 'export-1', distance: 100, duration: 60);
       final samples = [
         LocationSample(
@@ -154,19 +157,47 @@ void main() {
           hypothesisLabel: ActivityLabel.walkSteady,
           hypothesisConfidence: 0.8,
           evidence: const ['speed_band'],
+          userExclusionId: 'vehicle-1',
+        ),
+      ];
+      final exclusions = [
+        RouteExclusion(
+          id: 'vehicle-1',
+          sessionId: session.id,
+          startAt: DateTime.utc(2026, 7, 18, 9),
+          endAt: DateTime.utc(2026, 7, 18, 9, 1),
+          reason: RouteExclusionReason.vehicle,
+          createdAt: DateTime.utc(2026, 7, 18, 10),
         ),
       ];
       final ndjson = const SessionExport().toNdjson(
         session: session,
         windows: windows,
         samples: samples,
+        exclusions: exclusions,
       );
-      final lines = ndjson.trim().split('\n');
+      final lines = ndjson
+          .trim()
+          .split('\n')
+          .map(jsonDecode)
+          .cast<Map<String, dynamic>>()
+          .toList();
       expect(lines.length, greaterThanOrEqualTo(3));
-      expect(lines.first, contains('"type":"session"'));
-      expect(lines.first, contains('schema_version'));
-      expect(ndjson, contains('"type":"sample"'));
-      expect(ndjson, contains('"type":"window"'));
+      expect(lines.first['schema_version'], 2);
+      expect(lines.where((line) => line['type'] == 'exclusion'), hasLength(1));
+      expect(
+        lines
+            .where((line) => line['type'] == 'window')
+            .single['user_exclusion_id'],
+        'vehicle-1',
+      );
+      expect(
+        lines
+            .where((line) => line['type'] == 'sample')
+            .single
+            .containsKey('user_exclusion_id'),
+        isFalse,
+      );
     });
   });
 }

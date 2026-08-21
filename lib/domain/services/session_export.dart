@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../models/activity_label.dart';
 import '../models/location_sample.dart';
 import '../models/minute_window.dart';
+import '../models/route_exclusion.dart';
 import '../models/walk_session.dart';
 import '../pipeline/segment_merger.dart';
 import 'place_memory.dart';
@@ -70,10 +71,11 @@ class SessionExport {
     required WalkSession session,
     required List<MinuteWindow> windows,
     List<LocationSample> samples = const [],
+    List<RouteExclusion> exclusions = const [],
     bool includeSamples = false,
   }) {
     return {
-      'schema_version': 1,
+      'schema_version': 2,
       'export_kind': 'sanbo_session',
       'session': {
         'id': session.id,
@@ -91,6 +93,7 @@ class SessionExport {
         'median_accuracy_m': session.medianAccuracyM,
         'notes': session.notes,
       },
+      'exclusions': exclusions.map(_exclusionJson).toList(),
       'windows': windows.map(_windowJson).toList(),
       if (includeSamples) 'samples': samples.map(_sampleJson).toList(),
     };
@@ -101,15 +104,26 @@ class SessionExport {
     required WalkSession session,
     required List<MinuteWindow> windows,
     required List<LocationSample> samples,
+    required List<RouteExclusion> exclusions,
   }) {
     final meta = {
       'type': 'session',
-      'schema_version': 1,
-      'session': toJsonDocument(session: session, windows: windows)['session'],
+      'schema_version': 2,
+      'session': toJsonDocument(
+        session: session,
+        windows: windows,
+        exclusions: exclusions,
+      )['session'],
       'window_count': windows.length,
       'sample_count': samples.length,
+      'exclusion_count': exclusions.length,
     };
     final buf = StringBuffer()..writeln(jsonEncode(meta));
+    for (final exclusion in exclusions) {
+      buf.writeln(
+        jsonEncode({'type': 'exclusion', ..._exclusionJson(exclusion)}),
+      );
+    }
     for (final s in samples) {
       buf.writeln(jsonEncode({'type': 'sample', ..._sampleJson(s)}));
     }
@@ -131,9 +145,19 @@ class SessionExport {
     'hypothesis_confidence': w.hypothesisConfidence,
     'user_label': w.userLabel?.storageKey,
     'user_confirmed': w.userConfirmed,
+    'user_exclusion_id': w.userExclusionId,
     'user_note': w.userNote,
     'place_name': w.placeName,
     'place_address': w.placeAddress,
+  };
+
+  Map<String, Object?> _exclusionJson(RouteExclusion exclusion) => {
+    'id': exclusion.id,
+    'session_id': exclusion.sessionId,
+    'start_at': exclusion.startAt.toUtc().toIso8601String(),
+    'end_at': exclusion.endAt.toUtc().toIso8601String(),
+    'reason': exclusion.reason.name,
+    'created_at': exclusion.createdAt.toUtc().toIso8601String(),
   };
 
   Map<String, Object?> _sampleJson(LocationSample s) => {

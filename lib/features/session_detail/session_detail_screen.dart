@@ -12,6 +12,7 @@ import '../../data/walk_repository.dart';
 import '../../domain/models/activity_label.dart';
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/minute_window.dart';
+import '../../domain/models/route_exclusion.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/segment_merger.dart';
 import '../../domain/services/place_memory.dart';
@@ -33,9 +34,11 @@ final sessionDetailProvider = FutureProvider.autoDispose
       final loaded = await Future.wait<Object>([
         repo.getSamples(id),
         repo.getWindows(id),
+        repo.getRouteExclusions(id),
       ]);
       final samples = loaded[0] as List<LocationSample>;
       var windows = loaded[1] as List<MinuteWindow>;
+      final exclusions = loaded[2] as List<RouteExclusion>;
       var segments = SegmentMerger().merge(windows, sessionId: id);
 
       // Reuse only places the user previously named. This is a local DB
@@ -73,6 +76,7 @@ final sessionDetailProvider = FutureProvider.autoDispose
         session: session,
         samples: samples,
         windows: windows,
+        exclusions: exclusions,
         segments: segments,
       );
     });
@@ -85,12 +89,14 @@ class SessionDetailData {
     required this.session,
     required this.samples,
     required this.windows,
+    required this.exclusions,
     this.segments = const [],
   });
 
   final WalkSession session;
   final List<LocationSample> samples;
   final List<MinuteWindow> windows;
+  final List<RouteExclusion> exclusions;
   final List<ActivitySegment> segments;
 }
 
@@ -580,6 +586,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
         session: data.session,
         windows: data.windows,
         samples: data.samples,
+        exclusions: data.exclusions,
       );
       // Copy the data itself, not a temp-file path: an app-private systemTemp
       // path is unreachable to the user on mobile. Clipboard NDJSON is a real,

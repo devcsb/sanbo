@@ -2,15 +2,20 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 const maxBackupBytes = 50 * 1024 * 1024;
-const appBackupSchemaVersion = 1;
+const appBackupSchemaVersion = 2;
+
+const _v1Tables = {'sessions', 'location_samples', 'minute_windows', 'places'};
+const _v2Tables = {..._v1Tables, 'route_exclusions'};
 
 class AppBackupArchive {
   const AppBackupArchive({
+    required this.backupSchemaVersion,
     required this.databaseSchemaVersion,
     required this.exportedAt,
     required this.tables,
   });
 
+  final int backupSchemaVersion;
   final int databaseSchemaVersion;
   final DateTime exportedAt;
   final Map<String, List<Map<String, Object?>>> tables;
@@ -34,12 +39,7 @@ class BackupImportResult {
 
 /// Versioned, bounded JSON codec for a complete local Sanbo backup.
 abstract final class AppBackupCodec {
-  static const requiredTables = {
-    'sessions',
-    'location_samples',
-    'minute_windows',
-    'places',
-  };
+  static const requiredTables = _v2Tables;
 
   static String encode({
     required int databaseSchemaVersion,
@@ -77,7 +77,9 @@ abstract final class AppBackupCodec {
     if (decoded['export_kind'] != 'sanbo_backup') {
       throw const FormatException('산보 전체 백업 파일이 아닙니다');
     }
-    if (decoded['backup_schema_version'] != appBackupSchemaVersion) {
+    final backupSchemaVersion = decoded['backup_schema_version'];
+    if (backupSchemaVersion is! int ||
+        (backupSchemaVersion != 1 && backupSchemaVersion != 2)) {
       throw const FormatException('지원하지 않는 백업 버전입니다');
     }
     final databaseVersion = decoded['database_schema_version'];
@@ -95,8 +97,9 @@ abstract final class AppBackupCodec {
       throw const FormatException('백업 테이블 형식이 올바르지 않습니다');
     }
 
+    final expectedTables = backupSchemaVersion == 1 ? _v1Tables : _v2Tables;
     final tables = <String, List<Map<String, Object?>>>{};
-    for (final name in requiredTables) {
+    for (final name in expectedTables) {
       final rawRows = rawTables[name];
       if (rawRows is! List<dynamic>) {
         throw FormatException('$name 데이터가 없습니다');
@@ -104,16 +107,31 @@ abstract final class AppBackupCodec {
       if (rawRows.length > 500000) {
         throw FormatException('$name 행이 안전 제한을 초과합니다');
       }
-      tables[name] = [
+      final rows = <Map<String, Object?>>[
         for (final row in rawRows)
           if (row is Map<String, dynamic>)
             Map<String, Object?>.from(row)
           else
             throw FormatException('$name 행 형식이 올바르지 않습니다'),
       ];
+      if (name == 'minute_windows') {
+        for (final row in rows) {
+          if (backupSchemaVersion == 1) {
+            row['user_exclusion_id'] = null;
+          } else if (!row.containsKey('user_exclusion_id') ||
+              (row['user_exclusion_id'] != null &&
+                  row['user_exclusion_id'] is! String)) {
+            throw const FormatException('user_exclusion_id 형식이 올바르지 않습니다');
+          }
+        }
+      }
+      tables[name] = rows;
     }
 
+    if (backupSchemaVersion == 1) tables['route_exclusions'] = const [];
+
     return AppBackupArchive(
+      backupSchemaVersion: backupSchemaVersion,
       databaseSchemaVersion: databaseVersion,
       exportedAt: exportedAt,
       tables: Map.unmodifiable(tables),

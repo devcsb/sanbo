@@ -166,6 +166,7 @@ void main() {
         'location_samples': [],
         'minute_windows': [],
         'places': [],
+        'route_exclusions': [],
       },
     );
     final files = _FakeBackupFileService(
@@ -201,7 +202,8 @@ void main() {
     await tester.pump();
     final importDialog = find.textContaining('기존 기록은 지우지 않고');
     final deadline = DateTime.now().add(const Duration(seconds: 3));
-    while (importDialog.evaluate().isEmpty && DateTime.now().isBefore(deadline)) {
+    while (importDialog.evaluate().isEmpty &&
+        DateTime.now().isBefore(deadline)) {
       await tester.runAsync(
         () => Future<void>.delayed(const Duration(milliseconds: 20)),
       );
@@ -211,15 +213,16 @@ void main() {
     expect(importDialog, findsOneWidget);
     await tester.tap(find.text('가져오기'));
     await tester.pump();
-    await tester.runAsync(() async {
-      final deadline = DateTime.now().add(const Duration(seconds: 3));
-      while (container.read(historyTickProvider) == 0 &&
-          DateTime.now().isBefore(deadline)) {
-        await Future<void>.delayed(const Duration(milliseconds: 10));
-      }
-    });
-    await tester.pump();
+    final imported = find.text('산책 0개를 가져왔어요');
+    final importDeadline = DateTime.now().add(const Duration(seconds: 3));
+    while (imported.evaluate().isEmpty &&
+        DateTime.now().isBefore(importDeadline)) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 20)),
+      );
+      await tester.pump();
+    }
 
-    expect(find.text('산책 0개를 가져왔어요'), findsOneWidget);
+    expect(imported, findsOneWidget);
   });
 }

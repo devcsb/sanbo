@@ -856,6 +856,17 @@ ORDER BY w.window_start ASC
         orderBy: 'started_at ASC',
       );
       final sessionIds = sessions.map((row) => row['id']! as String).toSet();
+      final allExclusions = await txn.query(
+        'route_exclusions',
+        orderBy: 'session_id ASC, start_at ASC, id ASC',
+      );
+      final exclusions = <Map<String, Object?>>[
+        for (final row in allExclusions)
+          if (sessionIds.contains(row['session_id'])) Map.from(row),
+      ];
+      final exclusionsById = {
+        for (final row in exclusions) row['id']! as String: row,
+      };
       final allSamples = await txn.query(
         'location_samples',
         orderBy: 'session_id ASC, ts ASC',
@@ -872,6 +883,15 @@ ORDER BY w.window_start ASC
       final candidateWindows = allWindows
           .where((row) => sessionIds.contains(row['session_id']))
           .toList(growable: false);
+      for (final window in candidateWindows) {
+        final exclusionId = window['user_exclusion_id'] as String?;
+        if (exclusionId == null) continue;
+        final exclusion = exclusionsById[exclusionId];
+        if (exclusion == null ||
+            exclusion['session_id'] != window['session_id']) {
+          throw StateError('백업할 제외 구간 참조가 올바르지 않습니다');
+        }
+      }
       final referencedPlaceIds = candidateWindows
           .map((row) => row['place_id'])
           .whereType<int>()
@@ -893,6 +913,7 @@ ORDER BY w.window_start ASC
         'sessions': sessions
             .map(_sanitizedSessionBackupRow)
             .toList(growable: false),
+        'route_exclusions': exclusions,
         'location_samples': samples,
         'minute_windows': windows,
         'places': places,
@@ -944,10 +965,43 @@ ORDER BY w.window_start ASC
           skippedSessions++;
           continue;
         }
-        await txn.insert('sessions', entry.value);
         newSessionIds.add(entry.key);
       }
       final knownSessionIds = {...existingIds, ...importedSessionRows.keys};
+
+      final validatedExclusions = <Map<String, Object?>>[];
+      final exclusionIds = <String>{};
+      for (final rawExclusion in archive.table('route_exclusions')) {
+        final sessionId = _requiredString(
+          rawExclusion,
+          'session_id',
+          maxLength: 128,
+        );
+        final session = importedSessionRows[sessionId];
+        if (session == null) {
+          throw const FormatException('존재하지 않는 산책을 가리키는 제외 구간이 있습니다');
+        }
+        final exclusion = _validatedExclusionRow(rawExclusion, session);
+        final id = exclusion['id']! as String;
+        if (!exclusionIds.add(id)) {
+          throw const FormatException('백업에 중복된 제외 구간 ID가 있습니다');
+        }
+        validatedExclusions.add(exclusion);
+      }
+      _validateExclusionOverlaps(validatedExclusions);
+      final exclusionsById = {
+        for (final exclusion in validatedExclusions)
+          exclusion['id']! as String: exclusion,
+      };
+
+      await _insertSessions(txn, [
+        for (final entry in importedSessionRows.entries)
+          if (newSessionIds.contains(entry.key)) entry.value,
+      ]);
+      await _insertRouteExclusions(txn, [
+        for (final exclusion in validatedExclusions)
+          if (newSessionIds.contains(exclusion['session_id'])) exclusion,
+      ]);
 
       // Resolve only places used by newly imported sessions. This keeps a
       // duplicate-only import from leaving behind unreferenced coordinates.
@@ -974,6 +1028,38 @@ ORDER BY w.window_start ASC
         }
         sourcePlaces[sourceId] = rawPlace;
       }
+
+      var importedSamples = 0;
+      final sampleKeys = <String>{};
+      final sampleBatch = txn.batch();
+      for (final rawSample in archive.table('location_samples')) {
+        final sessionId = _requiredString(
+          rawSample,
+          'session_id',
+          maxLength: 128,
+        );
+        if (!knownSessionIds.contains(sessionId)) {
+          throw const FormatException('존재하지 않는 산책을 가리키는 위치 데이터가 있습니다');
+        }
+        if (!newSessionIds.contains(sessionId)) continue;
+        final ts = _requiredDate(rawSample, 'ts');
+        final lat = _requiredCoordinate(rawSample, 'lat', -90, 90);
+        final lon = _requiredCoordinate(rawSample, 'lon', -180, 180);
+        final key = '$sessionId|${ts.toUtc().microsecondsSinceEpoch}|$lat|$lon';
+        if (!sampleKeys.add(key)) continue;
+        sampleBatch.insert('location_samples', {
+          'session_id': sessionId,
+          'ts': ts.toIso8601String(),
+          'lat': lat,
+          'lon': lon,
+          'accuracy_m': _optionalDouble(rawSample, 'accuracy_m', min: 0),
+          'speed_mps': _optionalDouble(rawSample, 'speed_mps', min: 0),
+          'altitude_m': _optionalDouble(rawSample, 'altitude_m'),
+          'is_filtered_out': _requiredBoolInt(rawSample, 'is_filtered_out'),
+        });
+        importedSamples++;
+      }
+      await sampleBatch.commit(noResult: true);
 
       final placeIdMap = <int, int>{};
       for (final sourceId in referencedSourcePlaceIds) {
@@ -1016,38 +1102,6 @@ ORDER BY w.window_start ASC
         placeIdMap[sourceId] = targetId;
       }
 
-      var importedSamples = 0;
-      final sampleKeys = <String>{};
-      final sampleBatch = txn.batch();
-      for (final rawSample in archive.table('location_samples')) {
-        final sessionId = _requiredString(
-          rawSample,
-          'session_id',
-          maxLength: 128,
-        );
-        if (!knownSessionIds.contains(sessionId)) {
-          throw const FormatException('존재하지 않는 산책을 가리키는 위치 데이터가 있습니다');
-        }
-        if (!newSessionIds.contains(sessionId)) continue;
-        final ts = _requiredDate(rawSample, 'ts');
-        final lat = _requiredCoordinate(rawSample, 'lat', -90, 90);
-        final lon = _requiredCoordinate(rawSample, 'lon', -180, 180);
-        final key = '$sessionId|${ts.toUtc().microsecondsSinceEpoch}|$lat|$lon';
-        if (!sampleKeys.add(key)) continue;
-        sampleBatch.insert('location_samples', {
-          'session_id': sessionId,
-          'ts': ts.toIso8601String(),
-          'lat': lat,
-          'lon': lon,
-          'accuracy_m': _optionalDouble(rawSample, 'accuracy_m', min: 0),
-          'speed_mps': _optionalDouble(rawSample, 'speed_mps', min: 0),
-          'altitude_m': _optionalDouble(rawSample, 'altitude_m'),
-          'is_filtered_out': _requiredBoolInt(rawSample, 'is_filtered_out'),
-        });
-        importedSamples++;
-      }
-      await sampleBatch.commit(noResult: true);
-
       var importedWindows = 0;
       final windowKeys = <String>{};
       final windowBatch = txn.batch();
@@ -1066,6 +1120,32 @@ ORDER BY w.window_start ASC
             '$sessionId|${windowStart.toUtc().millisecondsSinceEpoch}';
         if (!windowKeys.add(windowKey)) {
           throw const FormatException('백업에 중복된 시간 구간이 있습니다');
+        }
+        final durationS = _requiredInt(
+          rawWindow,
+          'duration_s',
+          min: 1,
+          max: 60,
+        );
+        final userExclusionId = _optionalString(
+          rawWindow,
+          'user_exclusion_id',
+          maxLength: 128,
+        );
+        if (userExclusionId != null) {
+          final exclusion = exclusionsById[userExclusionId];
+          if (exclusion == null || exclusion['session_id'] != sessionId) {
+            throw const FormatException('구간 제외 참조가 올바르지 않습니다');
+          }
+          final exclusionStart = _requiredDate(exclusion, 'start_at').toUtc();
+          final exclusionEnd = _requiredDate(exclusion, 'end_at').toUtc();
+          final windowEnd = windowStart.toUtc().add(
+            Duration(seconds: durationS),
+          );
+          if (windowStart.toUtc().isBefore(exclusionStart) ||
+              windowEnd.isAfter(exclusionEnd)) {
+            throw const FormatException('제외 범위 밖의 구간이 있습니다');
+          }
         }
         final quality = _requiredString(rawWindow, 'quality', maxLength: 20);
         if (!WindowQuality.values.any((value) => value.name == quality)) {
@@ -1120,7 +1200,7 @@ ORDER BY w.window_start ASC
         windowBatch.insert('minute_windows', {
           'session_id': sessionId,
           'window_start': _stableWindowStart(windowStart),
-          'duration_s': _requiredInt(rawWindow, 'duration_s', min: 1, max: 60),
+          'duration_s': durationS,
           'partial': _requiredBoolInt(rawWindow, 'partial'),
           'sample_count': _requiredInt(rawWindow, 'sample_count', min: 0),
           'raw_sample_count': _requiredInt(
@@ -1161,6 +1241,7 @@ ORDER BY w.window_start ASC
           'user_note': _optionalString(rawWindow, 'user_note', maxLength: 2000),
           'user_confirmed': _requiredBoolInt(rawWindow, 'user_confirmed'),
           'place_id': targetPlaceId,
+          'user_exclusion_id': userExclusionId,
         });
         importedWindows++;
       }
@@ -1184,6 +1265,78 @@ ORDER BY w.window_start ASC
       'DELETE FROM places WHERE id NOT IN '
       '(SELECT DISTINCT place_id FROM minute_windows WHERE place_id IS NOT NULL)',
     );
+  }
+
+  Future<void> _insertSessions(
+    Transaction txn,
+    Iterable<Map<String, Object?>> sessions,
+  ) async {
+    for (final session in sessions) {
+      await txn.insert('sessions', session);
+    }
+  }
+
+  Future<void> _insertRouteExclusions(
+    Transaction txn,
+    Iterable<Map<String, Object?>> exclusions,
+  ) async {
+    for (final exclusion in exclusions) {
+      await txn.insert('route_exclusions', exclusion);
+    }
+  }
+
+  Map<String, Object?> _validatedExclusionRow(
+    Map<String, Object?> raw,
+    Map<String, Object?> session,
+  ) {
+    final id = _requiredString(raw, 'id', maxLength: 128);
+    final sessionId = _requiredString(raw, 'session_id', maxLength: 128);
+    final startAt = _requiredDate(raw, 'start_at').toUtc();
+    final endAt = _requiredDate(raw, 'end_at').toUtc();
+    final createdAt = _requiredDate(raw, 'created_at').toUtc();
+    if (!startAt.isBefore(endAt)) {
+      throw const FormatException('제외 시작은 종료보다 빨라야 합니다');
+    }
+    final sessionStart = _requiredDate(session, 'started_at').toUtc();
+    final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
+    if (startAt.isBefore(sessionStart) || endAt.isAfter(sessionEnd)) {
+      throw const FormatException('산책 범위를 벗어난 제외 구간이 있습니다');
+    }
+    final reason = _requiredString(raw, 'reason', maxLength: 40);
+    if (!RouteExclusionReason.values.any((value) => value.name == reason)) {
+      throw const FormatException('알 수 없는 제외 사유가 있습니다');
+    }
+    return {
+      'id': id,
+      'session_id': sessionId,
+      'start_at': startAt.toIso8601String(),
+      'end_at': endAt.toIso8601String(),
+      'reason': reason,
+      'created_at': createdAt.toIso8601String(),
+    };
+  }
+
+  void _validateExclusionOverlaps(List<Map<String, Object?>> exclusions) {
+    final bySession = <String, List<Map<String, Object?>>>{};
+    for (final exclusion in exclusions) {
+      final sessionId = exclusion['session_id']! as String;
+      (bySession[sessionId] ??= []).add(exclusion);
+    }
+    for (final entries in bySession.values) {
+      entries.sort(
+        (a, b) => _requiredDate(
+          a,
+          'start_at',
+        ).compareTo(_requiredDate(b, 'start_at')),
+      );
+      for (var index = 1; index < entries.length; index++) {
+        final previousEnd = _requiredDate(entries[index - 1], 'end_at');
+        final start = _requiredDate(entries[index], 'start_at');
+        if (start.isBefore(previousEnd)) {
+          throw const FormatException('겹치는 제외 구간이 있습니다');
+        }
+      }
+    }
   }
 
   Map<String, Object?> _withoutKeys(
