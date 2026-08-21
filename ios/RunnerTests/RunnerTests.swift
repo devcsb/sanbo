@@ -1,12 +1,23 @@
-import Flutter
-import UIKit
 import XCTest
+@testable import Runner
 
 class RunnerTests: XCTestCase {
 
-  func testExample() {
-    // If you add code to the Runner application, consider adding tests here.
-    // See https://developer.apple.com/documentation/xctest for more information about using XCTest.
+  func testBufferReturnsOneHighSpeedTapAndClearsIt() {
+    let buffer = NotificationTapBuffer()
+
+    buffer.store(kind: "highSpeed")
+
+    XCTAssertEqual(buffer.take(), "highSpeed")
+    XCTAssertNil(buffer.take())
+  }
+
+  func testBufferIgnoresUnsupportedKinds() {
+    let buffer = NotificationTapBuffer()
+
+    buffer.store(kind: "stationary")
+
+    XCTAssertNil(buffer.take())
   }
 
 }

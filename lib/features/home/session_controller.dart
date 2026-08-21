@@ -16,6 +16,16 @@ import '../../platform/notifications/session_notification_service.dart';
 import '../history/history_providers.dart';
 import 'session_maintenance_queue.dart';
 
+const _highSpeedWarning = SessionWarning(
+  kind: SessionWarningKind.highSpeed,
+  title: '산책 기록을 계속할까요?',
+  message: '이동 속도가 매우 빨라요. 산책을 마쳤다면 기록을 종료해 주세요.',
+  actions: {
+    SessionWarningAction.stopRecording,
+    SessionWarningAction.continueRecording,
+  },
+);
+
 class LiveSessionState {
   const LiveSessionState({
     this.session,
@@ -159,6 +169,9 @@ class SessionController extends Notifier<LiveSessionState> {
   var _endingSession = false;
   bool _autoStopInProgress = false;
   bool _appForeground = true;
+  bool _restorationComplete = false;
+  bool _restoring = false;
+  SessionNotificationTap? _pendingNotificationTap;
 
   static const _checkpointEvery = Duration(seconds: 30);
   static const _maxObservedLiveGap = trustedLocationGap;
@@ -177,7 +190,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _firstFixTimer?.cancel();
       _firstFixTimer = null;
       unawaited(_maintenanceQueue.close());
-      unawaited(_notifications.cancelWarning());
+      unawaited(_cancelCurrentNotification());
       unawaited(_sampleSub?.cancel() ?? Future<void>.value());
       _sampleSub = null;
     });
@@ -185,14 +198,24 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   /// Call after app start (bootstrap) to recover incomplete sessions.
-  Future<void> restoreIfNeeded() => _restoreActive();
+  Future<void> restoreIfNeeded() async {
+    if (_restoring) return;
+    _restoring = true;
+    try {
+      await _restoreActive();
+    } finally {
+      _restoring = false;
+      _restorationComplete = true;
+      await restorePendingNotificationTap();
+    }
+  }
 
   /// Retries a failed recovery lookup without starting a new walk.
   Future<void> retryRecovery() async {
     if (state.isBusy || !state.canRetryRecovery) return;
     state = state.copyWith(isBusy: true, clearError: true);
     try {
-      await _restoreActive();
+      await restoreIfNeeded();
     } finally {
       if (state.isBusy) {
         state = state.copyWith(isBusy: false);
@@ -285,7 +308,6 @@ class SessionController extends Notifier<LiveSessionState> {
             ? '이전에 끝내지 못한 산책이 있어요.'
             : '이전에 끝내지 못한 산책이 있어요. 위치 ${existing.length}개가 저장되어 있습니다.',
       );
-      await restorePendingNotificationTap();
     } catch (_) {
       // A storage failure must be visible: silently treating it as "no active
       // session" can make a user believe an in-progress walk disappeared.
@@ -311,8 +333,38 @@ class SessionController extends Notifier<LiveSessionState> {
     );
   }
 
-  /// Task 7 attaches pending native notification-tap restoration here.
-  Future<void> restorePendingNotificationTap() async {}
+  /// Applies one cold-start notification tap only after persisted session
+  /// recovery determines whether that session still exists.
+  Future<void> restorePendingNotificationTap() async {
+    final tap = _pendingNotificationTap;
+    _pendingNotificationTap = null;
+    if (tap == null || state.session == null) return;
+    _presentNotificationTap(tap);
+  }
+
+  void handleNotificationTap(SessionNotificationTap tap) {
+    if (tap.kind != SessionWarningKind.highSpeed) return;
+    if (!_restorationComplete || _restoring) {
+      _pendingNotificationTap = tap;
+      return;
+    }
+    if (state.session == null) return;
+    _presentNotificationTap(tap);
+  }
+
+  void _presentNotificationTap(SessionNotificationTap tap) {
+    switch (tap.kind) {
+      case SessionWarningKind.highSpeed:
+        state = state.copyWith(
+          activeWarning: _highSpeedWarning,
+          statusMessage: '기록 종료 확인 중',
+        );
+        return;
+      case SessionWarningKind.stationary:
+      case SessionWarningKind.duration:
+        return;
+    }
+  }
 
   void _startTicker(DateTime startedAt) {
     _ticker?.cancel();
@@ -336,7 +388,14 @@ class SessionController extends Notifier<LiveSessionState> {
 
   void _cancelSessionGuard() {
     _sessionGuard.reset();
-    unawaited(_notifications.cancelWarning());
+    unawaited(_cancelCurrentNotification());
+  }
+
+  Future<void> _cancelCurrentNotification() {
+    final kind = state.activeWarning?.kind;
+    return kind == null
+        ? Future<void>.value()
+        : _notifications.cancel(kind: kind);
   }
 
   Future<void> _runMaintenance() async {
@@ -382,6 +441,7 @@ class SessionController extends Notifier<LiveSessionState> {
 
   Future<void> start({TrackingMode mode = TrackingMode.balanced}) async {
     if (state.isBusy || state.isTracking) return;
+    unawaited(_notifications.requestPermission());
     state = state.copyWith(
       isBusy: true,
       clearError: true,
@@ -623,7 +683,7 @@ class SessionController extends Notifier<LiveSessionState> {
       );
     }
     if (clearVisibleStationaryWarning) {
-      unawaited(_notifications.cancelWarning());
+      unawaited(_notifications.cancel(kind: SessionWarningKind.stationary));
     }
     if (acceptedByIncrementalFilter) {
       unawaited(
@@ -670,10 +730,7 @@ class SessionController extends Notifier<LiveSessionState> {
           activeWarning: warning,
           statusMessage: '정지 상태 확인 중',
         );
-        await _notifications.showWarning(
-          title: warning.title,
-          body: '${warning.message} 계속 머무를 예정이라면 앱에서 ‘계속 기록’을 눌러 주세요.',
-        );
+        await _notifications.showWarning(warning);
         return;
       case SessionGuardEvent.stationaryLimit:
         if (deferAutoStop) {
@@ -695,10 +752,7 @@ class SessionController extends Notifier<LiveSessionState> {
           activeWarning: warning,
           statusMessage: '자동 종료 예정',
         );
-        await _notifications.showWarning(
-          title: warning.title,
-          body: warning.message,
-        );
+        await _notifications.showWarning(warning);
         return;
       case SessionGuardEvent.durationLimit:
         if (deferAutoStop) {
@@ -710,24 +764,13 @@ class SessionController extends Notifier<LiveSessionState> {
         }
         return;
       case SessionGuardEvent.highSpeedWarning:
-        const warning = SessionWarning(
-          kind: SessionWarningKind.highSpeed,
-          title: '산책 기록을 계속할까요?',
-          message: '이동 속도가 매우 빨라요. 산책을 마쳤다면 기록을 종료해 주세요.',
-          actions: {
-            SessionWarningAction.stopRecording,
-            SessionWarningAction.continueRecording,
-          },
-        );
+        const warning = _highSpeedWarning;
         state = state.copyWith(
           activeWarning: warning,
           statusMessage: '기록 종료 확인 중',
         );
         if (!_appForeground) {
-          await _notifications.showWarning(
-            title: warning.title,
-            body: warning.message,
-          );
+          await _notifications.showWarning(warning);
         }
         return;
     }
@@ -747,13 +790,13 @@ class SessionController extends Notifier<LiveSessionState> {
         return;
     }
     state = state.copyWith(clearActiveWarning: true, statusMessage: '기록 중');
-    unawaited(_notifications.cancelWarning());
+    unawaited(_notifications.cancel(kind: warning.kind));
   }
 
   Future<WalkSession?> stopFromHighSpeedWarning() async {
     if (state.activeWarning?.kind != SessionWarningKind.highSpeed) return null;
     state = state.copyWith(clearActiveWarning: true);
-    await _notifications.cancelWarning();
+    await _notifications.cancel(kind: SessionWarningKind.highSpeed);
     return stop();
   }
 
@@ -773,8 +816,12 @@ class SessionController extends Notifier<LiveSessionState> {
 
       if (state.needsRecovery && state.errorMessage != null) {
         await _notifications.showWarning(
-          title: '산책 저장을 마치지 못했어요',
-          body: '앱을 열어 ‘저장하고 종료’를 다시 눌러 주세요. 기록은 기기에 남아 있습니다.',
+          const SessionWarning(
+            kind: SessionWarningKind.stationary,
+            title: '산책 저장을 마치지 못했어요',
+            message: '앱을 열어 ‘저장하고 종료’를 다시 눌러 주세요. 기록은 기기에 남아 있습니다.',
+            actions: {},
+          ),
         );
         return;
       }

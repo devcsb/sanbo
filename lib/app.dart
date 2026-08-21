@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'app/router.dart';
 import 'core/theme/app_theme.dart';
 import 'features/home/session_controller.dart';
+import 'platform/notifications/session_notification_service.dart';
 
 class SanboApp extends ConsumerStatefulWidget {
   const SanboApp({super.key});
@@ -15,6 +18,7 @@ class SanboApp extends ConsumerStatefulWidget {
 
 class _SanboAppState extends ConsumerState<SanboApp> {
   late final AppLifecycleListener _lifecycleListener;
+  late final StreamSubscription<SessionNotificationTap> _notificationTapSub;
 
   @override
   void initState() {
@@ -30,11 +34,21 @@ class _SanboAppState extends ConsumerState<SanboApp> {
       onHide: () =>
           ref.read(sessionControllerProvider.notifier).setAppForeground(false),
     );
+    _notificationTapSub = ref
+        .read(sessionNotificationServiceProvider)
+        .taps
+        .listen((tap) {
+          ref
+              .read(sessionControllerProvider.notifier)
+              .handleNotificationTap(tap);
+          ref.read(routerProvider).go('/');
+        });
   }
 
   @override
   void dispose() {
     _lifecycleListener.dispose();
+    _notificationTapSub.cancel();
     super.dispose();
   }
 

@@ -1,9 +1,15 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sanbo/app.dart';
+import 'package:sanbo/app/router.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/session_warning.dart';
+import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sanbo/features/history/history_providers.dart';
@@ -18,10 +24,19 @@ class _FakeSessionNotifications implements SessionNotificationService {
   final warnings = <String>[];
   final completions = <String>[];
   int cancelCalls = 0;
+  final _tapController = StreamController<SessionNotificationTap>.broadcast();
 
   @override
-  Future<void> cancelWarning() async {
+  Future<void> cancel({required SessionWarningKind kind}) async {
     cancelCalls++;
+  }
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<NotificationPermissionResult> requestPermission() async {
+    return NotificationPermissionResult.granted;
   }
 
   @override
@@ -33,11 +48,19 @@ class _FakeSessionNotifications implements SessionNotificationService {
   }
 
   @override
-  Future<void> showWarning({
-    required String title,
-    required String body,
-  }) async {
-    warnings.add('$title|$body');
+  Future<void> showWarning(SessionWarning warning) async {
+    warnings.add('${warning.title}|${warning.message}');
+  }
+
+  @override
+  Stream<SessionNotificationTap> get taps => _tapController.stream;
+
+  void emitTap(SessionWarningKind kind) {
+    _tapController.add(SessionNotificationTap(kind));
+  }
+
+  void dispose() {
+    unawaited(_tapController.close());
   }
 }
 
@@ -421,6 +444,85 @@ void main() {
     expect(await repo.listCompleted(), hasLength(1));
     expect(container.read(historyTickProvider), 0);
   });
+
+  testWidgets(
+    'warm high-speed tap routes home and keeps the active warning actions',
+    (tester) async {
+      final repo = (await tester.runAsync<WalkRepository>(openTestRepository))!;
+      addTearDown(repo.close);
+      await tester.runAsync(
+        () => repo.startSession(mode: TrackingMode.balanced),
+      );
+      final notifications = _FakeSessionNotifications();
+      addTearDown(notifications.dispose);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await tester.runAsync(controller.restoreIfNeeded);
+      final router = container.read(routerProvider);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const SanboApp(),
+        ),
+      );
+      router.go('/settings');
+      await tester.pump();
+      await tester.pump();
+      notifications.emitTap(SessionWarningKind.highSpeed);
+      await tester.pump();
+
+      expect(router.routeInformationProvider.value.uri.path, '/');
+      expect(
+        container.read(sessionControllerProvider).activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+      expect(container.read(sessionControllerProvider).activeWarning?.actions, {
+        SessionWarningAction.stopRecording,
+        SessionWarningAction.continueRecording,
+      });
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  test(
+    'cold high-speed tap waits for recovery and ignores ended sessions',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+
+      controller.handleNotificationTap(
+        const SessionNotificationTap(SessionWarningKind.highSpeed),
+      );
+      await controller.restoreIfNeeded();
+
+      expect(container.read(sessionControllerProvider).activeWarning, isNull);
+    },
+  );
 }
 
 Future<void> _pumpGuard() async {

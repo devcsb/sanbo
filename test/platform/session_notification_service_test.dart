@@ -1,0 +1,111 @@
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:sanbo/domain/models/session_warning.dart';
+import 'package:sanbo/platform/notifications/session_notification_service.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('sanbo/session_notifications');
+
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null);
+  });
+
+  test('high-speed show and cancel send isolated kind and id', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    final service = PlatformSessionNotificationService();
+    await service.initialize();
+
+    await service.showWarning(
+      const SessionWarning(
+        kind: SessionWarningKind.highSpeed,
+        title: '산책 기록을 계속할까요?',
+        message: '이동 속도가 매우 빨라요. 산책을 마쳤다면 기록을 종료해 주세요.',
+        actions: {
+          SessionWarningAction.stopRecording,
+          SessionWarningAction.continueRecording,
+        },
+      ),
+    );
+    await service.cancel(kind: SessionWarningKind.highSpeed);
+
+    expect(calls[0].arguments, containsPair('kind', 'highSpeed'));
+    expect(calls[0].arguments, containsPair('id', 4103));
+    expect(calls[1].arguments, containsPair('id', 4103));
+  });
+
+  test('notificationTapped is emitted exactly once', () async {
+    final service = PlatformSessionNotificationService();
+    await service.initialize();
+    final received = <SessionNotificationTap>[];
+    final subscription = service.taps.listen(received.add);
+    addTearDown(subscription.cancel);
+
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(
+          channel.name,
+          channel.codec.encodeMethodCall(
+            const MethodCall('notificationTapped', {'kind': 'highSpeed'}),
+          ),
+          (_) {},
+        );
+    await pumpEventQueue();
+
+    expect(received.map((event) => event.kind), [SessionWarningKind.highSpeed]);
+  });
+
+  test(
+    'a tap received before subscription is delivered once to the first listener',
+    () async {
+      final service = PlatformSessionNotificationService();
+      await service.initialize();
+
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .handlePlatformMessage(
+            channel.name,
+            channel.codec.encodeMethodCall(
+              const MethodCall('notificationTapped', {'kind': 'highSpeed'}),
+            ),
+            (_) {},
+          );
+
+      final received = <SessionNotificationTap>[];
+      final subscription = service.taps.listen(received.add);
+      addTearDown(subscription.cancel);
+      await pumpEventQueue();
+
+      expect(received.map((event) => event.kind), [
+        SessionWarningKind.highSpeed,
+      ]);
+    },
+  );
+
+  test('permission and display failures remain nonfatal', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          throw PlatformException(code: 'denied');
+        });
+    final service = PlatformSessionNotificationService();
+    await service.initialize();
+
+    expect(
+      await service.requestPermission(),
+      NotificationPermissionResult.failed,
+    );
+    await service.showWarning(
+      const SessionWarning(
+        kind: SessionWarningKind.highSpeed,
+        title: '제목',
+        message: '내용',
+        actions: {},
+      ),
+    );
+    await service.cancel(kind: SessionWarningKind.highSpeed);
+  });
+}

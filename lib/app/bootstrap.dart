@@ -14,6 +14,7 @@ import '../features/settings/tracking_mode_setting.dart';
 import '../platform/location/geolocator_location_engine.dart';
 import '../platform/location/location_engine.dart';
 import '../platform/location/synthetic_location_engine.dart';
+import '../platform/notifications/session_notification_service.dart';
 import '../platform/prefs/app_flags.dart';
 
 const appLogName = 'sanbo';
@@ -38,12 +39,15 @@ Future<void> bootstrapAndRun({
 
   final flagsStore = AppFlagsStore();
   final flags = await flagsStore.load();
+  final notifications = PlatformSessionNotificationService();
+  await notifications.initialize();
 
   final container = ProviderContainer(
     observers: const [AppProviderObserver()],
     overrides: [
       walkRepositoryProvider.overrideWithValue(repo),
       locationEngineProvider.overrideWithValue(engine),
+      sessionNotificationServiceProvider.overrideWithValue(notifications),
       appFlagsStoreProvider.overrideWithValue(flagsStore),
       introSeenProvider.overrideWith((ref) => flags.hasSeenIntro),
       trackingModeSettingProvider.overrideWith(
