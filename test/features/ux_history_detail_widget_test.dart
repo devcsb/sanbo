@@ -48,6 +48,24 @@ Widget detailApp(
   );
 }
 
+Widget detailRouteApp(WalkRepository repository, String sessionId) {
+  return ProviderScope(
+    overrides: [walkRepositoryProvider.overrideWithValue(repository)],
+    child: MaterialApp(
+      home: Navigator(
+        onGenerateInitialRoutes: (_, _) => [
+          MaterialPageRoute<void>(
+            builder: (_) => const Scaffold(body: SizedBox.shrink()),
+          ),
+          MaterialPageRoute<void>(
+            builder: (_) => SessionDetailScreen(sessionId: sessionId),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
 class _DelayedFailingExcludeRepository extends WalkRepository {
   _DelayedFailingExcludeRepository(super.db);
 
@@ -66,6 +84,59 @@ class _DelayedFailingExcludeRepository extends WalkRepository {
     writeStarted.complete();
     await releaseFailure.future;
     throw StateError('write failed');
+  }
+}
+
+class _DelayedSuccessfulExcludeRepository extends WalkRepository {
+  _DelayedSuccessfulExcludeRepository(super.db);
+
+  final writeStarted = Completer<void>();
+  final releaseWrite = Completer<void>();
+  final writeFinished = Completer<void>();
+  var attempts = 0;
+
+  @override
+  Future<RouteExclusion> excludeRouteSegment({
+    required String sessionId,
+    required ActivitySegment segment,
+    RouteExclusionReason reason = RouteExclusionReason.vehicle,
+    DateTime? createdAt,
+  }) async {
+    attempts++;
+    writeStarted.complete();
+    await releaseWrite.future;
+    final exclusion = await super.excludeRouteSegment(
+      sessionId: sessionId,
+      segment: segment,
+      reason: reason,
+      createdAt: createdAt,
+    );
+    writeFinished.complete();
+    return exclusion;
+  }
+}
+
+class _DelayedSuccessfulRestoreRepository extends WalkRepository {
+  _DelayedSuccessfulRestoreRepository(super.db);
+
+  final writeStarted = Completer<void>();
+  final releaseWrite = Completer<void>();
+  final writeFinished = Completer<void>();
+  var attempts = 0;
+
+  @override
+  Future<void> restoreRouteExclusion({
+    required String sessionId,
+    required String exclusionId,
+  }) async {
+    attempts++;
+    writeStarted.complete();
+    await releaseWrite.future;
+    await super.restoreRouteExclusion(
+      sessionId: sessionId,
+      exclusionId: exclusionId,
+    );
+    writeFinished.complete();
   }
 }
 
@@ -304,27 +375,51 @@ void main() {
       await settle(tester);
       await settle(tester);
       await settle(tester);
+      final oldDistanceM = fixture.session.totalDistanceM ?? 0;
+      final oldMap = tester.widget<RouteMap>(find.byType(RouteMap));
+      final scrollable = find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first;
       await tester.scrollUntilVisible(
         find.text('활동 흐름'),
         300,
-        scrollable: find
-            .descendant(
-              of: find.byType(ListView).first,
-              matching: find.byType(Scrollable),
-            )
-            .first,
+        scrollable: scrollable,
+      );
+
+      final vehicleSegment = fixture.segments.last;
+      final selectFinder = find.byKey(
+        ValueKey('segment-select-${vehicleSegment.start.toIso8601String()}'),
+      );
+      await tester.scrollUntilVisible(
+        selectFinder,
+        300,
+        scrollable: scrollable,
+      );
+      await tester.ensureVisible(selectFinder);
+      await tester.pump();
+      await tester.tap(selectFinder);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<RouteMap>(find.byType(RouteMap, skipOffstage: false))
+            .highlightedFragments
+            .expand((fragment) => fragment),
+        isNotEmpty,
       );
 
       final editFinder = find.byTooltip(RegExp('구간 편집'));
       await tester.scrollUntilVisible(
+        find.text('활동 흐름'),
+        300,
+        scrollable: scrollable,
+      );
+      await tester.scrollUntilVisible(
         editFinder.last,
         300,
-        scrollable: find
-            .descendant(
-              of: find.byType(ListView).first,
-              matching: find.byType(Scrollable),
-            )
-            .first,
+        scrollable: scrollable,
       );
       await tester.ensureVisible(editFinder.last);
       await tester.pump();
@@ -351,35 +446,49 @@ void main() {
       await settle(tester);
       await settle(tester);
 
+      final updatedSession = await tester.runAsync(
+        () => repo.getSession(fixture.session.id),
+      );
+      expect(updatedSession, isNotNull);
+      expect(updatedSession!.totalDistanceM, lessThan(oldDistanceM));
       expect(
         await tester.runAsync(
           () => repo.getRouteExclusions(fixture.session.id),
         ),
         hasLength(1),
       );
-      await tester.pumpWidget(detailApp(repo, fixture.session.id));
-      await settle(tester);
-      await settle(tester);
+      expect(
+        find.text(
+          '${((updatedSession.totalDistanceM ?? 0) / 1000).toStringAsFixed(2)} km',
+        ),
+        findsWidgets,
+      );
+      final updatedMap = tester.widget<RouteMap>(
+        find.byType(RouteMap, skipOffstage: false),
+      );
+      expect(
+        updatedMap.fragments.expand((fragment) => fragment).length,
+        lessThan(oldMap.fragments.expand((fragment) => fragment).length),
+      );
+      expect(
+        updatedMap.highlightedFragments.expand((fragment) => fragment),
+        isEmpty,
+      );
+      expect(updatedMap.progress, isNotNull);
+      expect(
+        updatedMap.progress!.pointIndex,
+        updatedMap.fragments[updatedMap.progress!.fragmentIndex].length - 1,
+      );
       await tester.scrollUntilVisible(
         find.text('산책에서 제외됨'),
         300,
-        scrollable: find
-            .descendant(
-              of: find.byType(ListView).first,
-              matching: find.byType(Scrollable),
-            )
-            .first,
+        scrollable: scrollable,
       );
       expect(find.text('산책에서 제외됨'), findsWidgets);
       await tester.scrollUntilVisible(
         editFinder.last,
         300,
-        scrollable: find
-            .descendant(
-              of: find.byType(ListView).first,
-              matching: find.byType(Scrollable),
-            )
-            .first,
+        scrollable: scrollable,
       );
       await tester.ensureVisible(editFinder.last);
       await tester.pump();
@@ -462,18 +571,16 @@ void main() {
       await tester.runAsync(() => repo.writeStarted.future);
       await tester.pump();
       expect(repo.attempts, 1);
-      expect(
-        tester
-            .widget<IconButton>(
-              find.byKey(
-                ValueKey(
-                  'segment-edit-${fixture.segments.last.start.toIso8601String()}',
-                ),
-              ),
-            )
-            .onPressed,
-        isNull,
+      await tester.tap(
+        find.byKey(
+          ValueKey(
+            'segment-edit-${fixture.segments.last.start.toIso8601String()}',
+          ),
+        ),
+        warnIfMissed: false,
       );
+      await tester.pump();
+      expect(repo.attempts, 1);
 
       repo.releaseFailure.complete();
       await settle(tester);
@@ -485,6 +592,147 @@ void main() {
         oldMap.fragments,
       );
       expect(find.text('경로를 제외하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'completed exclusion after detail pop refreshes history without widget errors',
+    (tester) async {
+      late CompletedRouteFixture fixture;
+      late _DelayedSuccessfulExcludeRepository repo;
+      await tester.runAsync(() async {
+        final path =
+            '${DateTime.now().microsecondsSinceEpoch}_detail_exclusion_pop.db';
+        final seed = await openTestRepository(path: path);
+        fixture = await seedCompletedVehicleWalk(seed);
+        await seed.close();
+        repo = _DelayedSuccessfulExcludeRepository(
+          await databaseFactory.openDatabase(path),
+        );
+      });
+      addTearDown(() => tester.runAsync(repo.close));
+      tester.view.physicalSize = const Size(1200, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(detailRouteApp(repo, fixture.session.id));
+      await settle(tester);
+      await settle(tester);
+      await settle(tester);
+
+      final scrollable = find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(
+        find.text('활동 흐름'),
+        300,
+        scrollable: scrollable,
+      );
+      final editFinder = find.byKey(
+        ValueKey(
+          'segment-edit-${fixture.segments.last.start.toIso8601String()}',
+        ),
+      );
+      await tester.scrollUntilVisible(editFinder, 300, scrollable: scrollable);
+      await tester.drag(scrollable, const Offset(0, -500));
+      await tester.pump();
+      await tester.tap(editFinder);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('산책에서 제외'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.widgetWithText(FilledButton, '차량 이동 구간 제외'));
+      await tester.runAsync(() => repo.writeStarted.future);
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(SessionDetailScreen)),
+      );
+      Navigator.of(tester.element(find.byType(SessionDetailScreen))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(SessionDetailScreen), findsNothing);
+      repo.releaseWrite.complete();
+      await tester.runAsync(() => repo.writeFinished.future);
+      await tester.pump();
+
+      expect(repo.attempts, 1);
+      expect(container.read(historyTickProvider), 1);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'completed restore after detail pop refreshes history without widget errors',
+    (tester) async {
+      late CompletedRouteFixture fixture;
+      late _DelayedSuccessfulRestoreRepository repo;
+      await tester.runAsync(() async {
+        final path =
+            '${DateTime.now().microsecondsSinceEpoch}_detail_restore_pop.db';
+        final seed = await openTestRepository(path: path);
+        fixture = await seedCompletedVehicleWalk(seed);
+        await seed.excludeRouteSegment(
+          sessionId: fixture.session.id,
+          segment: fixture.segments.last,
+        );
+        await seed.close();
+        repo = _DelayedSuccessfulRestoreRepository(
+          await databaseFactory.openDatabase(path),
+        );
+      });
+      addTearDown(() => tester.runAsync(repo.close));
+      tester.view.physicalSize = const Size(1200, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      await tester.pumpWidget(detailRouteApp(repo, fixture.session.id));
+      await settle(tester);
+      await settle(tester);
+      await settle(tester);
+
+      final scrollable = find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first;
+      await tester.scrollUntilVisible(
+        find.text('활동 흐름'),
+        300,
+        scrollable: scrollable,
+      );
+      final editFinder = find.byKey(
+        ValueKey(
+          'segment-edit-${fixture.segments.last.start.toIso8601String()}',
+        ),
+      );
+      await tester.scrollUntilVisible(editFinder, 300, scrollable: scrollable);
+      await tester.drag(scrollable, const Offset(0, -500));
+      await tester.pump();
+      await tester.tap(editFinder);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('제외 취소'));
+      await tester.runAsync(() => repo.writeStarted.future);
+
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(SessionDetailScreen)),
+      );
+      Navigator.of(tester.element(find.byType(SessionDetailScreen))).pop();
+      await tester.pumpAndSettle();
+      expect(find.byType(SessionDetailScreen), findsNothing);
+      repo.releaseWrite.complete();
+      await tester.runAsync(() => repo.writeFinished.future);
+      await tester.pump();
+
+      expect(repo.attempts, 1);
+      expect(container.read(historyTickProvider), 1);
+      expect(tester.takeException(), isNull);
     },
   );
 

@@ -809,22 +809,30 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
       return;
     }
 
+    final repository = ref.read(walkRepositoryProvider);
+    // The app-level container outlives this detail route, so a completed write
+    // still refreshes history if the user leaves while it is in flight.
+    final container = ProviderScope.containerOf(context, listen: false);
     ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
     try {
-      await ref
-          .read(walkRepositoryProvider)
-          .excludeRouteSegment(sessionId: sessionId, segment: segment);
-      if (mounted) _resetRouteInteraction();
-      ref.read(historyTickProvider.notifier).state++;
-      ref.invalidate(sessionDetailProvider(sessionId));
+      await repository.excludeRouteSegment(
+        sessionId: sessionId,
+        segment: segment,
+      );
+      container.read(historyTickProvider.notifier).state++;
+      if (!mounted) return;
+      _resetRouteInteraction();
+      container.invalidate(sessionDetailProvider(sessionId));
     } on Object {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('경로를 제외하지 못했어요. 다시 시도해 주세요.')),
         );
       }
     } finally {
-      ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
+      if (mounted) {
+        ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
+      }
     }
   }
 
@@ -840,25 +848,28 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
       return;
     }
 
+    final repository = ref.read(walkRepositoryProvider);
+    final container = ProviderScope.containerOf(context, listen: false);
     ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
     try {
-      await ref
-          .read(walkRepositoryProvider)
-          .restoreRouteExclusion(
-            sessionId: sessionId,
-            exclusionId: exclusionId,
-          );
-      if (mounted) _resetRouteInteraction();
-      ref.read(historyTickProvider.notifier).state++;
-      ref.invalidate(sessionDetailProvider(sessionId));
+      await repository.restoreRouteExclusion(
+        sessionId: sessionId,
+        exclusionId: exclusionId,
+      );
+      container.read(historyTickProvider.notifier).state++;
+      if (!mounted) return;
+      _resetRouteInteraction();
+      container.invalidate(sessionDetailProvider(sessionId));
     } on Object {
-      if (context.mounted) {
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('제외를 취소하지 못했어요. 다시 시도해 주세요.')),
         );
       }
     } finally {
-      ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
+      if (mounted) {
+        ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
+      }
     }
   }
 
