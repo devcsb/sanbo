@@ -56,3 +56,34 @@ adb shell dumpsys activity services | grep -i -E 'geolocator|sanbo'
 - 재현성: 2회 결과가 크게 다르면 통과로 합치지 말고 신호·provider·절전 정책 차이를 원인 후보로 기록
 
 측정 결과는 `docs/QUALITY_REVIEW_0.7.md`의 남은 위험과 루프 기록에 링크한다.
+
+## 고속 경고와 경로 제외 실기기 매트릭스
+
+아래 행은 실제 기기에서만 채운다. 자동화 빌드나 simulator 결과로 통과 처리하지 않는다. 각 실행에는 기기 모델과 OS, 위치와 알림 권한 상태, 관측 결과를 남기고 `통과/실패`를 하나만 표시한다.
+
+| 확인 | 플랫폼 | 기기·OS | 권한 상태 | 기대 상태 | 관측 결과 | 통과/실패 |
+|------|--------|---------|-----------|-----------|-----------|-----------|
+| [ ] foreground warning without system banner | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 앱 전면에서 28.8km/h 누적 60초 뒤 고속 종료 확인만 보이고 시스템 배너는 없다 | 미기록 | 미판정 |
+| [ ] background notification | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 백그라운드에서 highSpeed 알림이 표시되고 기록은 계속된다 | 미기록 | 미판정 |
+| [ ] screen-off notification | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 화면을 꺼도 highSpeed 알림이 도착하고 위치 수집은 계속된다 | 미기록 | 미판정 |
+| [ ] warm tap | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 실행 중인 앱에서 알림 탭 시 홈의 고속 경고로 이동한다 | 미기록 | 미판정 |
+| [ ] killed-app cold tap | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 종료된 앱에서 탭하면 복구 뒤 홈의 고속 경고를 재구성한다 | 미기록 | 미판정 |
+| [ ] notification denied | Android | 미기록 | 위치: 허용, 알림: 거부 | 알림 권한 거부가 세션 생성, 위치 수집, 고속 상태 계산을 막지 않는다 | 미기록 | 미판정 |
+| [ ] notification API failure | Android | 미기록 | 위치: 허용, 알림: 허용 또는 API 실패 주입 | 알림 API 실패가 기록, 위치 수집, 세션 저장을 막지 않는다 | 미기록 | 미판정 |
+| [ ] continued background location | Android | 미기록 | 위치: 허용, 알림: 미기록 | 홈 이동과 화면 잠금 뒤 새 위치와 누적값이 계속 저장된다 | 미기록 | 미판정 |
+| [ ] route exclusion | Android | 미기록 | 완료 세션 | 선택한 연속 구간만 `산책에서 제외`되고 지도와 모든 합계가 함께 갱신된다 | 미기록 | 미판정 |
+| [ ] all-points exclusion | Android | 미기록 | 완료 세션 | 모든 점을 제외해도 세션과 원시 샘플은 남고 경로·집계는 0으로 갱신된다 | 미기록 | 미판정 |
+| [ ] restore | Android | 미기록 | 제외된 완료 세션 | `제외 취소` 뒤 지도, 세션, 기록, 일별 합계가 원래 계산으로 함께 돌아온다 | 미기록 | 미판정 |
+| [ ] app restart persistence | Android | 미기록 | 제외된 완료 세션 | 앱 재시작 뒤 제외 범위와 파생 분 기록, 지도와 합계가 유지된다 | 미기록 | 미판정 |
+| [ ] foreground warning without system banner | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 앱 전면에서 28.8km/h 누적 60초 뒤 고속 종료 확인만 보이고 시스템 배너는 없다 | 미기록 | 미판정 |
+| [ ] background notification | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 백그라운드에서 highSpeed 알림이 표시되고 기록은 계속된다 | 미기록 | 미판정 |
+| [ ] screen-off notification | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 화면을 꺼도 highSpeed 알림이 도착하고 위치 수집은 계속된다 | 미기록 | 미판정 |
+| [ ] warm tap | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 실행 중인 앱에서 알림 탭 시 홈의 고속 경고로 이동한다 | 미기록 | 미판정 |
+| [ ] killed-app cold tap | iOS | 미기록 | 위치: 미기록, 알림: 미기록 | 종료된 앱에서 탭하면 복구 뒤 홈의 고속 경고를 재구성한다 | 미기록 | 미판정 |
+| [ ] notification denied | iOS | 미기록 | 위치: 허용, 알림: 거부 | 알림 권한 거부가 세션 생성, 위치 수집, 고속 상태 계산을 막지 않는다 | 미기록 | 미판정 |
+| [ ] notification API failure | iOS | 미기록 | 위치: 허용, 알림: 허용 또는 API 실패 주입 | 알림 API 실패가 기록, 위치 수집, 세션 저장을 막지 않는다 | 미기록 | 미판정 |
+| [ ] continued background location | iOS | 미기록 | 위치: 허용, 알림: 미기록 | 홈 이동과 화면 잠금 뒤 새 위치와 누적값이 계속 저장된다 | 미기록 | 미판정 |
+| [ ] route exclusion | iOS | 미기록 | 완료 세션 | 선택한 연속 구간만 `산책에서 제외`되고 지도와 모든 합계가 함께 갱신된다 | 미기록 | 미판정 |
+| [ ] all-points exclusion | iOS | 미기록 | 완료 세션 | 모든 점을 제외해도 세션과 원시 샘플은 남고 경로·집계는 0으로 갱신된다 | 미기록 | 미판정 |
+| [ ] restore | iOS | 미기록 | 제외된 완료 세션 | `제외 취소` 뒤 지도, 세션, 기록, 일별 합계가 원래 계산으로 함께 돌아온다 | 미기록 | 미판정 |
+| [ ] app restart persistence | iOS | 미기록 | 제외된 완료 세션 | 앱 재시작 뒤 제외 범위와 파생 분 기록, 지도와 합계가 유지된다 | 미기록 | 미판정 |

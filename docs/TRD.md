@@ -81,8 +81,8 @@ lib/
 
 ## 3. 데이터 모델 (스키마 수준)
 
-DB 스키마 버전은 `2`(장소 기억 추가), NDJSON export의
-`schema_version`은 호환 가능한 기존 형식 `1`을 유지한다.
+DB 스키마 버전은 `4`다. v4는 완료 기록의 가역적 사용자 제외를 위한
+`route_exclusions`와 `minute_windows.user_exclusion_id`를 추가한다.
 
 ### 3.1 `sessions`
 
@@ -150,6 +150,7 @@ DB 스키마 버전은 `2`(장소 기억 추가), NDJSON export의
 | `user_label` | string? | 사용자 확정/수정 |
 | `user_note` | text? | |
 | `user_confirmed` | bool | default false |
+| `user_exclusion_id` | string? | `route_exclusions.id`를 가리키는 파생 상태 |
 
 **유니크**: `(session_id, window_start)`.
 
@@ -205,6 +206,106 @@ DB 스키마 버전은 `2`(장소 기억 추가), NDJSON export의
   "user_confirmed": false
 }
 ```
+
+### 3.7 고속 guard와 경로 제외 계약
+
+고속 판단은 `SessionGuard`가 저장 시각이 아니라 앱 수신 시각 `observedAt`으로 freshness를 확인해 수행한다. 신뢰 가능한 샘플은 정확도 80m 이하, 자동 필터 제외 아님, 좌표가 유효함을 만족해야 한다. receipt는 최대 30초 전, 최대 5초 미래까지 허용한다. 최근 120초에서 8.0m/s(28.8km/h) 이상 구간이 누적 60초면 `SessionGuardEvent.highSpeedWarning`을 낸다. 4.0m/s(14.4km/h) 이하가 연속 30초가 되어야 다시 무장한다. 고속 이동만으로 세션을 자동 종료하지 않는다.
+
+`SessionGuard.evaluate`의 경고 우선순위는 duration limit, stationary limit, duration warning, stationary warning, high-speed warning 순서다. 고속 경고는 `SessionWarningKind.highSpeed`로 표현하며 `기록 종료`는 `SessionController.stopFromHighSpeedWarning()`, `계속 기록`은 `SessionController.continueAfterWarning()`으로 처리한다.
+
+완료 세션의 사용자 제외 원본은 UTC ISO 8601으로 저장한 반개구간 `[startAt, endAt)`인 `route_exclusions`다. 범위는 세션 경계로 clamp하며 겹치는 범위는 거부하고, 맞닿은 범위는 별도 레코드로 보존한다. 원시 `location_samples.is_filtered_out` 값과 행은 제외와 복원에서 절대 변경하지 않으며, `location_samples.user_exclusion_id` 열은 만들지 않는다.
+
+```sql
+-- DB schemaVersion = 4
+CREATE TABLE route_exclusions (
+  id TEXT PRIMARY KEY NOT NULL,
+  session_id TEXT NOT NULL,
+  start_at TEXT NOT NULL,
+  end_at TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY(session_id) REFERENCES sessions(id) ON DELETE CASCADE
+);
+ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
+  REFERENCES route_exclusions(id) ON DELETE SET NULL;
+```
+
+`RoutePartitioner.partition`은 필터된 샘플, 유효하지 않은 좌표, 사용자 제외 내부 샘플, `trustedLocationGap`보다 긴 공백을 지나 선분을 잇지 않는다. 포함 샘플만 fragments에 두며, fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다.
+
+`WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 제외 없는 결과로 분 기록 교체, 세션 집계 갱신, 제외 레코드 삭제 순이며 삭제를 마지막에 둔다. 실패하면 원본과 파생 상태가 함께 rollback된다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
+
+정확한 공개 표면은 아래와 같다.
+
+```dart
+RouteExclusion RouteExclusion.clampedTo(WalkSession session);
+RouteExclusionReason.vehicle;
+
+RoutePartitionResult RoutePartitioner.partition({
+  required List<LocationSample> samples,
+  required List<RouteExclusion> exclusions,
+  Duration maxGap = trustedLocationGap,
+});
+// RoutePartitionResult exposes RouteFragment, RouteSegment, fragments,
+// includedSamples, and segments. MinuteWindow exposes userExclusionId and
+// isUserExcluded.
+List<MinuteWindow> WindowAggregator.aggregate({
+  required RoutePartitionResult partition,
+  required List<LocationSample> rawSamples,
+  required List<RouteExclusion> exclusions,
+  required DateTime sessionStart,
+  required DateTime sessionEnd,
+});
+SessionRollupResult SessionRollup.compute({
+  required WalkSession session,
+  required RoutePartitionResult partition,
+  required List<RouteExclusion> exclusions,
+  required DateTime endedAt,
+});
+CompletedSessionRecalculation SessionPipeline.recalculateCompleted({
+  required WalkSession session,
+  required List<LocationSample> storedSamples,
+  required List<RouteExclusion> exclusions,
+  required List<MinuteWindow> previousWindows,
+});
+
+Future<List<RouteExclusion>> WalkRepository.getRouteExclusions(String sessionId);
+Future<RouteExclusion> WalkRepository.excludeRouteSegment({
+  required String sessionId,
+  required ActivitySegment segment,
+  RouteExclusionReason reason = RouteExclusionReason.vehicle,
+  DateTime? createdAt,
+});
+Future<void> WalkRepository.restoreRouteExclusion({
+  required String sessionId,
+  required String exclusionId,
+});
+
+SessionGuardObservation SessionGuard.observe(
+  LocationSample sample, {
+  required DateTime observedAt,
+});
+void SessionGuard.rebuildHighSpeedState({
+  required Iterable<LocationSample> samples,
+  required DateTime observedAt,
+});
+void SessionGuard.dismissHighSpeedWarning();
+
+SessionWarningKind; // stationary, duration, highSpeed
+SessionWarningAction; // stopRecording, continueRecording
+SessionWarning;
+LiveSessionState.activeWarning;
+Future<void> SessionController.continueAfterWarning();
+Future<WalkSession?> SessionController.stopFromHighSpeedWarning();
+NotificationPermissionResult;
+SessionNotificationTap;
+Future<NotificationPermissionResult> SessionNotificationService.requestPermission();
+Future<void> SessionNotificationService.initialize();
+Stream<SessionNotificationTap> SessionNotificationService.taps;
+Future<void> SessionNotificationService.showWarning(SessionWarning warning);
+Future<void> SessionNotificationService.cancel({required SessionWarningKind kind});
+```
+
+알림 권한 거부와 notification API 실패는 비치명이다. 위치 권한, location engine 시작, 세션 생성과 기록을 지연하거나 실패시키지 않는다. native payload는 `kind: highSpeed`이고 Dart 전달은 `notificationTapped({kind: highSpeed})`다. warm start에서는 tap을 받은 즉시 홈으로 이동해 활성 고속 경고를 표시한다. cold start에서는 native의 한 항목 버퍼를 `initialize()` 뒤 전달하고, 세션 복구가 끝난 뒤 `rebuildHighSpeedState`로 고속 상태와 경고를 재구성한다.
 
 ---
 
@@ -562,17 +663,15 @@ attribution = © OpenStreetMap · © CARTO
 ### 9.2 Export 포맷 (P1, 레퍼런스 NDJSON 정신)
 
 ```text
+schema_version: 2
 session meta line (JSON)
-one LocationSample per line (NDJSON)  OR  windows-only export option
+one raw LocationSample per line (NDJSON), route exclusion records,
+and minute windows including user_exclusion_id
 ```
 
 ### 9.3 전체 백업 포맷
 
-최상위에 `export_kind=sanbo_backup`, `backup_schema_version`,
-`database_schema_version`, `exported_at`을 두고 `sessions`,
-`location_samples`, `minute_windows`, `places` 네 테이블을 담는다. 자동 증가
-샘플/윈도우 ID는 내보내지 않고 복원 시 새로 부여하며, 장소 ID만 백업 내부
-참조로 매핑한다. 진행 중 세션은 복제 복구를 막기 위해 제외한다.
+전체 백업 출력의 리터럴 버전은 `backup_schema_version: 2`다. 입력은 v1과 v2를 지원하며 v1을 읽을 때 `route_exclusions`는 빈 목록으로, `minute_windows.user_exclusion_id`는 null로 정규화한다. v2 출력은 `sessions`, `location_samples`, `minute_windows`, `places`, `route_exclusions`를 담고 원시 샘플의 `is_filtered_out`과 분 기록의 `user_exclusion_id`를 보존한다. 자동 증가 샘플/윈도우 ID는 내보내지 않고 복원 시 새로 부여하며, 장소와 제외 ID 참조는 백업 내부에서 매핑한다. 진행 중 세션은 복제 복구를 막기 위해 제외한다.
 
 ---
 

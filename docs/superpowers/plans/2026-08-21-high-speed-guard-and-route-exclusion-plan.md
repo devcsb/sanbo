@@ -703,7 +703,7 @@
 
   Expected: all focused domain tests PASS, including zero samples, one sample, all excluded, endpoint exclusion, offset-equivalent instants, and finite zero metrics.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
   ```bash
   git add lib/domain/models/route_exclusion.dart lib/domain/models/minute_window.dart lib/domain/pipeline/route_partitioner.dart lib/domain/pipeline/segment_merger.dart lib/domain/pipeline/window_aggregator.dart lib/domain/pipeline/session_rollup.dart lib/domain/services/session_pipeline.dart test/domain/route_partitioner_test.dart test/domain/segment_merger_test.dart test/domain/window_aggregator_test.dart test/domain/session_rollup_test.dart test/domain/session_pipeline_test.dart
@@ -1973,7 +1973,7 @@
 - Consumes: Tasks 1 through 7의 최종 public types, DB v4 schema, backup v2, 사용자 문구, native payload contract.
 - Produces: PRD 성공 기준, TRD 계산 및 저장 규칙, 실제 기기 점검표, 문서 구조 테스트, 전체 analyzer, test, Android build, iOS build 결과.
 
-- [ ] **Step 1: Write the failing documentation contract test**
+- [x] **Step 1: Write the failing documentation contract test**
 
   Create `test/features/high_speed_route_exclusion_docs_test.dart` so the active product and technical docs cannot silently drift from shipped constants and storage names.
 
@@ -2001,13 +2001,13 @@
   }
   ```
 
-- [ ] **Step 2: Run the documentation checks to verify RED**
+- [x] **Step 2: Run the documentation checks to verify RED**
 
   Run: `flutter test --no-pub --concurrency=1 test/features/high_speed_route_exclusion_docs_test.dart && python scripts/verify_prd_trd.py`
 
   Expected: the Dart test FAILS because the current PRD and TRD omit the new terms; the structural verifier remains useful but cannot prove feature coverage yet.
 
-- [ ] **Step 3: Update product, technical, and device verification documents with exact shipped contracts**
+- [x] **Step 3: Update product, technical, and device verification documents with exact shipped contracts**
 
   Add one PRD functional requirement for sustained high-speed confirmation with these exact values and copy: `28.8km/h`, latest `120초`, accumulated `60초`, recovery `14.4km/h` for `30초`, `기록 종료`, `계속 기록`, and no automatic high-speed stop. Add another requirement for completed-segment `산책에서 제외` and `제외 취소`, stating that maps, session totals, history totals, and daily totals refresh together.
 
@@ -2042,7 +2042,7 @@
 
   Expected: the documentation contract PASS and `verify_prd_trd.py` exits 0.
 
-- [ ] **Step 4: Run the complete automated completion audit**
+- [x] **Step 4: Run the complete automated completion audit**
 
   Run these commands independently so a failure cannot hide later evidence:
 
