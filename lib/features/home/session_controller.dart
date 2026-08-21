@@ -573,7 +573,9 @@ class SessionController extends Notifier<LiveSessionState> {
       }
       _lastValidSample = marked;
       _validSampleCount += 1;
-      clearedStayWarning = _sessionGuard.observe(marked, observedAt: _clock());
+      clearedStayWarning = _sessionGuard
+          .observe(marked, observedAt: _clock())
+          .clearedStationaryWarning;
     }
 
     final providerSpeed = sample.speedMps;
@@ -688,6 +690,8 @@ class SessionController extends Notifier<LiveSessionState> {
         } else {
           await _autoStop(completionNotice: '5시간이 지나 산책을 자동으로 저장하고 종료했어요.');
         }
+        return;
+      case SessionGuardEvent.highSpeedWarning:
         return;
     }
   }

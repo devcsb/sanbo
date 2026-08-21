@@ -1,3 +1,4 @@
+import 'dart:collection';
 import 'dart:math' as math;
 
 import '../models/location_sample.dart';
@@ -9,6 +10,7 @@ enum SessionGuardEvent {
   stationaryLimit,
   durationWarning,
   durationLimit,
+  highSpeedWarning,
 }
 
 class SessionGuardPolicy {
@@ -20,6 +22,14 @@ class SessionGuardPolicy {
     this.stationaryRadiusM = 35,
     this.movingSpeedMps = 0.9,
     this.maxUsableAccuracyM = 80,
+    this.highSpeedThresholdMps = 8.0,
+    this.highSpeedWindow = const Duration(seconds: 120),
+    this.highSpeedWarningAfter = const Duration(seconds: 60),
+    this.lowSpeedRecoveryMps = 4.0,
+    this.lowSpeedRecoveryAfter = const Duration(seconds: 30),
+    this.highSpeedMaxAccuracyM = 80,
+    this.maxSampleAge = const Duration(seconds: 30),
+    this.maxSampleFutureSkew = const Duration(seconds: 5),
   });
 
   final Duration stationaryWarningAfter;
@@ -29,6 +39,14 @@ class SessionGuardPolicy {
   final double stationaryRadiusM;
   final double movingSpeedMps;
   final double maxUsableAccuracyM;
+  final double highSpeedThresholdMps;
+  final Duration highSpeedWindow;
+  final Duration highSpeedWarningAfter;
+  final double lowSpeedRecoveryMps;
+  final Duration lowSpeedRecoveryAfter;
+  final double highSpeedMaxAccuracyM;
+  final Duration maxSampleAge;
+  final Duration maxSampleFutureSkew;
 }
 
 class SessionGuardDecision {
@@ -40,40 +58,224 @@ class SessionGuardDecision {
   final Duration? remaining;
 }
 
+class SessionGuardObservation {
+  const SessionGuardObservation({
+    this.acceptedForHighSpeed = false,
+    this.clearedStationaryWarning = false,
+  });
+
+  final bool acceptedForHighSpeed;
+  final bool clearedStationaryWarning;
+}
+
+class _TrustedSpeedSpan {
+  const _TrustedSpeedSpan({
+    required this.startAt,
+    required this.endAt,
+    required this.speedMps,
+  });
+
+  final DateTime startAt;
+  final DateTime endAt;
+  final double speedMps;
+}
+
 /// Watches one explicitly started walk for forgotten tracking and long stays.
-///
-/// A generous, accuracy-aware radius avoids treating ordinary GPS drift as
-/// movement. A reliable walking speed immediately resets the stationary clock,
-/// which also protects people walking small loops in a park.
 class SessionGuard {
   SessionGuard({this.policy = const SessionGuardPolicy()});
 
   final SessionGuardPolicy policy;
 
+  final _speedSpans = ListQueue<_TrustedSpeedSpan>();
   LocationSample? _anchor;
   LocationSample? _lastUsableSample;
+  LocationSample? _lastHighSpeedSample;
+  DateTime? _lastObservedAt;
   DateTime? _stationarySince;
+  DateTime? _lowSpeedSince;
+  DateTime? _highSpeedPendingAt;
   bool _stationaryWarningIssued = false;
   bool _durationWarningIssued = false;
+  bool _highSpeedWarningIssued = false;
+  bool _highSpeedPending = false;
 
   DateTime? get stationarySince => _stationarySince;
   bool get stationaryWarningIssued => _stationaryWarningIssued;
+  bool get highSpeedArmed => !_highSpeedWarningIssued;
 
   void reset() {
+    _speedSpans.clear();
     _anchor = null;
     _lastUsableSample = null;
+    _lastHighSpeedSample = null;
+    _lastObservedAt = null;
     _stationarySince = null;
+    _lowSpeedSince = null;
+    _highSpeedPendingAt = null;
     _stationaryWarningIssued = false;
     _durationWarningIssued = false;
+    _highSpeedWarningIssued = false;
+    _highSpeedPending = false;
   }
 
-  /// Returns true when meaningful movement clears an outstanding stay warning.
-  ///
-  /// [observedAt] is the app's receipt time. Platform location timestamps can
-  /// occasionally be cached or delayed, so safety timers must not be anchored
-  /// to them. Domain-only callers may omit it to use the sample timestamp.
-  bool observe(LocationSample sample, {DateTime? observedAt}) {
-    final receivedAt = observedAt ?? sample.timestamp;
+  /// [observedAt] is the app receipt time, not a possibly cached platform time.
+  SessionGuardObservation observe(
+    LocationSample sample, {
+    required DateTime observedAt,
+  }) {
+    final receivedAt = observedAt;
+    final receivedUtc = receivedAt.toUtc();
+    final previousObservedAt = _lastObservedAt;
+    if (previousObservedAt != null &&
+        receivedUtc.isBefore(previousObservedAt)) {
+      return const SessionGuardObservation();
+    }
+    _lastObservedAt = receivedUtc;
+
+    final acceptedForHighSpeed =
+        _freshAtReceipt(sample, receivedUtc) && _trustedForHighSpeed(sample);
+    if (acceptedForHighSpeed) {
+      _observeHighSpeed(sample, receivedUtc);
+    }
+
+    return SessionGuardObservation(
+      acceptedForHighSpeed: acceptedForHighSpeed,
+      clearedStationaryWarning: _observeStationary(sample, receivedAt),
+    );
+  }
+
+  void rebuildHighSpeedState({
+    required Iterable<LocationSample> samples,
+    required DateTime observedAt,
+  }) {
+    reset();
+    final receivedUtc = observedAt.toUtc();
+    final windowStart = receivedUtc.subtract(policy.highSpeedWindow);
+    final recentSamples =
+        samples.where((sample) {
+            final timestamp = sample.timestamp.toUtc();
+            return !timestamp.isBefore(windowStart) &&
+                !timestamp.isAfter(receivedUtc);
+          }).toList()
+          ..sort((a, b) => a.timestamp.toUtc().compareTo(b.timestamp.toUtc()));
+    for (final sample in recentSamples) {
+      observe(sample, observedAt: observedAt);
+    }
+  }
+
+  void dismissHighSpeedWarning() {
+    _highSpeedPending = false;
+    _highSpeedPendingAt = null;
+  }
+
+  bool _freshAtReceipt(LocationSample sample, DateTime observedAt) {
+    final age = observedAt.difference(sample.timestamp.toUtc());
+    return age <= policy.maxSampleAge && age >= -policy.maxSampleFutureSkew;
+  }
+
+  bool _trustedForHighSpeed(LocationSample sample) {
+    final accuracy = sample.accuracyM;
+    return accuracy != null &&
+        accuracy.isFinite &&
+        accuracy >= 0 &&
+        accuracy <= policy.highSpeedMaxAccuracyM &&
+        !sample.isFilteredOut &&
+        sample.latitude.isFinite &&
+        sample.longitude.isFinite &&
+        sample.latitude >= -90 &&
+        sample.latitude <= 90 &&
+        sample.longitude >= -180 &&
+        sample.longitude <= 180;
+  }
+
+  void _observeHighSpeed(LocationSample sample, DateTime observedAt) {
+    final previous = _lastHighSpeedSample;
+    if (previous == null) {
+      _lastHighSpeedSample = sample;
+      return;
+    }
+
+    final startAt = previous.timestamp.toUtc();
+    final endAt = sample.timestamp.toUtc();
+    final interval = endAt.difference(startAt);
+    if (interval <= Duration.zero) {
+      _lowSpeedSince = null;
+      return;
+    }
+    _lastHighSpeedSample = sample;
+    if (interval > trustedLocationGap) {
+      _lowSpeedSince = null;
+      return;
+    }
+
+    final distance = haversineMeters(
+      lat1: previous.latitude,
+      lon1: previous.longitude,
+      lat2: sample.latitude,
+      lon2: sample.longitude,
+    );
+    final speed =
+        distance / (interval.inMicroseconds / Duration.microsecondsPerSecond);
+    if (!speed.isFinite) return;
+
+    _speedSpans.add(
+      _TrustedSpeedSpan(startAt: startAt, endAt: endAt, speedMps: speed),
+    );
+    _trimHighSpeedWindow(observedAt);
+    if (!_highSpeedWarningIssued &&
+        _highSpeedDuration(observedAt) >= policy.highSpeedWarningAfter) {
+      _highSpeedWarningIssued = true;
+      _highSpeedPending = true;
+      _highSpeedPendingAt = observedAt;
+    }
+    if (_highSpeedWarningIssued) {
+      _updateLowSpeedRecovery(speed, startAt, endAt);
+    }
+  }
+
+  void _trimHighSpeedWindow(DateTime observedAt) {
+    final windowStart = observedAt.subtract(policy.highSpeedWindow);
+    while (_speedSpans.isNotEmpty &&
+        !_speedSpans.first.endAt.isAfter(windowStart)) {
+      _speedSpans.removeFirst();
+    }
+  }
+
+  Duration _highSpeedDuration(DateTime observedAt) {
+    final windowStart = observedAt.subtract(policy.highSpeedWindow);
+    var total = Duration.zero;
+    for (final span in _speedSpans) {
+      // Haversine calculations at an exact geographic threshold can land a
+      // few ulps below it, so preserve the inclusive policy boundary.
+      if (span.speedMps + 1e-9 < policy.highSpeedThresholdMps) continue;
+      final startAt = span.startAt.isAfter(windowStart)
+          ? span.startAt
+          : windowStart;
+      final endAt = span.endAt.isBefore(observedAt) ? span.endAt : observedAt;
+      if (endAt.isAfter(startAt)) {
+        total += endAt.difference(startAt);
+      }
+    }
+    return total;
+  }
+
+  void _updateLowSpeedRecovery(double speed, DateTime startAt, DateTime endAt) {
+    if (speed > policy.lowSpeedRecoveryMps) {
+      _lowSpeedSince = null;
+      return;
+    }
+    final recoveryStart = _lowSpeedSince ?? startAt;
+    _lowSpeedSince = recoveryStart;
+    if (endAt.difference(recoveryStart) >= policy.lowSpeedRecoveryAfter) {
+      _speedSpans.clear();
+      _lowSpeedSince = null;
+      _highSpeedWarningIssued = false;
+      _highSpeedPending = false;
+      _highSpeedPendingAt = null;
+    }
+  }
+
+  bool _observeStationary(LocationSample sample, DateTime receivedAt) {
     final accuracy = sample.accuracyM;
     if (accuracy != null &&
         accuracy.isFinite &&
@@ -123,7 +325,7 @@ class SessionGuard {
       lat2: current.latitude,
       lon2: current.longitude,
     );
-    return distance / (dt.inMilliseconds / 1000.0);
+    return distance / (dt.inMicroseconds / Duration.microsecondsPerSecond);
   }
 
   SessionGuardDecision evaluate({
@@ -162,6 +364,12 @@ class SessionGuard {
       }
     }
 
+    if (_highSpeedPending &&
+        (_highSpeedPendingAt == null || !now.isBefore(_highSpeedPendingAt!))) {
+      _highSpeedPending = false;
+      _highSpeedPendingAt = null;
+      return const SessionGuardDecision(SessionGuardEvent.highSpeedWarning);
+    }
     return SessionGuardDecision.none;
   }
 
