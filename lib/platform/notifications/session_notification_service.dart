@@ -43,7 +43,6 @@ class PlatformSessionNotificationService implements SessionNotificationService {
   SessionNotificationTap? _pendingTap;
   var _initialized = false;
   var _readyAcknowledged = false;
-  var _nativeUnavailable = false;
   Future<void>? _readyAttempt;
 
   @override
@@ -64,7 +63,7 @@ class PlatformSessionNotificationService implements SessionNotificationService {
   }
 
   Future<void> _tryReady() {
-    if (!_initialized || _readyAcknowledged || _nativeUnavailable) {
+    if (!_initialized || _readyAcknowledged) {
       return Future<void>.value();
     }
     final active = _readyAttempt;
@@ -83,8 +82,9 @@ class PlatformSessionNotificationService implements SessionNotificationService {
           .timeout(const Duration(seconds: 2));
       _readyAcknowledged = true;
     } on MissingPluginException {
-      _nativeUnavailable = true;
-      // Desktop, web, and widget tests do not install a native handler.
+      // The native engine can register this channel after Dart bootstrap,
+      // especially on iOS implicit engines. Keep the handshake retryable;
+      // unsupported desktop and web targets simply fail this best-effort call.
     } on PlatformException {
       // Notification readiness must never block location recording. Keep this
       // retryable because the native engine may not be ready yet.

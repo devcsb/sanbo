@@ -4,6 +4,7 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:permission_handler/permission_handler.dart' as ph;
 
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/tracking_mode.dart';
@@ -93,10 +94,9 @@ class GeolocatorLocationEngine implements LocationEngine {
       return LocationStreamEndAction.ignore;
     }
     // A missing fix is a normal GPS gap, especially in tunnels and on iOS.
-    // Only the fused provider can be switched to the Android fallback here.
-    // A fallback that stays silent for several minutes is treated as ended so
-    // the controller can expose recovery instead of remaining stuck forever.
-    if (usingLocationManagerFallback) return LocationStreamEndAction.report;
+    // Once LocationManager is active, re-arm it after a prolonged gap. This
+    // avoids both a false terminal stop and a permanently hung stream.
+    if (usingLocationManagerFallback) return LocationStreamEndAction.recover;
     return endedStreamAction(
       running: running,
       usingLocationManagerFallback: usingLocationManagerFallback,
@@ -123,6 +123,32 @@ class GeolocatorLocationEngine implements LocationEngine {
           (isApplePlatform && terminalProviderError));
 
   @visibleForTesting
+  static bool isTerminalProviderError(Object error) {
+    return error is LocationServiceDisabledException ||
+        error is PermissionDeniedException ||
+        error is PositionUpdateException;
+  }
+
+  @visibleForTesting
+  static bool shouldRequestAlwaysLocation({
+    required bool isApplePlatform,
+    required LocationPermissionState permission,
+  }) =>
+      isApplePlatform && permission == LocationPermissionState.granted;
+
+  @visibleForTesting
+  static LocationPermissionState stateAfterAlwaysPermission({
+    required LocationPermissionState foregroundPermission,
+    required bool alwaysGranted,
+  }) {
+    if (foregroundPermission == LocationPermissionState.granted &&
+        !alwaysGranted) {
+      return LocationPermissionState.grantedForegroundOnly;
+    }
+    return foregroundPermission;
+  }
+
+  @visibleForTesting
   static bool shouldAcceptOneShotResult({
     required bool running,
     required int currentGeneration,
@@ -144,8 +170,26 @@ class GeolocatorLocationEngine implements LocationEngine {
   Future<LocationPermissionState> checkPermission() async {
     final service = await Geolocator.isLocationServiceEnabled();
     if (!service) return LocationPermissionState.serviceDisabled;
-    final p = await Geolocator.checkPermission();
-    return _mapPermission(p);
+    return _mapPermission(await Geolocator.checkPermission());
+  }
+
+  Future<bool> _requestAlwaysLocationBestEffort() async {
+    try {
+      final status = await ph.Permission.locationAlways.status;
+      if (status.isGranted) return true;
+      // iOS only presents this upgrade after while-in-use was granted. The
+      // geolocator request above establishes that foreground permission first.
+      return (await ph.Permission.locationAlways.request()).isGranted;
+    } catch (error, stackTrace) {
+      developer.log(
+        'iOS background location permission upgrade was unavailable',
+        name: _logName,
+        error: error,
+        stackTrace: stackTrace,
+      );
+      // Background upgrade is best-effort. Foreground recording remains valid.
+      return false;
+    }
   }
 
   @override
@@ -162,7 +206,18 @@ class GeolocatorLocationEngine implements LocationEngine {
     if (p == LocationPermission.denied) {
       p = await Geolocator.requestPermission();
     }
-    return _mapPermission(p);
+    final mapped = _mapPermission(p);
+    if (shouldRequestAlwaysLocation(
+      isApplePlatform: Platform.isIOS,
+      permission: mapped,
+    )) {
+      final alwaysGranted = await _requestAlwaysLocationBestEffort();
+      return stateAfterAlwaysPermission(
+        foregroundPermission: mapped,
+        alwaysGranted: alwaysGranted,
+      );
+    }
+    return mapped;
   }
 
   @override
@@ -333,15 +388,11 @@ class GeolocatorLocationEngine implements LocationEngine {
         if (!ready.isCompleted) {
           ready.completeError(e, st);
         }
-        final terminalProviderError =
-            e is LocationServiceDisabledException ||
-            e is PermissionDeniedException ||
-            e is PositionUpdateException;
         if (shouldReportStreamError(
           running: _running,
           usingLocationManagerFallback: _usingLocationManagerFallback,
           isApplePlatform: Platform.isIOS,
-          terminalProviderError: terminalProviderError,
+          terminalProviderError: isTerminalProviderError(e),
         )) {
           _reportEndedStream(st);
           return;

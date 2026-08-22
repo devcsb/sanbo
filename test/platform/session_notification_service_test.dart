@@ -88,6 +88,29 @@ void main() {
     },
   );
 
+  test(
+    'readiness handshake retries when the native channel is registered late',
+    () async {
+      var readyAttempts = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'ready') {
+              readyAttempts++;
+              if (readyAttempts == 1) throw MissingPluginException();
+            }
+            return null;
+          });
+      final service = PlatformSessionNotificationService();
+
+      await service.initialize();
+      final subscription = service.taps.listen((_) {});
+      addTearDown(subscription.cancel);
+      await pumpEventQueue();
+
+      expect(readyAttempts, 2);
+    },
+  );
+
   test('cancel all warnings clears every distinct warning id', () async {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

@@ -363,6 +363,10 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   void clearError() {
+    if (state.permissionState ==
+        LocationPermissionState.grantedForegroundOnly) {
+      return;
+    }
     state = state.copyWith(
       clearError: true,
       statusMessage: state.statusMessage,
@@ -521,7 +525,8 @@ class SessionController extends Notifier<LiveSessionState> {
       );
       return;
     }
-    if (perm != LocationPermissionState.granted) {
+    if (perm != LocationPermissionState.granted &&
+        perm != LocationPermissionState.grantedForegroundOnly) {
       state = state.copyWith(
         isBusy: false,
         errorMessage: '위치 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.',
@@ -638,6 +643,9 @@ class SessionController extends Notifier<LiveSessionState> {
         validSampleCount: liveValid,
         liveDistanceM: liveDistance,
         permissionState: perm,
+        errorMessage: perm == LocationPermissionState.grantedForegroundOnly
+            ? '화면을 잠그고 기록하려면 설정에서 산보 위치 권한을 항상 허용해 주세요.'
+            : null,
         statusMessage: liveValid > 0 ? '기록 중' : 'GPS 잡는 중',
       );
       _startSessionGuard();
@@ -824,7 +832,8 @@ class SessionController extends Notifier<LiveSessionState> {
         liveDistanceM: _liveDistanceM,
         lastAccuracyM: _lastAccuracyM,
         statusMessage: _validSampleCount == 0 ? 'GPS 보정 중' : '기록 중',
-        clearError: true,
+        clearError:
+            state.permissionState != LocationPermissionState.grantedForegroundOnly,
         clearActiveWarning: clearVisibleStationaryWarning,
       );
     }

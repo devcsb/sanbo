@@ -31,6 +31,7 @@ class HomeScreen extends ConsumerWidget {
     final startMode = recovery ? live.session!.trackingMode : mode;
     final needsSystemSettings =
         live.permissionState == LocationPermissionState.deniedForever ||
+        live.permissionState == LocationPermissionState.grantedForegroundOnly ||
         live.permissionState == LocationPermissionState.serviceDisabled ||
         (live.errorMessage != null &&
             (live.errorMessage!.contains('설정') ||
@@ -320,6 +321,8 @@ class HomeScreen extends ConsumerWidget {
   String _permissionHint(LocationPermissionState p) {
     return switch (p) {
       LocationPermissionState.granted => '',
+      LocationPermissionState.grantedForegroundOnly =>
+        '화면을 잠그고 기록하려면 설정에서 위치 권한을 항상 허용해 주세요',
       LocationPermissionState.denied => '시작 시 위치 권한을 요청합니다',
       LocationPermissionState.deniedForever => '설정에서 위치 권한을 허용해 주세요',
       LocationPermissionState.serviceDisabled => '기기의 위치 서비스를 켜 주세요',

@@ -1100,6 +1100,48 @@ void main() {
     expect(state.errorMessage, isNotNull);
   });
 
+  test('foreground-only location permission still starts with settings guidance',
+      () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.grantedForegroundOnly,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    var state = container.read(sessionControllerProvider);
+    expect(state.isTracking, isTrue);
+    expect(
+      state.permissionState,
+      LocationPermissionState.grantedForegroundOnly,
+    );
+    expect(state.errorMessage, contains('항상 허용'));
+
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: state.session!.startedAt,
+        latitude: 37.5665,
+        longitude: 126.978,
+        accuracyM: 6,
+      ),
+    ]);
+    state = container.read(sessionControllerProvider);
+    expect(state.errorMessage, contains('항상 허용'));
+    controller.clearError();
+    expect(
+      container.read(sessionControllerProvider).errorMessage,
+      contains('항상 허용'),
+    );
+  });
+
   test('unknown permission state does not create an active walk', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

@@ -77,4 +77,48 @@ void main() {
       expect(engine.openSystemSettingsCalls, 1);
     },
   );
+
+  testWidgets(
+    'foreground-only tracking exposes 설정 열기 without blocking the walk',
+    (tester) async {
+      late WalkRepository repo;
+      await tester.runAsync(() async {
+        repo = await openTestRepository();
+      });
+      addTearDown(() async {
+        await tester.runAsync(() => repo.close());
+      });
+
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.grantedForegroundOnly,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await tester.runAsync(() async {
+        await container.read(sessionControllerProvider.notifier).start();
+      });
+      expect(container.read(sessionControllerProvider).isTracking, isTrue);
+
+      await tester.pumpWidget(
+        UncontrolledProviderScope(
+          container: container,
+          child: const MaterialApp(home: HomeScreen()),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.text('설정 열기'), findsOneWidget);
+      expect(find.textContaining('항상 허용'), findsWidgets);
+      await tester.tap(find.text('설정 열기'));
+      await tester.pump();
+      expect(engine.openSystemSettingsCalls, 1);
+    },
+  );
 }

@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/platform/location/geolocator_location_engine.dart';
+import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/location_request_policy.dart';
 
 void main() {
@@ -41,6 +44,44 @@ void main() {
         supportsLocationManagerFallback: true,
       ),
       isFalse,
+    );
+  });
+
+  test('iOS background upgrade is best-effort after foreground grant', () {
+    expect(
+      GeolocatorLocationEngine.shouldRequestAlwaysLocation(
+        isApplePlatform: true,
+        permission: LocationPermissionState.granted,
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldRequestAlwaysLocation(
+        isApplePlatform: true,
+        permission: LocationPermissionState.denied,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldRequestAlwaysLocation(
+        isApplePlatform: false,
+        permission: LocationPermissionState.granted,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.stateAfterAlwaysPermission(
+        foregroundPermission: LocationPermissionState.granted,
+        alwaysGranted: false,
+      ),
+      LocationPermissionState.grantedForegroundOnly,
+    );
+    expect(
+      GeolocatorLocationEngine.stateAfterAlwaysPermission(
+        foregroundPermission: LocationPermissionState.granted,
+        alwaysGranted: true,
+      ),
+      LocationPermissionState.granted,
     );
   });
 
@@ -93,7 +134,7 @@ void main() {
     );
   });
 
-  test('fallback stream eventually reports a prolonged silent stall', () {
+  test('fallback stream re-arms after a prolonged GPS gap', () {
     final now = DateTime(2026, 8, 22, 12, 0);
 
     expect(
@@ -118,7 +159,7 @@ void main() {
         timeout: const Duration(seconds: 28),
         supportsLocationManagerFallback: true,
       ),
-      LocationStreamEndAction.report,
+      LocationStreamEndAction.recover,
     );
   });
 
@@ -208,6 +249,33 @@ void main() {
         usingLocationManagerFallback: false,
         isApplePlatform: false,
         terminalProviderError: true,
+      ),
+      isFalse,
+    );
+  });
+
+  test('provider error classification excludes transient timeouts', () {
+    expect(
+      GeolocatorLocationEngine.isTerminalProviderError(
+        const LocationServiceDisabledException(),
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.isTerminalProviderError(
+        const PermissionDeniedException('denied'),
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.isTerminalProviderError(
+        const PositionUpdateException('LOCATION_UPDATE_FAILURE'),
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.isTerminalProviderError(
+        TimeoutException('temporary GPS gap'),
       ),
       isFalse,
     );
