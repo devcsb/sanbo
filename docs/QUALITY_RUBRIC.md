@@ -43,6 +43,7 @@ bash scripts/run_quality_loop.sh             # 구조·analyze·전체 테스트
 bash scripts/run_quality_loop.sh --debug-apk
 bash scripts/run_quality_loop.sh --release-apk
 scripts/run_native_platform_tests.sh        # Android native unit + iOS simulator XCTest
+scripts/run_android_emulator_smoke.sh       # 실제 debug APK + Android emulator provider smoke
 ```
 
 APK 옵션은 로컬 release signing 설정과 빌드 시간을 전제로 한다. Flutter 명령이 생성하는
@@ -68,3 +69,9 @@ Remaining risks / next loop:
 unit test와 iOS simulator XCTest로 확인한다. 실제 GPS provider, 제조사 절전 정책,
 시스템 알림 전달은 검증하지 않으므로 이 스크립트의 성공만으로 실기기 매트릭스를
 통과 처리하지 않는다.
+
+`run_android_emulator_smoke.sh`는 연결된 Android 에뮬레이터에만 실행하며, 실제 debug
+APK를 설치한 뒤 Geolocator provider에 GPS를 주입해 세션 거리, SQLite 완료 저장,
+종료 후 provider 해제를 확인한다. `SANBO_ANDROID_CLEAR_DATA=1`을 지정한 경우에만
+해당 에뮬레이터의 산보 앱 데이터를 초기화한다. 에뮬레이터 결과는 물리 기기와
+제조사 절전 정책을 증명하지 않으므로 실기기 매트릭스 상태는 바꾸지 않는다.

@@ -71,6 +71,18 @@ scripts/run_native_platform_tests.sh
 통과하더라도 실제 GPS 수집, 백그라운드 FGS, 제조사 절전 정책과 시스템 알림 전달은
 검증하지 않으므로 아래 실기기 행의 상태를 바꾸지 않는다.
 
+Android 에뮬레이터에서 실제 APK와 provider 경로를 반복 확인하려면 다음 명령을
+사용한다.
+
+```bash
+scripts/run_android_emulator_smoke.sh
+```
+
+이 명령은 에뮬레이터에서 GPS 주입, 거리 누적, 완료 세션 저장과 종료 후 provider
+해제를 확인한다. 기본값은 앱 데이터를 보존하며, 깨끗한 intro부터 반복하려면
+`SANBO_ANDROID_CLEAR_DATA=1`을 명시한다. 에뮬레이터 결과는 아래 물리 기기 행의
+통과 판정으로 승격하지 않는다.
+
 | 확인 | 플랫폼 | 기기·OS | 권한 상태 | 기대 상태 | 관측 결과 | 통과/실패 |
 |------|--------|---------|-----------|-----------|-----------|-----------|
 | [ ] foreground warning without system banner | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 앱 전면에서 28.8km/h 누적 60초 뒤 고속 종료 확인만 보이고 시스템 배너는 없다 | 미기록 | 미판정 |
