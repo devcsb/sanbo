@@ -8,6 +8,27 @@ step() {
   printf '\n[native] %s\n' "$1"
 }
 
+if [[ ! -f "$ROOT/android/local.properties" ]]; then
+  android_sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+  [[ -n "$android_sdk" ]] || {
+    echo "ANDROID_SDK_ROOT or ANDROID_HOME is required to run Android native tests" >&2
+    exit 1
+  }
+
+  flutter_sdk="${FLUTTER_ROOT:-}"
+  if [[ -z "$flutter_sdk" ]]; then
+    flutter_bin="$(command -v flutter || true)"
+    [[ -n "$flutter_bin" ]] || {
+      echo "Flutter is required to run Android native tests" >&2
+      exit 1
+    }
+    flutter_sdk="$(cd "$(dirname "$flutter_bin")/.." && pwd)"
+  fi
+
+  printf 'sdk.dir=%s\nflutter.sdk=%s\n' "$android_sdk" "$flutter_sdk" \
+    > "$ROOT/android/local.properties"
+fi
+
 step "Android native unit tests"
 (
   cd android
