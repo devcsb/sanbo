@@ -392,10 +392,23 @@ class SessionGuard {
   }
 
   bool _observeStationary(LocationSample sample, DateTime receivedAt) {
+    // Recovery replays the persisted stream, including samples that the live
+    // filter deliberately kept only for audit. Such a point must not move the
+    // stationary anchor or create a false clear/restart event.
+    if (sample.isFilteredOut ||
+        !sample.latitude.isFinite ||
+        !sample.longitude.isFinite ||
+        sample.latitude < -90 ||
+        sample.latitude > 90 ||
+        sample.longitude < -180 ||
+        sample.longitude > 180) {
+      return false;
+    }
     final accuracy = sample.accuracyM;
     if (accuracy != null &&
-        accuracy.isFinite &&
-        accuracy > policy.maxUsableAccuracyM) {
+        (!accuracy.isFinite ||
+            accuracy < 0 ||
+            accuracy > policy.maxUsableAccuracyM)) {
       return false;
     }
 

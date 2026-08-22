@@ -12,6 +12,7 @@ void main() {
     double latitude = 37.5665,
     double speedMps = 0,
     double accuracyM = 6,
+    bool isFilteredOut = false,
   }) {
     return LocationSample(
       timestamp: at,
@@ -19,6 +20,7 @@ void main() {
       longitude: 126.9780,
       accuracyM: accuracyM,
       speedMps: speedMps,
+      isFilteredOut: isFilteredOut,
     );
   }
 
@@ -903,6 +905,23 @@ void main() {
       guard.evaluate(startedAt: start, now: observedAt).event,
       SessionGuardEvent.none,
     );
+  });
+
+  test('rebuild does not move the stationary anchor with a filtered fix', () {
+    final guard = SessionGuard();
+    final observedAt = start.add(const Duration(seconds: 20));
+    final samples = <LocationSample>[
+      sample(at: start),
+      sample(
+        at: observedAt,
+        latitude: 37.5675,
+        isFilteredOut: true,
+      ),
+    ];
+
+    guard.rebuildHighSpeedState(samples: samples, observedAt: observedAt);
+
+    expect(guard.stationarySince?.isAtSameMomentAs(observedAt), isTrue);
   });
 
   test(
