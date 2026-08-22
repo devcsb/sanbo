@@ -8,6 +8,8 @@ PACKAGE="${SANBO_ANDROID_PACKAGE:-com.sanbo.sanbo}"
 ACTIVITY="${SANBO_ANDROID_ACTIVITY:-$PACKAGE/.MainActivity}"
 DEVICE_ID="${SANBO_ANDROID_DEVICE_ID:-}"
 CLEAR_DATA="${SANBO_ANDROID_CLEAR_DATA:-0}"
+NOTIFICATION_PERMISSION="${SANBO_ANDROID_NOTIFICATION_PERMISSION:-grant}"
+SCREEN_OFF="${SANBO_ANDROID_SCREEN_OFF:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:-127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000100}"
@@ -163,17 +165,46 @@ if [[ "$CLEAR_DATA" == "1" ]]; then
 fi
 for permission in \
   android.permission.ACCESS_FINE_LOCATION \
-  android.permission.ACCESS_COARSE_LOCATION \
-  android.permission.POST_NOTIFICATIONS; do
+  android.permission.ACCESS_COARSE_LOCATION; do
   adb shell pm grant "$PACKAGE" "$permission" >/dev/null 2>&1 || true
 done
+case "$NOTIFICATION_PERMISSION" in
+  grant)
+    adb shell pm grant "$PACKAGE" android.permission.POST_NOTIFICATIONS \
+      >/dev/null 2>&1 || true
+    ;;
+  deny)
+    adb shell pm revoke "$PACKAGE" android.permission.POST_NOTIFICATIONS \
+      >/dev/null 2>&1 || true
+    ;;
+  *)
+    fail "SANBO_ANDROID_NOTIFICATION_PERMISSION은 grant 또는 deny여야 합니다: $NOTIFICATION_PERMISSION"
+    ;;
+esac
+case "$SCREEN_OFF" in
+  0|1) ;;
+  *) fail "SANBO_ANDROID_SCREEN_OFF는 0 또는 1이어야 합니다: $SCREEN_OFF" ;;
+esac
 adb shell am force-stop "$PACKAGE"
 adb shell am start -W -n "$ACTIVITY" >/dev/null
 
 step "앱 시작과 세션 진입"
 tap_desc '산보 시작하기' 8 || true
 tap_desc '산책 시작' 30 || fail '산책 시작 버튼을 찾지 못했습니다.'
+if [[ "$NOTIFICATION_PERMISSION" == "deny" ]]; then
+  # A clean emulator still shows Android's first-run notification dialog even
+  # when the permission was revoked through adb. Dismiss it to exercise the
+  # same post-denial recording path as a real user choice.
+  tap_desc 'Don’t allow' 5 ||
+    tap_desc "Don't allow" 5 ||
+    tap_desc '허용 안 함' 5 ||
+    tap_desc '알림 허용 안 함' 5 || true
+fi
 wait_desc '기록 중' 30 || fail '기록 상태로 전환되지 않았습니다.'
+if [[ "$SCREEN_OFF" == "1" ]]; then
+  adb shell input keyevent 26
+  sleep 2
+fi
 
 step "실제 Geolocator provider에 GPS 이동 주입"
 adb emu geo fix "$BASE_LON" "$BASE_LAT" >/dev/null
@@ -183,6 +214,10 @@ for index in 0 1 2 3 4; do
   adb emu geo fix "$longitude" "$BASE_LAT" >/dev/null
   sleep 9
 done
+if [[ "$SCREEN_OFF" == "1" ]]; then
+  adb shell input keyevent 26
+  sleep 2
+fi
 
 dump_ui
 metric="$(grep -Eo 'content-desc=\"시간[^\"]+\"' "$ui_xml" | head -n 1 | sed -E 's/^content-desc="(.*)"$/\1/')"

@@ -83,6 +83,11 @@ scripts/run_android_emulator_smoke.sh
 `SANBO_ANDROID_CLEAR_DATA=1`을 명시한다. 에뮬레이터 결과는 아래 물리 기기 행의
 통과 판정으로 승격하지 않는다.
 
+알림 권한 거부 경로는 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny`를 추가한다.
+기본값은 `grant`이며, 어느 모드에서도 위치 기록과 세션 저장 결과를 확인한다.
+화면을 끈 상태의 provider 지속성은 `SANBO_ANDROID_SCREEN_OFF=1`을 추가해
+에뮬레이터에서 반복할 수 있다.
+
 iOS simulator의 실제 Core Location 경로는 다음 명령으로 반복한다.
 
 ```bash
