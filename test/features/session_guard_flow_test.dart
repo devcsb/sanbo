@@ -27,6 +27,7 @@ class _FakeSessionNotifications implements SessionNotificationService {
   final completions = <String>[];
   int cancelCalls = 0;
   int cancelAllCalls = 0;
+  Completer<void>? cancelAllRelease;
   int tapDeliveries = 0;
   SessionNotificationTap? _pendingColdTap;
   late final _tapController =
@@ -42,6 +43,8 @@ class _FakeSessionNotifications implements SessionNotificationService {
   @override
   Future<void> cancelAllWarnings() async {
     cancelAllCalls++;
+    final release = cancelAllRelease;
+    if (release != null) await release.future;
   }
 
   @override
@@ -103,6 +106,49 @@ class _ThrowingSessionPipeline extends SessionPipeline {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('stop waits for warning cancellation before completing', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    final notifications = _FakeSessionNotifications();
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+        sessionNotificationServiceProvider.overrideWithValue(notifications),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final session = controller.state.session!;
+    controller.debugIngestSamples(
+      buildWalkTrace(
+        start: session.startedAt,
+        duration: const Duration(minutes: 1),
+        step: const Duration(seconds: 10),
+      ),
+    );
+    notifications.cancelAllRelease = Completer<void>();
+
+    var completed = false;
+    final stopping = controller.stop().whenComplete(() => completed = true);
+    for (var attempt = 0; attempt < 100; attempt++) {
+      if (notifications.cancelAllCalls > 0) break;
+      await Future<void>.delayed(const Duration(milliseconds: 1));
+    }
+    expect(notifications.cancelAllCalls, greaterThan(0));
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(completed, isFalse);
+
+    notifications.cancelAllRelease!.complete();
+    await stopping;
+    expect(completed, isTrue);
+  });
 
   test(
     'long stay warns, can continue, then auto-saves at the next limit',
@@ -1012,6 +1058,7 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, '기록 종료'));
       await tester.runAsync(() async {
         for (var attempt = 0; attempt < 100; attempt++) {
+          await tester.pump();
           if (fixture.router.routeInformationProvider.value.uri.path ==
               '/history/$sessionId') {
             return;

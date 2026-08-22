@@ -325,7 +325,21 @@ class SessionController extends Notifier<LiveSessionState> {
   Future<bool> _restoreActive() async {
     try {
       final active = await _repo.getActiveSession();
-      if (active == null) return true;
+      if (active == null) {
+        // A previous lookup may have failed after leaving a retryable error in
+        // state. A successful retry that finds no active row is a clean idle
+        // result and must release the start guard as well as old buffers.
+        _sessionSamples.clear();
+        _pendingPersist.clear();
+        _lastValidSample = null;
+        _liveDistanceM = 0;
+        _liveSpeedMps = 0;
+        _lastAccuracyM = null;
+        _validSampleCount = 0;
+        _sessionGuard.reset();
+        state = const LiveSessionState();
+        return true;
+      }
       final existing = await _repo.getSamples(active.id);
       _sessionSamples
         ..clear()
@@ -433,10 +447,16 @@ class SessionController extends Notifier<LiveSessionState> {
     unawaited(_evaluateSessionGuard(_clock()));
   }
 
-  void _cancelSessionGuard() {
+  Future<void> _cancelSessionGuard() async {
     _sessionGuard.reset();
     _highSpeedWarningPublished = false;
-    unawaited(_notifications.cancelAllWarnings());
+    try {
+      await _notifications.cancelAllWarnings().timeout(
+        const Duration(seconds: 2),
+      );
+    } catch (_) {
+      // Notification cleanup is best-effort and must not fail recovery.
+    }
   }
 
   Future<void> _runMaintenance() async {
@@ -489,6 +509,10 @@ class SessionController extends Notifier<LiveSessionState> {
     if (failureCleanup != null) {
       await failureCleanup;
     }
+    // A failed storage lookup is recoverable, not an invitation to create a
+    // second session. Keep the retry action as the only path until the active
+    // session can be read successfully.
+    if (state.canRetryRecovery) return;
     if (state.isBusy || state.isTracking) return;
     state = state.copyWith(
       isBusy: true,
@@ -689,7 +713,6 @@ class SessionController extends Notifier<LiveSessionState> {
     _locationStreamFailed = true;
     _endingSession = true;
     _sessionGeneration++;
-    _cancelSessionGuard();
     _ticker?.cancel();
     _ticker = null;
     _checkpointTimer?.cancel();
@@ -724,24 +747,28 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   Future<void> _cleanupAfterLocationStreamError() async {
-    final subscription = _sampleSub;
-    _sampleSub = null;
-    await subscription?.cancel();
     try {
-      await _engine.stop();
-    } catch (_) {
-      // The stream has already failed. Keep the recoverable state visible even
-      // if the platform adapter also rejects its cleanup call.
-    }
-    await _maintenanceQueue.close();
-    final session = state.session;
-    if (session == null || _pendingPersist.isEmpty) return;
-    final batch = List<LocationSample>.of(_pendingPersist);
-    _pendingPersist.clear();
-    try {
-      await _repo.insertSamples(session.id, batch);
-    } catch (_) {
-      _pendingPersist.insertAll(0, batch);
+      final subscription = _sampleSub;
+      _sampleSub = null;
+      await subscription?.cancel();
+      try {
+        await _engine.stop();
+      } catch (_) {
+        // The stream has already failed. Keep the recoverable state visible
+        // even if the platform adapter also rejects its cleanup call.
+      }
+      await _maintenanceQueue.close();
+      final session = state.session;
+      if (session == null || _pendingPersist.isEmpty) return;
+      final batch = List<LocationSample>.of(_pendingPersist);
+      _pendingPersist.clear();
+      try {
+        await _repo.insertSamples(session.id, batch);
+      } catch (_) {
+        _pendingPersist.insertAll(0, batch);
+      }
+    } finally {
+      await _cancelSessionGuard();
     }
   }
 
@@ -1138,7 +1165,6 @@ class SessionController extends Notifier<LiveSessionState> {
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       await _maintenanceQueue.close();
-      _cancelSessionGuard();
       _ticker?.cancel();
       _checkpointTimer?.cancel();
       _firstFixTimer?.cancel();
@@ -1308,6 +1334,8 @@ class SessionController extends Notifier<LiveSessionState> {
         statusMessage: '기록은 기기에 남아 있습니다.',
       );
       return null;
+    } finally {
+      await _cancelSessionGuard();
     }
   }
 
@@ -1319,7 +1347,6 @@ class SessionController extends Notifier<LiveSessionState> {
     state = state.copyWith(isBusy: true);
     try {
       await _maintenanceQueue.close();
-      _cancelSessionGuard();
       _ticker?.cancel();
       _checkpointTimer?.cancel();
       _firstFixTimer?.cancel();
@@ -1346,6 +1373,8 @@ class SessionController extends Notifier<LiveSessionState> {
         isBusy: false,
         errorMessage: '삭제에 실패했습니다. 다시 시도해 주세요.',
       );
+    } finally {
+      await _cancelSessionGuard();
     }
   }
 

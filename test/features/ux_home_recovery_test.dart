@@ -153,6 +153,67 @@ void main() {
     expect(container.read(sessionControllerProvider).canRetryRecovery, isTrue);
   });
 
+  test('start never creates a new walk while recovery is retryable', () async {
+    final repo = await openTestRepository();
+    await repo.close();
+    addTearDown(() async {
+      try {
+        await repo.close();
+      } catch (_) {}
+    });
+
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+    expect(controller.state.canRetryRecovery, isTrue);
+
+    await controller.start();
+
+    expect(controller.state.canRetryRecovery, isTrue);
+    expect(controller.state.isTracking, isFalse);
+    expect(controller.state.session, isNull);
+  });
+
+  test('successful recovery with no active session clears retry state', () async {
+    ensureSqfliteFfi();
+    final db = await openAppDatabase(
+      path:
+          '${Directory.systemTemp.path}/sanbo_recovery_no_active_${DateTime.now().microsecondsSinceEpoch}.db',
+    );
+    final repo = _FlakyActiveSessionRepository(db);
+    addTearDown(repo.close);
+
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+    expect(controller.state.canRetryRecovery, isTrue);
+
+    await controller.retryRecovery();
+
+    expect(controller.state.canRetryRecovery, isFalse);
+    expect(controller.state.errorMessage, isNull);
+    await controller.start();
+    expect(controller.state.isTracking, isTrue);
+  });
+
   test('cold notification tap survives a retryable recovery failure', () async {
     ensureSqfliteFfi();
     final db = await openAppDatabase(
