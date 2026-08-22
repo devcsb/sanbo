@@ -31,6 +31,8 @@ class GeolocatorLocationEngine implements LocationEngine {
   bool _usingLocationManagerFallback = false;
   bool _streamRecoveryInFlight = false;
   Timer? _stallWatchdog;
+  DateTime? _lastEmitAt;
+  int _streamGeneration = 0;
   int _emitCount = 0;
 
   static const _logName = 'sanbo.location';
@@ -65,6 +67,40 @@ class GeolocatorLocationEngine implements LocationEngine {
     }
     return LocationStreamEndAction.report;
   }
+
+  @visibleForTesting
+  static LocationStreamEndAction stalledStreamAction({
+    required bool running,
+    required bool usingLocationManagerFallback,
+    required bool recoveryInFlight,
+    required DateTime? lastEmitAt,
+    required DateTime now,
+    required Duration timeout,
+    required bool supportsLocationManagerFallback,
+  }) {
+    if (!running || recoveryInFlight || !supportsLocationManagerFallback) {
+      return LocationStreamEndAction.ignore;
+    }
+    if (lastEmitAt != null && now.difference(lastEmitAt) < timeout) {
+      return LocationStreamEndAction.ignore;
+    }
+    // A missing fix is a normal GPS gap, especially in tunnels and on iOS.
+    // Only the fused provider can be switched to the Android fallback here;
+    // the fallback itself remains alive until its stream reports onDone/error.
+    if (usingLocationManagerFallback) return LocationStreamEndAction.ignore;
+    return endedStreamAction(
+      running: running,
+      usingLocationManagerFallback: usingLocationManagerFallback,
+      recoveryInFlight: recoveryInFlight,
+      supportsLocationManagerFallback: supportsLocationManagerFallback,
+    );
+  }
+
+  @visibleForTesting
+  static bool shouldHandleStreamEvent({
+    required int currentGeneration,
+    required int eventGeneration,
+  }) => currentGeneration == eventGeneration;
 
   @override
   Stream<LocationSample> get samples => _controller.stream;
@@ -127,6 +163,8 @@ class GeolocatorLocationEngine implements LocationEngine {
 
   Duration get _interval => _profile.interval;
 
+  Duration get _stallTimeout => _interval + const Duration(seconds: 8);
+
   int get _distanceFilterM => _profile.distanceFilterM;
 
   bool get _keepCpuAwake => _profile.keepCpuAwake;
@@ -137,6 +175,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     _running = true;
     _usingLocationManagerFallback = false;
     _streamRecoveryInFlight = false;
+    _lastEmitAt = null;
     _emitCount = 0;
 
     final perm = await Geolocator.checkPermission();
@@ -192,11 +231,13 @@ class GeolocatorLocationEngine implements LocationEngine {
   Future<void> _startStream({required bool forceLocationManager}) async {
     // Mark the fallback before creating its stream. Android can report onDone
     // immediately, and that callback must terminate instead of retrying fused.
+    final generation = ++_streamGeneration;
     if (forceLocationManager) {
       _usingLocationManagerFallback = true;
     }
     await _sub?.cancel();
     _sub = null;
+    _lastEmitAt = null;
 
     final LocationSettings locationSettings;
     if (Platform.isAndroid) {
@@ -237,10 +278,22 @@ class GeolocatorLocationEngine implements LocationEngine {
     final ready = Completer<void>();
     _sub = stream.listen(
       (pos) {
+        if (!shouldHandleStreamEvent(
+          currentGeneration: _streamGeneration,
+          eventGeneration: generation,
+        )) {
+          return;
+        }
         if (!ready.isCompleted) ready.complete();
         _emitPosition(pos);
       },
       onError: (Object e, StackTrace st) {
+        if (!shouldHandleStreamEvent(
+          currentGeneration: _streamGeneration,
+          eventGeneration: generation,
+        )) {
+          return;
+        }
         developer.log(
           'Position stream error',
           name: _logName,
@@ -255,6 +308,12 @@ class GeolocatorLocationEngine implements LocationEngine {
         }
       },
       onDone: () {
+        if (!shouldHandleStreamEvent(
+          currentGeneration: _streamGeneration,
+          eventGeneration: generation,
+        )) {
+          return;
+        }
         developer.log('Position stream done', name: _logName);
         _handleStreamDone();
       },
@@ -325,27 +384,31 @@ class GeolocatorLocationEngine implements LocationEngine {
 
   void _armStallWatchdog() {
     _stallWatchdog?.cancel();
-    // If nothing arrives in 12s, try LocationManager fallback once.
-    _stallWatchdog = Timer(const Duration(seconds: 12), () async {
-      if (!_running || _emitCount > 0 || _usingLocationManagerFallback) return;
-      if (!Platform.isAndroid) return;
-      developer.log(
-        'No GPS fix in 12s — switching to LocationManager fallback',
-        name: _logName,
+    if (!Platform.isAndroid) return;
+    _stallWatchdog = Timer.periodic(_stallTimeout, (_) {
+      final action = stalledStreamAction(
+        running: _running,
+        usingLocationManagerFallback: _usingLocationManagerFallback,
+        recoveryInFlight: _streamRecoveryInFlight,
+        lastEmitAt: _lastEmitAt,
+        now: DateTime.now(),
+        timeout: _stallTimeout,
+        supportsLocationManagerFallback: Platform.isAndroid,
       );
-      try {
-        await _startStream(forceLocationManager: true);
-        unawaited(_emitCurrentPosition(retries: 2, forceLocationManager: true));
-      } catch (e, st) {
-        developer.log(
-          'Fallback stream failed',
-          name: _logName,
-          error: e,
-          stackTrace: st,
-        );
-        if (!_controller.isClosed) {
-          _controller.addError(StateError('location_timeout_no_fix'), st);
-        }
+      switch (action) {
+        case LocationStreamEndAction.ignore:
+          return;
+        case LocationStreamEndAction.recover:
+          developer.log(
+            'Location stream stalled — switching to LocationManager fallback',
+            name: _logName,
+          );
+          _streamRecoveryInFlight = true;
+          unawaited(_recoverEndedStream());
+          return;
+        case LocationStreamEndAction.report:
+          developer.log('Location stream stalled', name: _logName);
+          _reportEndedStream();
       }
     });
   }
@@ -423,6 +486,7 @@ class GeolocatorLocationEngine implements LocationEngine {
         : null;
     final speed = pos.speed.isFinite && pos.speed >= 0 ? pos.speed : null;
     final altitude = pos.altitude.isFinite ? pos.altitude : null;
+    _lastEmitAt = DateTime.now();
     _emitCount++;
     if (kDebugMode && _emitCount <= 3) {
       developer.log(
@@ -447,6 +511,8 @@ class GeolocatorLocationEngine implements LocationEngine {
     _stallWatchdog?.cancel();
     _stallWatchdog = null;
     _running = false;
+    ++_streamGeneration;
+    _lastEmitAt = null;
     await _sub?.cancel();
     _sub = null;
   }

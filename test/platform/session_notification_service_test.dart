@@ -36,10 +36,15 @@ void main() {
     );
     await service.cancel(kind: SessionWarningKind.highSpeed);
 
-    final notificationCalls = calls.where((call) => call.method != 'ready').toList();
+    final notificationCalls = calls
+        .where((call) => call.method != 'ready')
+        .toList();
     expect(notificationCalls[0].arguments, containsPair('kind', 'highSpeed'));
     expect(notificationCalls[0].arguments, containsPair('id', 4103));
-    expect(notificationCalls[0].arguments, containsPair('sessionId', 'session-1'));
+    expect(
+      notificationCalls[0].arguments,
+      containsPair('sessionId', 'session-1'),
+    );
     expect(notificationCalls[1].arguments, containsPair('id', 4103));
   });
 
@@ -173,5 +178,21 @@ void main() {
       ),
     );
     await service.cancel(kind: SessionWarningKind.highSpeed);
+  });
+
+  test('generic native channel failures remain nonfatal', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          throw StateError('native channel unavailable');
+        });
+    final service = PlatformSessionNotificationService();
+
+    await service.initialize();
+    expect(
+      await service.requestPermission(),
+      NotificationPermissionResult.failed,
+    );
+    await service.showCompletion(title: '제목', body: '내용');
+    await service.cancelAllWarnings();
   });
 }

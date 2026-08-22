@@ -44,6 +44,89 @@ void main() {
     );
   });
 
+  test(
+    'stalled stream waits for the mode-specific timeout before recovery',
+    () {
+      final now = DateTime(2026, 8, 22, 12, 0);
+
+      expect(
+        GeolocatorLocationEngine.stalledStreamAction(
+          running: true,
+          usingLocationManagerFallback: false,
+          recoveryInFlight: false,
+          lastEmitAt: now.subtract(const Duration(seconds: 15)),
+          now: now,
+          timeout: const Duration(seconds: 16),
+          supportsLocationManagerFallback: true,
+        ),
+        LocationStreamEndAction.ignore,
+      );
+      expect(
+        GeolocatorLocationEngine.stalledStreamAction(
+          running: true,
+          usingLocationManagerFallback: false,
+          recoveryInFlight: false,
+          lastEmitAt: now.subtract(const Duration(seconds: 16)),
+          now: now,
+          timeout: const Duration(seconds: 16),
+          supportsLocationManagerFallback: true,
+        ),
+        LocationStreamEndAction.recover,
+      );
+    },
+  );
+
+  test('stalled fallback stream stays alive during a GPS gap', () {
+    final now = DateTime(2026, 8, 22, 12, 0);
+
+    expect(
+      GeolocatorLocationEngine.stalledStreamAction(
+        running: true,
+        usingLocationManagerFallback: true,
+        recoveryInFlight: false,
+        lastEmitAt: now.subtract(const Duration(seconds: 28)),
+        now: now,
+        timeout: const Duration(seconds: 28),
+        supportsLocationManagerFallback: true,
+      ),
+      LocationStreamEndAction.ignore,
+    );
+  });
+
+  test('stalled watchdog stays disabled on platforms without a fallback', () {
+    final now = DateTime(2026, 8, 22, 12, 0);
+
+    expect(
+      GeolocatorLocationEngine.stalledStreamAction(
+        running: true,
+        usingLocationManagerFallback: false,
+        recoveryInFlight: false,
+        lastEmitAt: now.subtract(const Duration(seconds: 30)),
+        now: now,
+        timeout: const Duration(seconds: 16),
+        supportsLocationManagerFallback: false,
+      ),
+      LocationStreamEndAction.ignore,
+    );
+  });
+
+  test('stale stream events are ignored after a new stream is armed', () {
+    expect(
+      GeolocatorLocationEngine.shouldHandleStreamEvent(
+        currentGeneration: 2,
+        eventGeneration: 1,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldHandleStreamEvent(
+        currentGeneration: 2,
+        eventGeneration: 2,
+      ),
+      isTrue,
+    );
+  });
+
   test('tracking modes map to deliberate battery request profiles', () {
     final saver = locationRequestProfile(TrackingMode.batterySaver);
     expect(saver.accuracy, LocationAccuracy.medium);

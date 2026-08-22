@@ -430,7 +430,7 @@ void main() {
       final guard = SessionGuard();
       guard.observe(movingFix(start, 0), observedAt: start);
       guard.observe(
-        movingFix(start.add(const Duration(seconds: 10)), 80, accuracy: 81),
+        movingFix(start.add(const Duration(seconds: 10)), 80, accuracy: 151),
         observedAt: start.add(const Duration(seconds: 10)),
       );
       guard.observe(
@@ -469,6 +469,84 @@ void main() {
       );
     },
   );
+
+  test('sustained vehicle-scale movement with soft accuracy still warns', () {
+    final guard = SessionGuard();
+    for (var second = 0; second <= 60; second += 10) {
+      guard.observe(
+        movingFix(
+          start.add(Duration(seconds: second)),
+          second * 8.0,
+          accuracy: 100,
+        ),
+        observedAt: start.add(Duration(seconds: second)),
+      );
+    }
+
+    expect(
+      guard
+          .evaluate(
+            startedAt: start,
+            now: start.add(const Duration(seconds: 60)),
+          )
+          .event,
+      SessionGuardEvent.highSpeedWarning,
+    );
+  });
+
+  test('soft-accuracy GPS jitter does not create a vehicle warning', () {
+    final guard = SessionGuard();
+    for (var second = 0; second <= 60; second += 10) {
+      final meters = (second ~/ 10).isEven ? 0.0 : 80.0;
+      guard.observe(
+        movingFix(start.add(Duration(seconds: second)), meters, accuracy: 100),
+        observedAt: start.add(Duration(seconds: second)),
+      );
+    }
+
+    expect(
+      guard
+          .evaluate(
+            startedAt: start,
+            now: start.add(const Duration(seconds: 60)),
+          )
+          .event,
+      SessionGuardEvent.none,
+    );
+  });
+
+  test('soft-accuracy evidence restarts after a low-speed recovery window', () {
+    final guard = warnedGuard(start);
+    for (var second = 70; second <= 90; second += 10) {
+      guard.observe(
+        movingFix(
+          start.add(Duration(seconds: second)),
+          480 + (second - 60) * 2.0,
+          accuracy: 100,
+        ),
+        observedAt: start.add(Duration(seconds: second)),
+      );
+    }
+    expect(guard.highSpeedArmed, isTrue);
+
+    for (var second = 110; second <= 170; second += 10) {
+      final meters = (second ~/ 10).isEven ? 1000.0 : 1080.0;
+      guard.observe(
+        movingFix(start.add(Duration(seconds: second)), meters, accuracy: 100),
+        observedAt: start.add(Duration(seconds: second)),
+      );
+    }
+
+    expect(
+      guard
+          .evaluate(
+            startedAt: start,
+            now: start.add(const Duration(seconds: 170)),
+          )
+          .event,
+      SessionGuardEvent.none,
+    );
+  });
 
   test(
     'rejects future fixes and observedAt regressions for high-speed state',
@@ -592,7 +670,7 @@ void main() {
             sample: movingFix(
               start.add(const Duration(seconds: 91)),
               581,
-              accuracy: 81,
+              accuracy: 151,
             ),
             observedAt: start.add(const Duration(seconds: 91)),
             nextAt: start.add(const Duration(seconds: 100)),
@@ -777,7 +855,7 @@ void main() {
     final samples = <LocationSample>[
       for (var second = 0; second <= 60; second += 10)
         movingFix(start.add(Duration(seconds: second)), second * 8.0),
-      movingFix(observedAt, 560, accuracy: 100),
+      movingFix(observedAt, 560, accuracy: 151),
     ];
 
     guard.rebuildHighSpeedState(samples: samples, observedAt: observedAt);
@@ -794,7 +872,7 @@ void main() {
     final samples = <LocationSample>[
       for (var second = 0; second <= 60; second += 10)
         movingFix(start.add(Duration(seconds: second)), second * 8.0),
-      movingFix(observedAt.add(const Duration(seconds: 5)), 560, accuracy: 100),
+      movingFix(observedAt.add(const Duration(seconds: 5)), 560, accuracy: 151),
     ];
 
     guard.rebuildHighSpeedState(samples: samples, observedAt: observedAt);

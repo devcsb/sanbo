@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/services.dart';
 
 const defaultSessionTimezone = 'Asia/Seoul';
@@ -12,7 +14,7 @@ Future<String> currentSessionTimezone() async {
   try {
     final timezone = await const MethodChannel(
       'sanbo/session_notifications',
-    ).invokeMethod<String>('getTimezone');
+    ).invokeMethod<String>('getTimezone').timeout(const Duration(seconds: 2));
     if (timezone != null && _looksLikeIanaTimezone(timezone)) {
       return timezone;
     }
@@ -20,6 +22,13 @@ Future<String> currentSessionTimezone() async {
     // Desktop, web, and widget tests do not install the native channel.
   } on PlatformException {
     // A timezone lookup must never prevent a walk from starting.
+  } catch (e, st) {
+    developer.log(
+      'Timezone channel lookup failed',
+      name: 'sanbo.session_timezone',
+      error: e,
+      stackTrace: st,
+    );
   }
   return defaultSessionTimezone;
 }

@@ -27,7 +27,10 @@ class SessionGuardPolicy {
     this.highSpeedWarningAfter = const Duration(seconds: 60),
     this.lowSpeedRecoveryMps = 4.0,
     this.lowSpeedRecoveryAfter = const Duration(seconds: 30),
-    this.highSpeedMaxAccuracyM = 80,
+    // Sustained vehicle-scale movement remains actionable with the same
+    // soft accuracy ceiling used by the route filter. Stationary detection
+    // keeps its stricter 80 m ceiling separately.
+    this.highSpeedMaxAccuracyM = 150,
     this.maxSampleAge = const Duration(seconds: 30),
     this.maxSampleFutureSkew = const Duration(seconds: 5),
   });
@@ -87,6 +90,7 @@ class SessionGuard {
   final SessionGuardPolicy policy;
 
   final _speedSpans = ListQueue<_TrustedSpeedSpan>();
+  final _highSpeedSamples = ListQueue<LocationSample>();
   LocationSample? _anchor;
   LocationSample? _lastUsableSample;
   LocationSample? _lastHighSpeedSample;
@@ -98,6 +102,7 @@ class SessionGuard {
   bool _durationWarningIssued = false;
   bool _highSpeedWarningIssued = false;
   bool _highSpeedPending = false;
+  bool _highSpeedUsesSoftAccuracy = false;
 
   DateTime? get stationarySince => _stationarySince;
   bool get stationaryWarningIssued => _stationaryWarningIssued;
@@ -105,6 +110,7 @@ class SessionGuard {
 
   void reset() {
     _speedSpans.clear();
+    _highSpeedSamples.clear();
     _anchor = null;
     _lastUsableSample = null;
     _lastHighSpeedSample = null;
@@ -116,6 +122,7 @@ class SessionGuard {
     _durationWarningIssued = false;
     _highSpeedWarningIssued = false;
     _highSpeedPending = false;
+    _highSpeedUsesSoftAccuracy = false;
   }
 
   /// [observedAt] is the app receipt time, not a possibly cached platform time.
@@ -220,6 +227,9 @@ class SessionGuard {
   void _observeHighSpeed(LocationSample sample, DateTime observedAt) {
     final previous = _lastHighSpeedSample;
     if (previous == null) {
+      _highSpeedSamples.add(sample);
+      _highSpeedUsesSoftAccuracy =
+          (sample.accuracyM ?? 0) > policy.maxUsableAccuracyM;
       _lastHighSpeedSample = sample;
       return;
     }
@@ -232,6 +242,10 @@ class SessionGuard {
       return;
     }
     _lastHighSpeedSample = sample;
+    _highSpeedSamples.add(sample);
+    _highSpeedUsesSoftAccuracy =
+        _highSpeedUsesSoftAccuracy ||
+        (sample.accuracyM ?? 0) > policy.maxUsableAccuracyM;
 
     final distance = haversineMeters(
       lat1: previous.latitude,
@@ -250,7 +264,11 @@ class SessionGuard {
       _TrustedSpeedSpan(startAt: startAt, endAt: endAt, speedMps: speed),
     );
     _trimHighSpeedWindow(observedAt);
+    final lowAccuracyEvidence =
+        !_highSpeedUsesSoftAccuracy ||
+        _netHighSpeedDisplacementM() >= _minimumSoftAccuracyDisplacementM;
     if (!_highSpeedWarningIssued &&
+        lowAccuracyEvidence &&
         _highSpeedDuration(observedAt) >= policy.highSpeedWarningAfter) {
       _highSpeedWarningIssued = true;
       _highSpeedPending = true;
@@ -261,11 +279,35 @@ class SessionGuard {
     }
   }
 
+  double get _minimumSoftAccuracyDisplacementM => math.max(
+    200,
+    policy.highSpeedThresholdMps *
+        policy.highSpeedWarningAfter.inMilliseconds /
+        Duration.millisecondsPerSecond *
+        0.4,
+  );
+
+  double _netHighSpeedDisplacementM() {
+    final origin = _highSpeedSamples.isEmpty ? null : _highSpeedSamples.first;
+    final latest = _highSpeedSamples.isEmpty ? null : _highSpeedSamples.last;
+    if (origin == null || latest == null) return 0;
+    return haversineMeters(
+      lat1: origin.latitude,
+      lon1: origin.longitude,
+      lat2: latest.latitude,
+      lon2: latest.longitude,
+    );
+  }
+
   void _trimHighSpeedWindow(DateTime observedAt) {
     final windowStart = observedAt.subtract(policy.highSpeedWindow);
     while (_speedSpans.isNotEmpty &&
         !_speedSpans.first.endAt.isAfter(windowStart)) {
       _speedSpans.removeFirst();
+    }
+    while (_highSpeedSamples.isNotEmpty &&
+        !_highSpeedSamples.first.timestamp.toUtc().isAfter(windowStart)) {
+      _highSpeedSamples.removeFirst();
     }
   }
 
@@ -296,17 +338,21 @@ class SessionGuard {
     _lowSpeedSince = recoveryStart;
     if (endAt.difference(recoveryStart) >= policy.lowSpeedRecoveryAfter) {
       _speedSpans.clear();
+      _highSpeedSamples.clear();
       _lowSpeedSince = null;
       _highSpeedWarningIssued = false;
       _highSpeedPending = false;
       _highSpeedPendingAt = null;
+      _highSpeedUsesSoftAccuracy = false;
     }
   }
 
   void _interruptHighSpeedContinuity() {
     _speedSpans.clear();
+    _highSpeedSamples.clear();
     _lastHighSpeedSample = null;
     _lowSpeedSince = null;
+    _highSpeedUsesSoftAccuracy = false;
   }
 
   bool _observeStationary(LocationSample sample, DateTime receivedAt) {

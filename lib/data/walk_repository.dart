@@ -51,17 +51,55 @@ class WalkRepository {
 
   Future<List<WalkSession>> listCompleted({int? limit, int offset = 0}) async {
     if (limit != null && limit <= 0) return const [];
+    if (offset < 0) {
+      throw ArgumentError.value(offset, 'offset', 'must not be negative');
+    }
+
+    // Current rows use fixed-width UTC ISO-8601 strings, so SQLite can page
+    // them with its index. Keep the compatibility sort below if any row uses
+    // an offset, offsetless value, malformed value, or variable precision.
+    final legacyRows = await _db.rawQuery(
+      '''
+SELECT 1
+FROM sessions
+WHERE status = ?
+  AND NOT (started_at GLOB ?)
+LIMIT 1
+''',
+      [
+        SessionStatus.completed.name,
+        '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T'
+            '[0-9][0-9]:[0-9][0-9]:[0-9][0-9][.]'
+            '[0-9][0-9][0-9][0-9][0-9][0-9]Z',
+      ],
+    );
+    if (legacyRows.isEmpty) {
+      final rows = await _db.query(
+        'sessions',
+        where: 'status = ?',
+        whereArgs: [SessionStatus.completed.name],
+        orderBy: 'started_at DESC, id DESC',
+        limit: limit,
+        offset: offset,
+      );
+      return rows.map(_sessionFromRow).toList();
+    }
+
     final rows = await _db.query(
       'sessions',
       where: "status = ?",
       whereArgs: [SessionStatus.completed.name],
-      // The id tie-breaker keeps offset pagination deterministic when users
-      // finish multiple walks in the same timestamp bucket.
-      orderBy: 'started_at DESC, id DESC',
-      limit: limit,
-      offset: offset,
     );
-    return rows.map(_sessionFromRow).toList();
+    final sessions = rows.map(_sessionFromRow).toList()
+      ..sort((a, b) {
+        final byStarted = b.startedAt.toUtc().compareTo(a.startedAt.toUtc());
+        return byStarted != 0 ? byStarted : b.id.compareTo(a.id);
+      });
+    if (offset >= sessions.length) return const [];
+    final end = limit == null
+        ? sessions.length
+        : math.min(offset + limit, sessions.length);
+    return sessions.sublist(offset, end);
   }
 
   /// Computes history summary in SQLite without loading every session into
@@ -380,11 +418,14 @@ WHERE status = ?
       'route_exclusions',
       where: 'session_id = ?',
       whereArgs: [sessionId],
-      orderBy: 'start_at ASC, id ASC',
     );
-    return rows
+    final exclusions = rows
         .map((row) => _exclusionFromRow(row, timezone: timezone))
-        .toList(growable: false);
+        .toList();
+    return exclusions..sort((a, b) {
+      final byStart = a.startAt.compareTo(b.startAt);
+      return byStart != 0 ? byStart : a.id.compareTo(b.id);
+    });
   }
 
   /// Saves one user-selected route exclusion and every derived aggregate in
@@ -550,11 +591,14 @@ SELECT w.*,
 FROM minute_windows AS w
 LEFT JOIN places AS p ON p.id = w.place_id
 WHERE w.session_id = ?
-ORDER BY w.window_start ASC
 ''',
       [sessionId],
     );
-    return rows.map((row) => _windowFromRow(row, timezone: timezone)).toList();
+    final windows = rows
+        .map((row) => _windowFromRow(row, timezone: timezone))
+        .toList();
+    windows.sort((a, b) => a.windowStart.compareTo(b.windowStart));
+    return windows;
   }
 
   Future<_RouteEditSnapshot> _loadRouteEditSnapshot(
@@ -592,10 +636,13 @@ ORDER BY w.window_start ASC
               'route_exclusions',
               where: 'session_id = ?',
               whereArgs: [sessionId],
-              orderBy: 'start_at ASC, id ASC',
             ))
             .map((row) => _exclusionFromRow(row, timezone: session.timezone))
-            .toList(growable: false);
+            .toList()
+          ..sort((a, b) {
+            final byStart = a.startAt.compareTo(b.startAt);
+            return byStart != 0 ? byStart : a.id.compareTo(b.id);
+          });
     return _RouteEditSnapshot(
       session: session,
       samples: samples,
@@ -1576,8 +1623,8 @@ ORDER BY w.window_start ASC
     }
     return {
       'id': id,
-      'started_at': startedAt.toIso8601String(),
-      'ended_at': endedAt.toIso8601String(),
+      'started_at': _canonicalUtcInstant(startedAt),
+      'ended_at': _canonicalUtcInstant(endedAt),
       'status': status,
       'tracking_mode': trackingMode,
       'timezone': timezone,
@@ -1760,12 +1807,21 @@ ORDER BY w.window_start ASC
     return floored.toIso8601String();
   }
 
+  String _canonicalUtcInstant(DateTime value) {
+    final iso = value.toUtc().toIso8601String();
+    final match = RegExp(
+      r'^(.*T\d{2}:\d{2}:\d{2})\.(\d{3,6})Z$',
+    ).firstMatch(iso);
+    if (match == null) return iso;
+    return '${match.group(1)}.${match.group(2)!.padRight(6, '0')}Z';
+  }
+
   // ── mapping ────────────────────────────────────────────────────
 
   Map<String, Object?> _sessionToRow(WalkSession s) => {
     'id': s.id,
-    'started_at': s.startedAt.toUtc().toIso8601String(),
-    'ended_at': s.endedAt?.toUtc().toIso8601String(),
+    'started_at': _canonicalUtcInstant(s.startedAt),
+    'ended_at': s.endedAt == null ? null : _canonicalUtcInstant(s.endedAt!),
     'status': s.status.name,
     'tracking_mode': s.trackingMode.name,
     'timezone': s.timezone,

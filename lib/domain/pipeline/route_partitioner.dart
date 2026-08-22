@@ -15,8 +15,7 @@ class RouteSegment {
 
   Duration get duration => end.timestamp.difference(start.timestamp);
   double get speedMps =>
-      distanceM /
-      (duration.inMicroseconds / Duration.microsecondsPerSecond);
+      distanceM / (duration.inMicroseconds / Duration.microsecondsPerSecond);
 }
 
 class RouteFragment {
@@ -42,8 +41,20 @@ abstract final class RoutePartitioner {
     required List<LocationSample> samples,
     required List<RouteExclusion> exclusions,
     Duration maxGap = trustedLocationGap,
+    DateTime? sessionStart,
+    DateTime? sessionEnd,
   }) {
-    final orderedSamples = [...samples]
+    final startUtc = sessionStart?.toUtc();
+    final endUtc = sessionEnd?.toUtc();
+    if (startUtc != null && endUtc != null && startUtc.isAfter(endUtc)) {
+      throw ArgumentError('세션 시작은 종료보다 빨라야 합니다');
+    }
+    final boundedSamples = samples.where((sample) {
+      final timestamp = sample.timestamp.toUtc();
+      return (startUtc == null || !timestamp.isBefore(startUtc)) &&
+          (endUtc == null || !timestamp.isAfter(endUtc));
+    });
+    final orderedSamples = [...boundedSamples]
       ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     final orderedExclusions = [...exclusions]
       ..sort((a, b) => a.startAt.compareTo(b.startAt));
@@ -93,8 +104,7 @@ abstract final class RoutePartitioner {
         lon2: sample.longitude,
       );
       final speed =
-          distance /
-          (duration.inMicroseconds / Duration.microsecondsPerSecond);
+          distance / (duration.inMicroseconds / Duration.microsecondsPerSecond);
       final connect =
           duration > Duration.zero &&
           duration <= maxGap &&

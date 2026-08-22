@@ -13,7 +13,8 @@
 ## Global Constraints
 
 - 고속 기준은 `8.0 m/s`, 판단 창은 `120초`, 경고 누적은 `60초`, 저속 회복 기준은 `4.0 m/s`, 재활성화는 연속 `30초`로 고정한다.
-- 고속 판단 최대 수평 정확도는 `80m`, 오래된 receipt 허용치는 `30초`, 미래 허용치는 `5초`, 인접 위치 공백은 기존 `trustedLocationGap`을 사용한다.
+- 고속 판단 최대 수평 정확도는 `150m`, 정지 판단 정확도 기준은 `80m`, 오래된 receipt 허용치는 `30초`, 미래 허용치는 `5초`, 인접 위치 공백은 기존 `trustedLocationGap`을 사용한다.
+- 80m 초과 정확도 샘플이 포함된 고속 구간은 순이동량 `200m` 이상을 추가로 요구해 GPS 왕복 흔들림을 경고로 오인하지 않는다.
 - 고속 이동만으로 기록을 자동 종료하지 않으며, 기존 정지 `20분` 경고와 `30분` 종료, 전체 `4시간 45분` 경고와 `5시간` 종료를 변경하지 않는다.
 - 사용자 제외 범위는 `[startAt, endAt)` 반개구간이며, 세션 경계로 clamp하고 절대 시각으로 비교한 뒤 UTC ISO 8601 문자열로 저장한다.
 - `location_samples`에는 `user_exclusion_id`를 추가하지 않고, 저장된 `is_filtered_out` 값과 행을 제외 및 복원 과정에서 변경하지 않는다.
@@ -1588,7 +1589,7 @@
 
   `_highSpeedDuration` intersects every span with `[observedAt - highSpeedWindow, observedAt]` and sums only speeds `>= 8.0`. `_updateLowSpeedRecovery` starts at a trustworthy span start when speed `<= 4.0`, rearms after 30 seconds, and clears the recovery start for speed above 4.0 or any gap. Rearming clears old spans and `_highSpeedPending`; dismissing only clears `_highSpeedPending`, never `_highSpeedWarningIssued`.
 
-  `observe` rejects an `observedAt` older than `_lastObservedAt`, and only feeds high-speed state when both accuracy values are finite, non-negative, at most 80m, the sample is not filtered, coordinates are valid, and `_freshAtReceipt` is true. It still retains current stationary behavior for a fresh usable fix. Return `SessionGuardObservation` instead of bool.
+  `observe` rejects an `observedAt` older than `_lastObservedAt`, and only feeds high-speed state when both accuracy values are finite, non-negative, at most 150m, the sample is not filtered, coordinates are valid, and `_freshAtReceipt` is true. It still retains current stationary behavior for a fresh usable fix. Return `SessionGuardObservation` instead of bool.
 
   Update the two existing tests that assign `final cleared = guard.observe(...)` to read `guard.observe(...).clearedStationaryWarning`; all other existing callers that ignore the return value remain unchanged.
 

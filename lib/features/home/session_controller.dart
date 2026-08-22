@@ -734,10 +734,6 @@ class SessionController extends Notifier<LiveSessionState> {
   void _onSample(LocationSample rawSample) {
     if (_endingSession) return;
     final sample = rawSample.normalizedMetadata();
-    _sessionSamples.add(sample);
-    _pendingPersist.add(sample);
-
-    // Incremental filter vs last accepted sample (avoids O(n^2) on long walks).
     final prev = _lastValidSample;
     // Guard against out-of-order fixes (clock adjust / provider reordering):
     // the filter sorts ascending, so an older-than-prev sample would otherwise
@@ -745,7 +741,17 @@ class SessionController extends Notifier<LiveSessionState> {
     // _lastValidSample. Skip the incremental step; stop() reprocesses the full
     // sorted set anyway.
     final ordered = prev == null || sample.timestamp.isAfter(prev.timestamp);
-    final probe = prev == null ? [sample] : [prev, sample];
+    // Preserve that continuity break across a process death. Reprocessing the
+    // raw timestamp-sorted list during recovery must not silently reconnect a
+    // fix that arrived out of order while the app was alive.
+    final storedSample = ordered
+        ? sample
+        : sample.copyWith(isFilteredOut: true);
+    _sessionSamples.add(storedSample);
+    _pendingPersist.add(storedSample);
+
+    // Incremental filter vs last accepted sample (avoids O(n^2) on long walks).
+    final probe = prev == null ? [storedSample] : [prev, storedSample];
     final marked = _liveFilter.apply(probe).last;
     double? segmentSpeed;
     SessionGuardObservation? observation;

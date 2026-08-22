@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import 'package:flutter/services.dart';
 
@@ -55,11 +56,15 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     // iOS can flush their own pre-engine tap buffers only after this handler
     // is installed.
     try {
-      await _channel.invokeMethod<void>('ready');
+      await _channel
+          .invokeMethod<void>('ready')
+          .timeout(const Duration(seconds: 2));
     } on MissingPluginException {
       // Desktop, web, and widget tests do not install a native handler.
     } on PlatformException {
       // Notification readiness must never block location recording.
+    } catch (e, st) {
+      _logChannelFailure('ready', e, st);
     }
   }
 
@@ -73,6 +78,9 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     } on MissingPluginException {
       return NotificationPermissionResult.unsupported;
     } on PlatformException {
+      return NotificationPermissionResult.failed;
+    } catch (e, st) {
+      _logChannelFailure('requestPermission', e, st);
       return NotificationPermissionResult.failed;
     }
   }
@@ -101,6 +109,8 @@ class PlatformSessionNotificationService implements SessionNotificationService {
       // Desktop, web, and widget tests do not install a native handler.
     } on PlatformException {
       // Notification failures must never interrupt an active walk.
+    } catch (e, st) {
+      _logChannelFailure('cancel', e, st);
     }
   }
 
@@ -113,6 +123,8 @@ class PlatformSessionNotificationService implements SessionNotificationService {
         // Desktop, web, and widget tests do not install a native handler.
       } on PlatformException {
         // Notification failures must never interrupt session cleanup.
+      } catch (e, st) {
+        _logChannelFailure('cancelAllWarnings', e, st);
       }
     }
   }
@@ -136,7 +148,18 @@ class PlatformSessionNotificationService implements SessionNotificationService {
       // Desktop, web, and widget tests do not install a native handler.
     } on PlatformException {
       // A user can revoke notification permission during a walk.
+    } catch (e, st) {
+      _logChannelFailure('show', e, st);
     }
+  }
+
+  void _logChannelFailure(String method, Object error, StackTrace stack) {
+    developer.log(
+      'Notification channel call failed: $method',
+      name: 'sanbo.notifications',
+      error: error,
+      stackTrace: stack,
+    );
   }
 
   Future<dynamic> _handleMethodCall(MethodCall call) async {

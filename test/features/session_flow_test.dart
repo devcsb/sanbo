@@ -792,6 +792,58 @@ void main() {
     expect(live.liveDistanceM, lessThan(300));
   });
 
+  test('out-of-order fixes stay filtered after a recovery restart', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    var now = DateTime(2026, 8, 22, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final session = controller.state.session!;
+    LocationSample fix(int second, double longitude) => LocationSample(
+      timestamp: session.startedAt.add(Duration(seconds: second)),
+      latitude: 37.5,
+      longitude: longitude,
+      accuracyM: 5,
+    );
+    controller.debugIngestSamples([
+      fix(0, 127.0000),
+      fix(60, 127.0050),
+      fix(120, 127.0100),
+      fix(90, 127.0075),
+      fix(180, 127.0150),
+      fix(240, 127.0200),
+    ]);
+    expect(controller.state.sampleCount, 6);
+    expect(controller.state.validSampleCount, greaterThanOrEqualTo(5));
+    expect(controller.state.liveDistanceM, greaterThan(100));
+
+    now = session.startedAt.add(const Duration(minutes: 5));
+    final completed = await controller.stop();
+    expect(completed, isNotNull);
+    final stored = await repo.getSamples(session.id);
+    expect(
+      stored
+          .singleWhere(
+            (sample) =>
+                sample.timestamp.difference(session.startedAt) ==
+                const Duration(seconds: 90),
+          )
+          .isFilteredOut,
+      isTrue,
+    );
+  });
+
   test('recovered live distance does not bridge a long GPS gap', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

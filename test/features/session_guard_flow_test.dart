@@ -274,7 +274,7 @@ void main() {
           timestamp: now,
           latitude: 37.5665,
           longitude: 126.9780,
-          // Accepted by SampleFilter but rejected by the high-speed guard.
+          // Accepted by both filters, but one fix is not enough to warn.
           accuracyM: 100,
         ),
       ]);

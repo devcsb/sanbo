@@ -43,6 +43,8 @@ final sessionDetailProvider = FutureProvider.autoDispose
       final route = RoutePartitioner.partition(
         samples: samples,
         exclusions: exclusions,
+        sessionStart: session.startedAt,
+        sessionEnd: session.endedAt,
       );
       var segments = SegmentMerger().merge(
         windows,

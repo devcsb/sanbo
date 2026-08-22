@@ -24,4 +24,13 @@ void main() {
   test('falls back when native timezone is unavailable', () async {
     expect(await currentSessionTimezone(), defaultSessionTimezone);
   });
+
+  test('falls back when native timezone throws an unexpected error', () async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          throw StateError('timezone channel unavailable');
+        });
+
+    expect(await currentSessionTimezone(), defaultSessionTimezone);
+  });
 }

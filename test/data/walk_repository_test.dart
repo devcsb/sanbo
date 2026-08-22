@@ -745,13 +745,13 @@ BEGIN SELECT RAISE(ABORT, 'forced session failure'); END
     final plan = await db.rawQuery(
       '''
 EXPLAIN QUERY PLAN
-SELECT substr(started_at, 1, 10) AS day,
-       COUNT(*) AS walk_count,
-       COALESCE(SUM(total_distance_m), 0) AS total_distance_m,
-       COALESCE(SUM(duration_s), 0) AS total_duration_s
+SELECT started_at,
+       timezone,
+       total_distance_m,
+       duration_s
 FROM sessions
 WHERE status = ? AND started_at >= ? AND started_at < ?
-GROUP BY substr(started_at, 1, 10)
+ORDER BY started_at ASC
 ''',
       ['completed', '2026-08-10T00:00:00', '2026-08-17T00:00:00'],
     );
@@ -820,6 +820,125 @@ GROUP BY substr(started_at, 1, 10)
       expect(secondPage, hasLength(1));
       expect(ids.toSet(), hasLength(3));
       expect(ids, orderedEquals([...ids]..sort((a, b) => b.compareTo(a))));
+    },
+  );
+
+  test(
+    'completed history sorts mixed legacy and UTC instants by real time',
+    () async {
+      final path =
+          '${Directory.systemTemp.path}/sanbo_mixed_timestamp_${DateTime.now().microsecondsSinceEpoch}.db';
+      final repo = await openTestRepository(path: path);
+      final legacy = await repo.startSession(
+        timezone: 'Asia/Seoul',
+        startedAt: DateTime(2026, 8, 22, 10),
+      );
+      await repo.completeSession(
+        sessionId: legacy.id,
+        endedAt: DateTime(2026, 8, 22, 10, 1),
+        totalDistanceM: 100,
+        durationS: 60,
+        movingTimeS: 60,
+        stationaryTimeS: 0,
+        avgSpeedMps: 1,
+        validSampleCount: 1,
+      );
+      final modern = await repo.startSession(
+        startedAt: DateTime.utc(2026, 8, 22, 1, 30),
+      );
+      await repo.completeSession(
+        sessionId: modern.id,
+        endedAt: DateTime.utc(2026, 8, 22, 1, 31),
+        totalDistanceM: 100,
+        durationS: 60,
+        movingTimeS: 60,
+        stationaryTimeS: 0,
+        avgSpeedMps: 1,
+        validSampleCount: 1,
+      );
+      await repo.close();
+
+      final db = await databaseFactory.openDatabase(path);
+      await db.update(
+        'sessions',
+        {'started_at': '2026-08-22T10:00:00.000'},
+        where: 'id = ?',
+        whereArgs: [legacy.id],
+      );
+      await db.close();
+
+      final reopened = await WalkRepository.open(path: path);
+      addTearDown(reopened.close);
+      final page = await reopened.listCompleted(limit: 1);
+
+      expect(page.single.id, modern.id);
+    },
+  );
+
+  test(
+    'completed history falls back for offset and fractional precision variants',
+    () async {
+      final path =
+          '${Directory.systemTemp.path}/sanbo_timestamp_variants_${DateTime.now().microsecondsSinceEpoch}.db';
+      final repo = await openTestRepository(path: path);
+      final offset = await repo.startSession(
+        startedAt: DateTime.utc(2026, 8, 22, 1),
+      );
+      await repo.completeSession(
+        sessionId: offset.id,
+        endedAt: DateTime.utc(2026, 8, 22, 1, 1),
+        totalDistanceM: 100,
+        durationS: 60,
+        movingTimeS: 60,
+        stationaryTimeS: 0,
+        avgSpeedMps: 1,
+        validSampleCount: 1,
+      );
+      final precise = await repo.startSession(
+        startedAt: DateTime.utc(2026, 8, 22, 1, 0, 0, 0, 1),
+      );
+      await repo.completeSession(
+        sessionId: precise.id,
+        endedAt: DateTime.utc(2026, 8, 22, 1, 1, 0, 0, 1),
+        totalDistanceM: 100,
+        durationS: 60,
+        movingTimeS: 60,
+        stationaryTimeS: 0,
+        avgSpeedMps: 1,
+        validSampleCount: 1,
+      );
+      final later = await repo.startSession(
+        startedAt: DateTime.utc(2026, 8, 22, 2),
+      );
+      await repo.completeSession(
+        sessionId: later.id,
+        endedAt: DateTime.utc(2026, 8, 22, 2, 1),
+        totalDistanceM: 100,
+        durationS: 60,
+        movingTimeS: 60,
+        stationaryTimeS: 0,
+        avgSpeedMps: 1,
+        validSampleCount: 1,
+      );
+      await repo.close();
+
+      final db = await databaseFactory.openDatabase(path);
+      await db.update(
+        'sessions',
+        {'started_at': '2026-08-22T10:00:00.000+09:00'},
+        where: 'id = ?',
+        whereArgs: [offset.id],
+      );
+      await db.close();
+
+      final reopened = await WalkRepository.open(path: path);
+      addTearDown(reopened.close);
+      final page = await reopened.listCompleted();
+
+      expect(
+        page.map((session) => session.id),
+        orderedEquals([later.id, precise.id, offset.id]),
+      );
     },
   );
 

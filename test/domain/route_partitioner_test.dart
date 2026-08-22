@@ -62,6 +62,30 @@ void main() {
     );
   });
 
+  test('partition ignores samples outside the completed session bounds', () {
+    final t = DateTime.utc(2026, 8, 21, 0);
+    LocationSample fix(int second) {
+      return LocationSample(
+        timestamp: t.add(Duration(seconds: second)),
+        latitude: 37.5,
+        longitude: 127.0 + second / 100000.0,
+        accuracyM: 5,
+      );
+    }
+
+    final result = RoutePartitioner.partition(
+      samples: [fix(-10), fix(0), fix(10), fix(20)],
+      exclusions: const [],
+      sessionStart: t,
+      sessionEnd: t.add(const Duration(seconds: 10)),
+    );
+
+    expect(result.includedSamples.map((sample) => sample.timestamp), [
+      t,
+      t.add(const Duration(seconds: 10)),
+    ]);
+  });
+
   test('an exclusion crossing a segment splits two outside endpoints', () {
     final t = DateTime.utc(2026, 8, 21, 0);
     final result = RoutePartitioner.partition(
