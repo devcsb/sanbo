@@ -266,7 +266,8 @@ class SessionGuard {
     _trimHighSpeedWindow(observedAt);
     final lowAccuracyEvidence =
         !_highSpeedUsesSoftAccuracy ||
-        _netHighSpeedDisplacementM() >= _minimumSoftAccuracyDisplacementM;
+        _netHighSpeedDisplacementM() >= _minimumSoftAccuracyDisplacementM ||
+        _maxRollingDisplacementM() >= _minimumSoftAccuracyDisplacementM;
     if (!_highSpeedWarningIssued &&
         lowAccuracyEvidence &&
         _highSpeedDuration(observedAt) >= policy.highSpeedWarningAfter) {
@@ -297,6 +298,41 @@ class SessionGuard {
       lat2: latest.latitude,
       lon2: latest.longitude,
     );
+  }
+
+  double _maxRollingDisplacementM() {
+    if (_highSpeedSamples.length < 2) return 0;
+    final minimumWindowUs = math
+        .max(
+          const Duration(seconds: 10).inMicroseconds,
+          policy.highSpeedWarningAfter.inMicroseconds ~/ 2,
+        )
+        .toInt();
+    final samples = _highSpeedSamples.toList(growable: false);
+    var maximum = 0.0;
+    for (var startIndex = 0; startIndex < samples.length; startIndex++) {
+      for (
+        var endIndex = startIndex + 1;
+        endIndex < samples.length;
+        endIndex++
+      ) {
+        final elapsedUs = samples[endIndex].timestamp
+            .toUtc()
+            .difference(samples[startIndex].timestamp.toUtc())
+            .inMicroseconds;
+        if (elapsedUs < minimumWindowUs) continue;
+        maximum = math.max(
+          maximum,
+          haversineMeters(
+            lat1: samples[startIndex].latitude,
+            lon1: samples[startIndex].longitude,
+            lat2: samples[endIndex].latitude,
+            lon2: samples[endIndex].longitude,
+          ),
+        );
+      }
+    }
+    return maximum;
   }
 
   void _trimHighSpeedWindow(DateTime observedAt) {

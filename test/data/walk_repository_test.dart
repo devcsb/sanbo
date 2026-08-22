@@ -868,10 +868,20 @@ ORDER BY started_at ASC
       await db.close();
 
       final reopened = await WalkRepository.open(path: path);
-      addTearDown(reopened.close);
       final page = await reopened.listCompleted(limit: 1);
 
       expect(page.single.id, modern.id);
+      await reopened.close();
+
+      final normalizedDb = await databaseFactory.openDatabase(path);
+      addTearDown(normalizedDb.close);
+      final normalized = await normalizedDb.query(
+        'sessions',
+        columns: const ['started_at'],
+        where: 'id = ?',
+        whereArgs: [legacy.id],
+      );
+      expect(normalized.single['started_at'], '2026-08-22T01:00:00.000000Z');
     },
   );
 

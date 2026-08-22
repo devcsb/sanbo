@@ -209,7 +209,7 @@ DB 스키마 버전은 `4`다. v4는 완료 기록의 가역적 사용자 제외
 
 ### 3.7 고속 guard와 경로 제외 계약
 
-고속 판단은 `SessionGuard`가 저장 시각이 아니라 앱 수신 시각 `observedAt`으로 freshness를 확인해 수행한다. 신뢰 가능한 샘플은 정확도 150m 이하, 자동 필터 제외 아님, 좌표가 유효함을 만족해야 한다. 정지 판단은 별도 기준인 정확도 80m 이하를 사용한다. receipt는 최대 30초 전, 최대 5초 미래까지 허용한다. 최근 120초에서 8.0m/s(28.8km/h) 이상 구간이 누적 60초면 `SessionGuardEvent.highSpeedWarning`을 낸다. 80m를 초과하는 soft 정확도 샘플이 포함되면 같은 구간의 순이동량이 최소 200m 이상일 때만 경고해 GPS 왕복 흔들림을 억제한다. 4.0m/s(14.4km/h) 이하가 연속 30초가 되어야 다시 무장한다. 라이브 `SampleFilter`가 거부한 fix는 guard에 전달하지 않는 대신 `interruptHighSpeedContinuity()`로 누적 연속성을 끊는다. 복구에서는 저장된 샘플에 `SampleFilter.apply`를 먼저 적용한 marked 결과로 guard 상태를 재구축한다. 고속 이동만으로 세션을 자동 종료하지 않는다.
+고속 판단은 `SessionGuard`가 저장 시각이 아니라 앱 수신 시각 `observedAt`으로 freshness를 확인해 수행한다. 신뢰 가능한 샘플은 정확도 150m 이하, 자동 필터 제외 아님, 좌표가 유효함을 만족해야 한다. 정지 판단은 별도 기준인 정확도 80m 이하를 사용한다. receipt는 최대 30초 전, 최대 5초 미래까지 허용한다. 최근 120초에서 8.0m/s(28.8km/h) 이상 구간이 누적 60초면 `SessionGuardEvent.highSpeedWarning`을 낸다. 80m를 초과하는 soft 정확도 샘플이 포함되면 같은 구간의 순이동량이나 최근 절반 경고 시간의 rolling 순이동량이 최소 200m 이상일 때만 경고해 GPS 왕복 흔들림을 억제하면서 짧은 차량 회전과 되돌림을 놓치지 않는다. 4.0m/s(14.4km/h) 이하가 연속 30초가 되어야 다시 무장한다. 라이브 `SampleFilter`가 거부한 fix는 guard에 전달하지 않는 대신 `interruptHighSpeedContinuity()`로 누적 연속성을 끊는다. 복구에서는 저장된 샘플에 `SampleFilter.apply`를 먼저 적용한 marked 결과로 guard 상태를 재구축한다. 고속 이동만으로 세션을 자동 종료하지 않는다.
 
 `SessionGuard.evaluate`의 경고 우선순위는 duration limit, stationary limit, duration warning, stationary warning, high-speed warning 순서다. 고속 경고는 `SessionWarningKind.highSpeed`로 표현하며 `기록 종료`는 `SessionController.stopFromHighSpeedWarning()`, `계속 기록`은 `SessionController.continueAfterWarning()`으로 처리한다.
 

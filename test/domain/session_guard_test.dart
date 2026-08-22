@@ -548,6 +548,28 @@ void main() {
     );
   });
 
+  test('soft-accuracy vehicle movement still warns on a short return path', () {
+    final guard = SessionGuard();
+    const offsets = [0.0, 80.0, 160.0, 240.0, 160.0, 80.0, 0.0];
+    for (var index = 0; index < offsets.length; index++) {
+      final at = start.add(Duration(seconds: index * 10));
+      guard.observe(
+        movingFix(at, offsets[index], accuracy: 100),
+        observedAt: at,
+      );
+    }
+
+    expect(
+      guard
+          .evaluate(
+            startedAt: start,
+            now: start.add(const Duration(seconds: 60)),
+          )
+          .event,
+      SessionGuardEvent.highSpeedWarning,
+    );
+  });
+
   test(
     'rejects future fixes and observedAt regressions for high-speed state',
     () {

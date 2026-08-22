@@ -28,6 +28,7 @@ class WalkRepository {
   final Database _db;
   final _uuid = const Uuid();
   final _pipeline = SessionPipeline();
+  var _completedTimestampsCanonical = false;
 
   static Future<WalkRepository> open({String? path}) async {
     final db = await openAppDatabase(path: path);
@@ -55,39 +56,48 @@ class WalkRepository {
       throw ArgumentError.value(offset, 'offset', 'must not be negative');
     }
 
-    // Current rows use fixed-width UTC ISO-8601 strings, so SQLite can page
-    // them with its index. Keep the compatibility sort below if any row uses
-    // an offset, offsetless value, malformed value, or variable precision.
-    final legacyRows = await _db.rawQuery(
-      '''
+    if (!_completedTimestampsCanonical) {
+      // Current rows use fixed-width UTC ISO-8601 strings, so SQLite can page
+      // them with its index. Older databases may contain local or offset
+      // strings. Normalize those rows once, then every later page stays in
+      // the indexed SQL path instead of materializing the full history.
+      final legacyRows = await _db.rawQuery(
+        '''
 SELECT 1
 FROM sessions
 WHERE status = ?
   AND NOT (started_at GLOB ?)
 LIMIT 1
 ''',
-      [
-        SessionStatus.completed.name,
-        '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T'
-            '[0-9][0-9]:[0-9][0-9]:[0-9][0-9][.]'
-            '[0-9][0-9][0-9][0-9][0-9][0-9]Z',
-      ],
-    );
-    if (legacyRows.isEmpty) {
-      final rows = await _db.query(
-        'sessions',
-        where: 'status = ?',
-        whereArgs: [SessionStatus.completed.name],
-        orderBy: 'started_at DESC, id DESC',
-        limit: limit,
-        offset: offset,
+        [
+          SessionStatus.completed.name,
+          '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T'
+              '[0-9][0-9]:[0-9][0-9]:[0-9][0-9][.]'
+              '[0-9][0-9][0-9][0-9][0-9][0-9]Z',
+        ],
       );
-      return rows.map(_sessionFromRow).toList();
+      if (legacyRows.isNotEmpty) {
+        final normalized = await _normalizeCompletedTimestamps();
+        if (!normalized) return _listCompletedParsed(limit, offset);
+      }
+      _completedTimestampsCanonical = true;
     }
 
     final rows = await _db.query(
       'sessions',
-      where: "status = ?",
+      where: 'status = ?',
+      whereArgs: [SessionStatus.completed.name],
+      orderBy: 'started_at DESC, id DESC',
+      limit: limit,
+      offset: offset,
+    );
+    return rows.map(_sessionFromRow).toList();
+  }
+
+  Future<List<WalkSession>> _listCompletedParsed(int? limit, int offset) async {
+    final rows = await _db.query(
+      'sessions',
+      where: 'status = ?',
       whereArgs: [SessionStatus.completed.name],
     );
     final sessions = rows.map(_sessionFromRow).toList()
@@ -100,6 +110,46 @@ LIMIT 1
         ? sessions.length
         : math.min(offset + limit, sessions.length);
     return sessions.sublist(offset, end);
+  }
+
+  Future<bool> _normalizeCompletedTimestamps() async {
+    try {
+      return await _db.transaction((txn) async {
+        final rows = await txn.query(
+          'sessions',
+          columns: const ['id', 'started_at', 'ended_at', 'timezone'],
+          where: 'status = ?',
+          whereArgs: [SessionStatus.completed.name],
+        );
+        for (final row in rows) {
+          final timezone = row['timezone']! as String;
+          final startedAt = parseStoredInstant(
+            row['started_at']! as String,
+            timezone: timezone,
+          ).toUtc();
+          final endedRaw = row['ended_at'] as String?;
+          final endedAt = endedRaw == null
+              ? null
+              : parseStoredInstant(endedRaw, timezone: timezone).toUtc();
+          await txn.update(
+            'sessions',
+            {
+              'started_at': _canonicalUtcInstant(startedAt),
+              'ended_at': endedAt == null
+                  ? null
+                  : _canonicalUtcInstant(endedAt),
+            },
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+        }
+        return true;
+      });
+    } on FormatException {
+      return false;
+    } on ArgumentError {
+      return false;
+    }
   }
 
   /// Computes history summary in SQLite without loading every session into
