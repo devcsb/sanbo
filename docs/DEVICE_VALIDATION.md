@@ -61,6 +61,16 @@ adb shell dumpsys activity services | grep -i -E 'geolocator|sanbo'
 
 아래 행은 실제 기기에서만 채운다. 자동화 빌드나 simulator 결과로 통과 처리하지 않는다. 각 실행에는 기기 모델과 OS, 위치와 알림 권한 상태, 관측 결과를 남기고 `통과/실패`를 하나만 표시한다.
 
+실기기 측정 전에 native 계약을 빠르게 확인하려면 저장소 루트에서 다음 명령을 실행한다.
+
+```bash
+scripts/run_native_platform_tests.sh
+```
+
+이 명령은 Android native unit test와 사용 가능한 iPhone simulator의 XCTest만 실행한다.
+통과하더라도 실제 GPS 수집, 백그라운드 FGS, 제조사 절전 정책과 시스템 알림 전달은
+검증하지 않으므로 아래 실기기 행의 상태를 바꾸지 않는다.
+
 | 확인 | 플랫폼 | 기기·OS | 권한 상태 | 기대 상태 | 관측 결과 | 통과/실패 |
 |------|--------|---------|-----------|-----------|-----------|-----------|
 | [ ] foreground warning without system banner | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 앱 전면에서 28.8km/h 누적 60초 뒤 고속 종료 확인만 보이고 시스템 배너는 없다 | 미기록 | 미판정 |

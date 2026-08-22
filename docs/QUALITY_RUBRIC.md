@@ -42,6 +42,7 @@ G8 release arm64 APK manifest               location/FGS/notification/WakeLock +
 bash scripts/run_quality_loop.sh             # 구조·analyze·전체 테스트
 bash scripts/run_quality_loop.sh --debug-apk
 bash scripts/run_quality_loop.sh --release-apk
+scripts/run_native_platform_tests.sh        # Android native unit + iOS simulator XCTest
 ```
 
 APK 옵션은 로컬 release signing 설정과 빌드 시간을 전제로 한다. Flutter 명령이 생성하는
@@ -62,3 +63,8 @@ Remaining risks / next loop:
 
 현재 루프의 실기기 증거 수집은 [`docs/DEVICE_VALIDATION.md`](DEVICE_VALIDATION.md)의 고정 조건과 매트릭스를 사용한다. 장기 기록 확장성은 페이지·aggregate 테스트로 보완했지만,
 실제 수천 건 스크롤과 배터리/백그라운드 동작은 코드 테스트만으로 완료 판정하지 않는다.
+
+`run_native_platform_tests.sh`는 native channel 계약과 권한·알림 보조 코드를 Android
+unit test와 iOS simulator XCTest로 확인한다. 실제 GPS provider, 제조사 절전 정책,
+시스템 알림 전달은 검증하지 않으므로 이 스크립트의 성공만으로 실기기 매트릭스를
+통과 처리하지 않는다.
