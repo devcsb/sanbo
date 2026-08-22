@@ -68,7 +68,7 @@
 - Android release split APK: `0.7.0+10` 빌드 성공
 - Android release: 3개 ABI APK의 인증서가 기존 v0.3.2 배포본과 동일함을 확인
 - APK SHA-256: arm64 `9b981c…6322`, armeabi-v7a `39d071…e0c4`, x86_64 `4b88d6…214c`
-- iOS Simulator debug: Xcode/CocoaPods 빌드 성공
+- iOS Simulator debug: Xcode와 Swift Package Manager 빌드 성공
 - DB: v1→v2 마이그레이션에서 기존 행 보존 확인
 - DB: v1→v3 마이그레이션에서 기존 행·세션 조회 인덱스 보존 확인
 - 백업: 전체 왕복, 중복 가져오기, 손상 좌표 rollback, 미래 DB 버전 거부 확인
