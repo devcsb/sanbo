@@ -94,6 +94,29 @@ DateTime asLocal(DateTime ts, {String? timezone}) {
   return tz.TZDateTime.from(ts.toUtc(), location);
 }
 
+/// Parses an instant saved by Sanbo. New rows use an explicit UTC offset. Old
+/// rows may omit an offset, in which case the value was a session-local wall
+/// clock and must be interpreted with that session's IANA timezone.
+DateTime parseStoredInstant(String value, {String? timezone}) {
+  final parsed = DateTime.parse(value);
+  final hasOffset =
+      value.endsWith('Z') || RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(value);
+  if (hasOffset) return parsed.toUtc();
+  final location = _locationFor(timezone);
+  if (location == null) return parsed.toUtc();
+  return tz.TZDateTime(
+    location,
+    parsed.year,
+    parsed.month,
+    parsed.day,
+    parsed.hour,
+    parsed.minute,
+    parsed.second,
+    parsed.millisecond,
+    parsed.microsecond,
+  ).toUtc();
+}
+
 /// Floor [ts] to **local** wall-clock minute boundary.
 ///
 /// Always converts an instant to the session wall-clock zone first.

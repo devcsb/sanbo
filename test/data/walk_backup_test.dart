@@ -164,6 +164,50 @@ void main() {
     expect(await target.listCompleted(), isEmpty);
   });
 
+  test('legacy offsetless backup instants use the session timezone', () async {
+    final source = await openTestRepository();
+    final target = await openTestRepository();
+    addTearDown(source.close);
+    addTearDown(target.close);
+    final fixture = await _seedCompletedPartialMinuteWalk(source);
+    final backup =
+        jsonDecode(await source.createBackupJson()) as Map<String, dynamic>;
+    final tables = _tables(backup);
+    final session =
+        (tables['sessions'] as List<dynamic>).single as Map<String, dynamic>;
+    session['timezone'] = 'America/New_York';
+    session['started_at'] = '2026-08-21T09:00:50';
+    session['ended_at'] = '2026-08-21T09:01:00';
+
+    final samples = tables['location_samples'] as List<dynamic>;
+    for (var index = 0; index < samples.length; index++) {
+      (samples[index] as Map<String, dynamic>)['ts'] =
+          '2026-08-21T09:00:${(50 + index * 5).toString().padLeft(2, '0')}';
+    }
+    final window =
+        (tables['minute_windows'] as List<dynamic>).single
+            as Map<String, dynamic>;
+    window['window_start'] = '2026-08-21T09:00:00';
+
+    final result = await target.importBackupJson(jsonEncode(backup));
+    expect(result.importedSessions, 1);
+    final restored = await target.getSession(fixture.session.id);
+    expect(restored!.startedAt.toUtc(), DateTime.utc(2026, 8, 21, 13, 0, 50));
+    expect(restored.endedAt!.toUtc(), DateTime.utc(2026, 8, 21, 13, 1));
+    final restoredSamples = await target.getSamples(fixture.session.id);
+    expect(
+      restoredSamples.first.timestamp.isAtSameMomentAs(restored.startedAt),
+      isTrue,
+    );
+    final restoredWindow = (await target.getWindows(fixture.session.id)).single;
+    expect(
+      restoredWindow.windowStart.isAtSameMomentAs(
+        DateTime.utc(2026, 8, 21, 13),
+      ),
+      isTrue,
+    );
+  });
+
   test('historical invalid REAL values export and import safely', () async {
     final path =
         '${Directory.systemTemp.path}/sanbo_historical_non_finite_${DateTime.now().microsecondsSinceEpoch}.db';

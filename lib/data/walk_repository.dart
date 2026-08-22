@@ -107,32 +107,53 @@ WHERE status = ?
       );
     }
 
-    final rows = await _db.rawQuery(
-      '''
-SELECT substr(started_at, 1, 10) AS day,
-       COUNT(*) AS walk_count,
-       COALESCE(SUM(total_distance_m), 0) AS total_distance_m,
-       COALESCE(SUM(duration_s), 0) AS total_duration_s
-FROM sessions
-WHERE status = ? AND started_at >= ? AND started_at < ?
-GROUP BY substr(started_at, 1, 10)
-ORDER BY day ASC
-''',
-      [
-        SessionStatus.completed.name,
-        start.toIso8601String(),
-        end.toIso8601String(),
+    // New rows store UTC instants while older databases may contain local
+    // wall-clock strings. Read a small UTC guard band, then group by the
+    // device-local date after parsing with each session's saved timezone.
+    final rows = await _db.query(
+      'sessions',
+      columns: const [
+        'started_at',
+        'timezone',
+        'total_distance_m',
+        'duration_s',
       ],
+      where: 'status = ? AND started_at >= ? AND started_at < ?',
+      whereArgs: [
+        SessionStatus.completed.name,
+        start.toUtc().subtract(const Duration(days: 1)).toIso8601String(),
+        end.toUtc().add(const Duration(days: 1)).toIso8601String(),
+      ],
+      orderBy: 'started_at ASC',
     );
+    final aggregates = <String, ({int count, double distance, int duration})>{};
+    for (final row in rows) {
+      final timezone = row['timezone']! as String;
+      final startedAt = parseStoredInstant(
+        row['started_at']! as String,
+        timezone: timezone,
+      ).toLocal();
+      final day = DateTime(startedAt.year, startedAt.month, startedAt.day);
+      if (day.isBefore(start) || !day.isBefore(end)) continue;
+      final key = _dateKey(day);
+      final previous = aggregates[key];
+      aggregates[key] = (
+        count: (previous?.count ?? 0) + 1,
+        distance:
+            (previous?.distance ?? 0) +
+            _nonNegativeDouble(row['total_distance_m']),
+        duration:
+            (previous?.duration ?? 0) + _nonNegativeInt(row['duration_s']),
+      );
+    }
     final grouped = <String, DailyWalkStats>{
-      for (final row in rows)
-        if (row['day'] is String)
-          row['day'] as String: DailyWalkStats(
-            date: _dateFromKey(row['day']! as String),
-            walkCount: _nonNegativeInt(row['walk_count']),
-            totalDistanceM: _nonNegativeDouble(row['total_distance_m']),
-            totalDurationS: _nonNegativeInt(row['total_duration_s']),
-          ),
+      for (final entry in aggregates.entries)
+        entry.key: DailyWalkStats(
+          date: _dateFromKey(entry.key),
+          walkCount: entry.value.count,
+          totalDistanceM: entry.value.distance,
+          totalDurationS: entry.value.duration,
+        ),
     };
 
     final days = <DailyWalkStats>[];
@@ -197,7 +218,7 @@ ORDER BY day ASC
     final s = sample.normalizedMetadata();
     return {
       'session_id': sessionId,
-      'ts': s.timestamp.toIso8601String(),
+      'ts': s.timestamp.toUtc().toIso8601String(),
       'lat': s.latitude,
       'lon': s.longitude,
       'accuracy_m': s.accuracyM,
@@ -291,13 +312,26 @@ ORDER BY day ASC
   }
 
   Future<List<LocationSample>> getSamples(String sessionId) async {
+    final sessionRows = await _db.query(
+      'sessions',
+      columns: const ['timezone'],
+      where: 'id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    if (sessionRows.isEmpty) return const [];
+    final timezone = sessionRows.single['timezone']! as String;
     final rows = await _db.query(
       'location_samples',
       where: 'session_id = ?',
       whereArgs: [sessionId],
       orderBy: 'ts ASC',
     );
-    return rows.map(_sampleFromRow).toList();
+    final samples = rows
+        .map((row) => _sampleFromRow(row, timezone: timezone))
+        .toList();
+    samples.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return samples;
   }
 
   Future<void> replaceWindows(
@@ -333,13 +367,24 @@ ORDER BY day ASC
   }
 
   Future<List<RouteExclusion>> getRouteExclusions(String sessionId) async {
+    final sessionRows = await _db.query(
+      'sessions',
+      columns: const ['timezone'],
+      where: 'id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    if (sessionRows.isEmpty) return const [];
+    final timezone = sessionRows.single['timezone']! as String;
     final rows = await _db.query(
       'route_exclusions',
       where: 'session_id = ?',
       whereArgs: [sessionId],
       orderBy: 'start_at ASC, id ASC',
     );
-    return rows.map(_exclusionFromRow).toList(growable: false);
+    return rows
+        .map((row) => _exclusionFromRow(row, timezone: timezone))
+        .toList(growable: false);
   }
 
   /// Saves one user-selected route exclusion and every derived aggregate in
@@ -527,23 +572,30 @@ ORDER BY w.window_start ASC
     if (session.status != SessionStatus.completed || session.endedAt == null) {
       throw StateError('완료된 산책만 경로를 제외할 수 있습니다');
     }
-    final samples = (await executor.query(
-      'location_samples',
-      where: 'session_id = ?',
-      whereArgs: [sessionId],
-      orderBy: 'ts ASC',
-    )).map(_sampleFromRow).toList(growable: false);
+    final samples =
+        (await executor.query(
+              'location_samples',
+              where: 'session_id = ?',
+              whereArgs: [sessionId],
+              orderBy: 'ts ASC',
+            ))
+            .map((row) => _sampleFromRow(row, timezone: session.timezone))
+            .toList()
+          ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
     final windows = await _getWindowsIn(
       executor,
       sessionId,
       timezone: session.timezone,
     );
-    final exclusions = (await executor.query(
-      'route_exclusions',
-      where: 'session_id = ?',
-      whereArgs: [sessionId],
-      orderBy: 'start_at ASC, id ASC',
-    )).map(_exclusionFromRow).toList(growable: false);
+    final exclusions =
+        (await executor.query(
+              'route_exclusions',
+              where: 'session_id = ?',
+              whereArgs: [sessionId],
+              orderBy: 'start_at ASC, id ASC',
+            ))
+            .map((row) => _exclusionFromRow(row, timezone: session.timezone))
+            .toList(growable: false);
     return _RouteEditSnapshot(
       session: session,
       samples: samples,
@@ -804,7 +856,7 @@ ORDER BY w.window_start ASC
             'address': (trimmedAddress == null || trimmedAddress.isEmpty)
                 ? null
                 : trimmedAddress,
-            'updated_at': now.toIso8601String(),
+            'updated_at': now.toUtc().toIso8601String(),
           },
           where: 'id = ?',
           whereArgs: [placeId],
@@ -819,7 +871,7 @@ ORDER BY w.window_start ASC
         'address': (trimmedAddress == null || trimmedAddress.isEmpty)
             ? null
             : trimmedAddress,
-        'updated_at': now.toIso8601String(),
+        'updated_at': now.toUtc().toIso8601String(),
       });
 
       await _attachPlaceToWindows(
@@ -1131,8 +1183,9 @@ ORDER BY w.window_start ASC
           throw const FormatException('존재하지 않는 산책을 가리키는 위치 데이터가 있습니다');
         }
         if (!newSessionIds.contains(sessionId)) continue;
-        final ts = _requiredDate(rawSample, 'ts');
         final session = importedSessionRows[sessionId]!;
+        final timezone = session['timezone']! as String;
+        final ts = _requiredDate(rawSample, 'ts', timezone: timezone);
         final sessionStart = _requiredDate(session, 'started_at').toUtc();
         final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
         final isFilteredOut = _requiredBoolInt(rawSample, 'is_filtered_out');
@@ -1150,7 +1203,7 @@ ORDER BY w.window_start ASC
         if (!sampleKeys.add(key)) continue;
         sampleBatch.insert('location_samples', {
           'session_id': sessionId,
-          'ts': ts.toIso8601String(),
+          'ts': ts.toUtc().toIso8601String(),
           'lat': lat,
           'lon': lon,
           'accuracy_m': _optionalDouble(rawSample, 'accuracy_m', min: 0),
@@ -1198,7 +1251,7 @@ ORDER BY w.window_start ASC
           'lon': lon,
           'name': name,
           'address': address,
-          'updated_at': updatedAt.toIso8601String(),
+          'updated_at': updatedAt.toUtc().toIso8601String(),
         });
         placeIdMap[sourceId] = targetId;
       }
@@ -1216,11 +1269,15 @@ ORDER BY w.window_start ASC
           throw const FormatException('존재하지 않는 산책을 가리키는 구간 데이터가 있습니다');
         }
         if (!newSessionIds.contains(sessionId)) continue;
-        final windowStart = _requiredDate(rawWindow, 'window_start');
         final session = importedSessionRows[sessionId]!;
         final sessionStart = _requiredDate(session, 'started_at').toUtc();
         final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
         final timezone = session['timezone']! as String;
+        final windowStart = _requiredDate(
+          rawWindow,
+          'window_start',
+          timezone: timezone,
+        );
         final canonicalWindowStart = windowStart.toUtc();
         final expectedWindowStart = floorToMinute(
           windowStart,
@@ -1435,9 +1492,14 @@ ORDER BY w.window_start ASC
   ) {
     final id = _requiredString(raw, 'id', maxLength: 128);
     final sessionId = _requiredString(raw, 'session_id', maxLength: 128);
-    final startAt = _requiredDate(raw, 'start_at').toUtc();
-    final endAt = _requiredDate(raw, 'end_at').toUtc();
-    final createdAt = _requiredDate(raw, 'created_at').toUtc();
+    final timezone = _requiredString(session, 'timezone', maxLength: 80);
+    final startAt = _requiredDate(raw, 'start_at', timezone: timezone).toUtc();
+    final endAt = _requiredDate(raw, 'end_at', timezone: timezone).toUtc();
+    final createdAt = _requiredDate(
+      raw,
+      'created_at',
+      timezone: timezone,
+    ).toUtc();
     if (!startAt.isBefore(endAt)) {
       throw const FormatException('제외 시작은 종료보다 빨라야 합니다');
     }
@@ -1494,8 +1556,13 @@ ORDER BY w.window_start ASC
 
   Map<String, Object?> _validatedSessionRow(Map<String, Object?> raw) {
     final id = _requiredString(raw, 'id', maxLength: 128);
-    final startedAt = _requiredDate(raw, 'started_at');
-    final endedAt = _requiredDate(raw, 'ended_at');
+    final timezone = _requiredString(raw, 'timezone', maxLength: 80);
+    final startedAt = _requiredDate(
+      raw,
+      'started_at',
+      timezone: timezone,
+    ).toUtc();
+    final endedAt = _requiredDate(raw, 'ended_at', timezone: timezone).toUtc();
     if (endedAt.isBefore(startedAt)) {
       throw const FormatException('종료 시각이 시작 시각보다 빠른 산책이 있습니다');
     }
@@ -1513,7 +1580,7 @@ ORDER BY w.window_start ASC
       'ended_at': endedAt.toIso8601String(),
       'status': status,
       'tracking_mode': trackingMode,
-      'timezone': _requiredString(raw, 'timezone', maxLength: 80),
+      'timezone': timezone,
       'total_distance_m': _optionalDouble(raw, 'total_distance_m', min: 0),
       'duration_s': _optionalInt(raw, 'duration_s', min: 0),
       'moving_time_s': _optionalInt(raw, 'moving_time_s', min: 0),
@@ -1550,12 +1617,18 @@ ORDER BY w.window_start ASC
     return value;
   }
 
-  DateTime _requiredDate(Map<String, Object?> row, String key) {
+  DateTime _requiredDate(
+    Map<String, Object?> row,
+    String key, {
+    String? timezone,
+  }) {
     final value = row[key];
     if (value is! String) throw FormatException('$key 시각이 없습니다');
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) throw FormatException('$key 시각이 올바르지 않습니다');
-    return parsed;
+    try {
+      return parseStoredInstant(value, timezone: timezone);
+    } on FormatException {
+      throw FormatException('$key 시각이 올바르지 않습니다');
+    }
   }
 
   int _requiredInt(Map<String, Object?> row, String key, {int? min, int? max}) {
@@ -1691,8 +1764,8 @@ ORDER BY w.window_start ASC
 
   Map<String, Object?> _sessionToRow(WalkSession s) => {
     'id': s.id,
-    'started_at': s.startedAt.toIso8601String(),
-    'ended_at': s.endedAt?.toIso8601String(),
+    'started_at': s.startedAt.toUtc().toIso8601String(),
+    'ended_at': s.endedAt?.toUtc().toIso8601String(),
     'status': s.status.name,
     'tracking_mode': s.trackingMode.name,
     'timezone': s.timezone,
@@ -1707,12 +1780,19 @@ ORDER BY w.window_start ASC
   };
 
   WalkSession _sessionFromRow(Map<String, Object?> r) {
+    final timezone = r['timezone']! as String;
     return WalkSession(
       id: r['id']! as String,
-      startedAt: DateTime.parse(r['started_at']! as String),
+      startedAt: asLocal(
+        parseStoredInstant(r['started_at']! as String, timezone: timezone),
+        timezone: timezone,
+      ),
       endedAt: r['ended_at'] == null
           ? null
-          : DateTime.parse(r['ended_at']! as String),
+          : asLocal(
+              parseStoredInstant(r['ended_at']! as String, timezone: timezone),
+              timezone: timezone,
+            ),
       status: SessionStatus.values.byName(r['status']! as String),
       trackingMode: TrackingMode.values.byName(r['tracking_mode']! as String),
       timezone: r['timezone']! as String,
@@ -1727,9 +1807,15 @@ ORDER BY w.window_start ASC
     );
   }
 
-  LocationSample _sampleFromRow(Map<String, Object?> r) {
+  LocationSample _sampleFromRow(
+    Map<String, Object?> r, {
+    required String timezone,
+  }) {
     return LocationSample(
-      timestamp: DateTime.parse(r['ts']! as String),
+      // Samples are instants used by filtering and route math. Keep the
+      // public value in UTC so equality and ordering do not depend on the
+      // timezone object used to interpret a legacy offsetless row.
+      timestamp: parseStoredInstant(r['ts']! as String, timezone: timezone),
       latitude: (r['lat']! as num).toDouble(),
       longitude: (r['lon']! as num).toDouble(),
       accuracyM: (r['accuracy_m'] as num?)?.toDouble(),
@@ -1860,7 +1946,10 @@ ORDER BY w.window_start ASC
     final evidence = (jsonDecode(evidenceRaw) as List<dynamic>)
         .map((e) => e.toString())
         .toList();
-    final persistedStart = DateTime.parse(r['window_start']! as String);
+    final persistedStart = parseStoredInstant(
+      r['window_start']! as String,
+      timezone: timezone,
+    );
     return MinuteWindow(
       windowStart: asLocal(persistedStart, timezone: timezone),
       durationS: r['duration_s']! as int,
@@ -1903,7 +1992,7 @@ ORDER BY w.window_start ASC
       longitude: (r['lon']! as num).toDouble(),
       name: r['name']! as String,
       address: r['address'] as String?,
-      updatedAt: DateTime.parse(r['updated_at']! as String),
+      updatedAt: parseStoredInstant(r['updated_at']! as String),
     );
   }
 
@@ -1916,13 +2005,19 @@ ORDER BY w.window_start ASC
     'created_at': item.createdAt.toUtc().toIso8601String(),
   };
 
-  RouteExclusion _exclusionFromRow(Map<String, Object?> row) => RouteExclusion(
+  RouteExclusion _exclusionFromRow(
+    Map<String, Object?> row, {
+    String? timezone,
+  }) => RouteExclusion(
     id: row['id']! as String,
     sessionId: row['session_id']! as String,
-    startAt: DateTime.parse(row['start_at']! as String),
-    endAt: DateTime.parse(row['end_at']! as String),
+    startAt: parseStoredInstant(row['start_at']! as String, timezone: timezone),
+    endAt: parseStoredInstant(row['end_at']! as String, timezone: timezone),
     reason: RouteExclusionReason.values.byName(row['reason']! as String),
-    createdAt: DateTime.parse(row['created_at']! as String),
+    createdAt: parseStoredInstant(
+      row['created_at']! as String,
+      timezone: timezone,
+    ),
   );
 }
 

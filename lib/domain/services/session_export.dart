@@ -84,8 +84,8 @@ class SessionExport {
       'export_kind': 'sanbo_session',
       'session': {
         'id': session.id,
-        'started_at': session.startedAt.toIso8601String(),
-        'ended_at': session.endedAt?.toIso8601String(),
+        'started_at': session.startedAt.toUtc().toIso8601String(),
+        'ended_at': session.endedAt?.toUtc().toIso8601String(),
         'status': session.status.name,
         'tracking_mode': session.trackingMode.name,
         'timezone': session.timezone,
@@ -139,7 +139,7 @@ class SessionExport {
   }
 
   Map<String, Object?> _windowJson(MinuteWindow w) => {
-    'window_start': w.windowStart.toIso8601String(),
+    'window_start': w.windowStart.toUtc().toIso8601String(),
     'duration_s': w.durationS,
     'partial': w.partial,
     'distance_m': w.distanceM,
@@ -166,7 +166,7 @@ class SessionExport {
   };
 
   Map<String, Object?> _sampleJson(LocationSample s) => {
-    'ts': s.timestamp.toIso8601String(),
+    'ts': s.timestamp.toUtc().toIso8601String(),
     'lat': s.latitude,
     'lon': s.longitude,
     'accuracy_m': s.accuracyM,

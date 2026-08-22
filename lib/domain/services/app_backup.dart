@@ -50,7 +50,7 @@ abstract final class AppBackupCodec {
       'export_kind': 'sanbo_backup',
       'backup_schema_version': appBackupSchemaVersion,
       'database_schema_version': databaseSchemaVersion,
-      'exported_at': (exportedAt ?? DateTime.now()).toIso8601String(),
+      'exported_at': (exportedAt ?? DateTime.now()).toUtc().toIso8601String(),
       'tables': tables,
     });
     if (utf8.encode(encoded).length > maxBackupBytes) {
