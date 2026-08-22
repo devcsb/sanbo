@@ -25,9 +25,11 @@ import '../helpers/test_db.dart';
 class _FakeSessionNotifications implements SessionNotificationService {
   final warnings = <String>[];
   final completions = <String>[];
+  final events = <String>[];
   int cancelCalls = 0;
   int cancelAllCalls = 0;
   Completer<void>? cancelAllRelease;
+  Completer<void>? cancelRelease;
   int tapDeliveries = 0;
   SessionNotificationTap? _pendingColdTap;
   late final _tapController =
@@ -38,6 +40,9 @@ class _FakeSessionNotifications implements SessionNotificationService {
   @override
   Future<void> cancel({required SessionWarningKind kind}) async {
     cancelCalls++;
+    events.add('cancel:${kind.name}');
+    final release = cancelRelease;
+    if (release != null) await release.future;
   }
 
   @override
@@ -66,6 +71,7 @@ class _FakeSessionNotifications implements SessionNotificationService {
   @override
   Future<void> showWarning(SessionWarning warning, {String? sessionId}) async {
     warnings.add('${warning.title}|${warning.message}');
+    events.add('show:${warning.kind.name}');
   }
 
   @override
@@ -148,6 +154,71 @@ void main() {
     notifications.cancelAllRelease!.complete();
     await stopping;
     expect(completed, isTrue);
+  });
+
+  test('replacement warning waits for a prior cancellation', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final notifications = _FakeSessionNotifications();
+    var now = DateTime(2026, 8, 21, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionNotificationServiceProvider.overrideWithValue(notifications),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final session = controller.state.session!;
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: session.startedAt,
+        latitude: 37.5665,
+        longitude: 126.978,
+        accuracyM: 6,
+      ),
+    ]);
+    now = session.startedAt.add(const Duration(minutes: 20));
+    await controller.debugEvaluateSessionGuard(now);
+    expect(controller.state.activeWarning?.kind, SessionWarningKind.stationary);
+
+    notifications.cancelRelease = Completer<void>();
+    now = session.startedAt.add(const Duration(minutes: 20, seconds: 10));
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: now,
+        latitude: 37.567,
+        longitude: 126.978,
+        accuracyM: 6,
+      ),
+    ]);
+
+    now = session.startedAt.add(const Duration(hours: 4, minutes: 44));
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: now,
+        latitude: 37.568,
+        longitude: 126.978,
+        accuracyM: 6,
+      ),
+    ]);
+    now = session.startedAt.add(const Duration(hours: 4, minutes: 45));
+    final durationWarning = controller.debugEvaluateSessionGuard(now);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(notifications.events, isNot(contains('show:duration')));
+
+    notifications.cancelRelease!.complete();
+    await durationWarning;
+    final cancelIndex = notifications.events.indexOf('cancel:stationary');
+    final showIndex = notifications.events.indexOf('show:duration');
+    expect(cancelIndex, greaterThanOrEqualTo(0));
+    expect(showIndex, greaterThan(cancelIndex));
   });
 
   test(

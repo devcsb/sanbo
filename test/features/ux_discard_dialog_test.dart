@@ -6,12 +6,42 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
+import 'package:sanbo/domain/models/session_warning.dart';
 import 'package:sanbo/features/home/discard_confirm.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/synthetic_location_engine.dart';
+import 'package:sanbo/platform/notifications/session_notification_service.dart';
 
 import '../helpers/test_db.dart';
+
+class _ImmediateSessionNotifications implements SessionNotificationService {
+  @override
+  Future<void> cancel({required SessionWarningKind kind}) async {}
+
+  @override
+  Future<void> cancelAllWarnings() async {}
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<NotificationPermissionResult> requestPermission() async {
+    return NotificationPermissionResult.granted;
+  }
+
+  @override
+  Stream<SessionNotificationTap> get taps => const Stream.empty();
+
+  @override
+  Future<void> showCompletion({
+    required String title,
+    required String body,
+  }) async {}
+
+  @override
+  Future<void> showWarning(SessionWarning warning, {String? sessionId}) async {}
+}
 
 /// UX-H01: confirmDiscardIncompleteWalk gates discardActive (shipped path).
 void main() {
@@ -34,6 +64,9 @@ void main() {
           overrides: [
             walkRepositoryProvider.overrideWithValue(repo),
             locationEngineProvider.overrideWithValue(engine),
+            sessionNotificationServiceProvider.overrideWithValue(
+              _ImmediateSessionNotifications(),
+            ),
           ],
         );
         controller = container.read(sessionControllerProvider.notifier);
@@ -85,23 +118,34 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, '삭제'));
       await tester.pump();
       await tester.runAsync(() async {
-        await Future<void>.delayed(const Duration(milliseconds: 40));
+        for (var attempt = 0; attempt < 100; attempt++) {
+          if (!controller.state.isBusy) break;
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+        }
       });
       await tester.pump();
 
-      active = await tester.runAsync<WalkSession?>(() => repo.getActiveSession());
+      active = await tester.runAsync<WalkSession?>(
+        () => repo.getActiveSession(),
+      );
       expect(active, isNull);
+      expect(container.read(sessionControllerProvider).isBusy, isFalse);
       expect(container.read(sessionControllerProvider).needsRecovery, isFalse);
     },
   );
 
-  test('HomeScreen wires confirmDiscardIncompleteWalk before discardActive', () {
-    final home = File('lib/features/home/home_screen.dart').readAsStringSync();
-    expect(home, contains('confirmDiscardIncompleteWalk'));
-    expect(home, contains('discardActive'));
-    expect(
-      home.indexOf('confirmDiscardIncompleteWalk'),
-      lessThan(home.lastIndexOf('discardActive')),
-    );
-  });
+  test(
+    'HomeScreen wires confirmDiscardIncompleteWalk before discardActive',
+    () {
+      final home = File(
+        'lib/features/home/home_screen.dart',
+      ).readAsStringSync();
+      expect(home, contains('confirmDiscardIncompleteWalk'));
+      expect(home, contains('discardActive'));
+      expect(
+        home.indexOf('confirmDiscardIncompleteWalk'),
+        lessThan(home.lastIndexOf('discardActive')),
+      );
+    },
+  );
 }
