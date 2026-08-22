@@ -79,11 +79,18 @@ class _ErroringLocationEngine implements LocationEngine {
   final _samples = StreamController<LocationSample>.broadcast();
   TrackingMode _mode = TrackingMode.balanced;
   bool running = false;
+  bool endDuringStart = false;
   int stopCalls = 0;
 
   void emitError(Object error) {
     if (!_samples.isClosed) _samples.addError(error);
   }
+
+  void emit(LocationSample sample) {
+    if (running && !_samples.isClosed) _samples.add(sample);
+  }
+
+  Future<void> closeStream() => _samples.close();
 
   @override
   Stream<LocationSample> get samples => _samples.stream;
@@ -106,7 +113,10 @@ class _ErroringLocationEngine implements LocationEngine {
   Future<bool> openSystemSettings() async => true;
 
   @override
-  Future<void> start() async => running = true;
+  Future<void> start() async {
+    running = true;
+    if (endDuringStart) await _samples.close();
+  }
 
   @override
   Future<void> stop() async {
@@ -276,6 +286,84 @@ void main() {
     expect(engine.stopCalls, 1);
   });
 
+  test('location stream onDone enters the same recovery state', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = _ErroringLocationEngine();
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+
+    await controller.start();
+    await engine.closeStream();
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.state.isTracking, isFalse);
+    expect(controller.state.needsRecovery, isTrue);
+    expect(engine.stopCalls, 1);
+  });
+
+  test('stream ending during engine startup stays recoverable', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = _ErroringLocationEngine()..endDuringStart = true;
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await container.read(sessionControllerProvider.notifier).start();
+
+    final state = container.read(sessionControllerProvider);
+    expect(state.isTracking, isFalse);
+    expect(state.isBusy, isFalse);
+    expect(state.needsRecovery, isTrue);
+    expect(state.errorMessage, isNotNull);
+    expect(engine.stopCalls, 1);
+  });
+
+  test(
+    'terminal stream cleanup flushes pending samples before recovery',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = _ErroringLocationEngine();
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = controller.state.session!;
+      final sample = LocationSample(
+        timestamp: session.startedAt,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      );
+
+      engine.emit(sample);
+      await Future<void>.delayed(Duration.zero);
+      engine.emitError(StateError('location_stream_ended'));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(await repo.getSamples(session.id), hasLength(1));
+    },
+  );
+
   test('ordinary location stream errors remain non-terminal', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
@@ -341,30 +429,82 @@ void main() {
     expect(ended.endedAt!.difference(now).inSeconds, lessThanOrEqualTo(5));
     final stored = await repo.getSamples(ended.id);
     expect(
-      stored.singleWhere((sample) => sample.timestamp.isAfter(now)).isFilteredOut,
+      stored
+          .singleWhere((sample) => sample.timestamp.isAfter(now))
+          .isFilteredOut,
       isTrue,
     );
   });
 
-  test('recovery also marks a far-future fix outside the persisted route', () async {
+  test(
+    'recovery also marks a far-future fix outside the persisted route',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime.utc(2026, 8, 21, 9);
+      final now = start.add(const Duration(minutes: 2));
+      final session = await repo.startSession(startedAt: start);
+      final trace = buildWalkTrace(
+        start: start,
+        duration: const Duration(minutes: 2),
+        speedMps: 1.3,
+        step: const Duration(seconds: 4),
+      );
+      final future = LocationSample(
+        timestamp: start.add(const Duration(hours: 1)),
+        latitude: 37.6,
+        longitude: 127.1,
+        accuracyM: 5,
+      );
+      await repo.insertSamples(session.id, [...trace, future]);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.restoreIfNeeded();
+
+      final ended = await controller.stop();
+
+      expect(ended, isNotNull);
+      expect(ended!.durationS, lessThan(180));
+      final stored = await repo.getSamples(ended.id);
+      expect(
+        stored
+            .singleWhere((sample) => sample.timestamp == future.timestamp)
+            .isFilteredOut,
+        isTrue,
+      );
+    },
+  );
+
+  test('recovery clamps cached samples before session start', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
     final start = DateTime.utc(2026, 8, 21, 9);
-    final now = start.add(const Duration(minutes: 2));
     final session = await repo.startSession(startedAt: start);
-    final trace = buildWalkTrace(
-      start: start,
-      duration: const Duration(minutes: 2),
-      speedMps: 1.3,
-      step: const Duration(seconds: 4),
-    );
-    final future = LocationSample(
-      timestamp: start.add(const Duration(hours: 1)),
-      latitude: 37.6,
-      longitude: 127.1,
+    final cached = LocationSample(
+      timestamp: start.subtract(const Duration(minutes: 5)),
+      latitude: 37.5,
+      longitude: 127,
       accuracyM: 5,
     );
-    await repo.insertSamples(session.id, [...trace, future]);
+    final current = LocationSample(
+      timestamp: start.add(const Duration(seconds: 30)),
+      latitude: 37.501,
+      longitude: 127,
+      accuracyM: 5,
+    );
+    await repo.insertSamples(session.id, [cached, current]);
+    final now = start.add(const Duration(minutes: 1));
     final container = ProviderContainer(
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
@@ -381,10 +521,10 @@ void main() {
     final ended = await controller.stop();
 
     expect(ended, isNotNull);
-    expect(ended!.durationS, lessThan(180));
-    final stored = await repo.getSamples(ended.id);
+    expect(!ended!.endedAt!.toUtc().isBefore(start), isTrue);
+    final stored = await repo.getSamples(session.id);
     expect(
-      stored.singleWhere((sample) => sample.timestamp == future.timestamp).isFilteredOut,
+      stored.singleWhere((s) => s.timestamp == cached.timestamp).isFilteredOut,
       isTrue,
     );
   });

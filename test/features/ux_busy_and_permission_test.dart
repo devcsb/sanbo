@@ -70,6 +70,29 @@ void main() {
     },
   );
 
+  test(
+    'notification permission waits until location permission is granted',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final notifications = _NeverCompletingPermissionNotifications();
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(permission: LocationPermissionState.denied),
+          ),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(sessionControllerProvider.notifier).start();
+
+      expect(notifications.permissionRequests, 0);
+    },
+  );
+
   test('clearError removes banner message', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

@@ -5,6 +5,18 @@ import 'package:sanbo/platform/location/geolocator_location_engine.dart';
 import 'package:sanbo/platform/location/location_request_policy.dart';
 
 void main() {
+  test('ended fallback stream reports termination during fused recovery', () {
+    expect(
+      GeolocatorLocationEngine.endedStreamAction(
+        running: true,
+        usingLocationManagerFallback: true,
+        recoveryInFlight: true,
+        supportsLocationManagerFallback: true,
+      ),
+      LocationStreamEndAction.report,
+    );
+  });
+
   test('ended stream retries once only while tracking with fused location', () {
     expect(
       GeolocatorLocationEngine.shouldRecoverEndedStream(

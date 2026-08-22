@@ -45,6 +45,9 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         createNotificationChannel()
 
+        // A configuration change can create a new Dart messenger. Never reuse
+        // the previous engine's readiness acknowledgement for this channel.
+        notificationChannelReady = false
         notificationMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             methodChannelName,

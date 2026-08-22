@@ -4,12 +4,13 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:permission_handler/permission_handler.dart' as ph;
 
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/tracking_mode.dart';
 import 'location_engine.dart';
 import 'location_request_policy.dart';
+
+enum LocationStreamEndAction { ignore, recover, report }
 
 /// Production Android/iOS location via geolocator + FGS notification on Android.
 ///
@@ -45,6 +46,26 @@ class GeolocatorLocationEngine implements LocationEngine {
         supportsLocationManagerFallback;
   }
 
+  @visibleForTesting
+  static LocationStreamEndAction endedStreamAction({
+    required bool running,
+    required bool usingLocationManagerFallback,
+    required bool recoveryInFlight,
+    required bool supportsLocationManagerFallback,
+  }) {
+    if (!running) return LocationStreamEndAction.ignore;
+    if (usingLocationManagerFallback) return LocationStreamEndAction.report;
+    if (recoveryInFlight) return LocationStreamEndAction.ignore;
+    if (shouldRecoverEndedStream(
+      running: running,
+      usingLocationManagerFallback: usingLocationManagerFallback,
+      supportsLocationManagerFallback: supportsLocationManagerFallback,
+    )) {
+      return LocationStreamEndAction.recover;
+    }
+    return LocationStreamEndAction.report;
+  }
+
   @override
   Stream<LocationSample> get samples => _controller.stream;
 
@@ -78,36 +99,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     if (p == LocationPermission.denied) {
       p = await Geolocator.requestPermission();
     }
-    final mapped = _mapPermission(p);
-    // Ask only after the location purpose has been accepted. Notification
-    // denial is non-fatal; GPS recording can still continue.
-    if (mapped == LocationPermissionState.granted && Platform.isAndroid) {
-      await _requestNotificationPermission();
-    }
-    return mapped;
-  }
-
-  Future<void> _requestNotificationPermission() async {
-    try {
-      final status = await ph.Permission.notification.status;
-      if (status.isGranted || status.isLimited) return;
-      if (status.isPermanentlyDenied) {
-        developer.log(
-          'Notification permission permanently denied — FGS may fail on API 33+',
-          name: _logName,
-        );
-        return;
-      }
-      final result = await ph.Permission.notification.request();
-      developer.log('Notification permission: $result', name: _logName);
-    } catch (e, st) {
-      developer.log(
-        'Notification permission request failed',
-        name: _logName,
-        error: e,
-        stackTrace: st,
-      );
-    }
+    return _mapPermission(p);
   }
 
   @override
@@ -198,6 +190,11 @@ class GeolocatorLocationEngine implements LocationEngine {
   }
 
   Future<void> _startStream({required bool forceLocationManager}) async {
+    // Mark the fallback before creating its stream. Android can report onDone
+    // immediately, and that callback must terminate instead of retrying fused.
+    if (forceLocationManager) {
+      _usingLocationManagerFallback = true;
+    }
     await _sub?.cancel();
     _sub = null;
 
@@ -274,17 +271,21 @@ class GeolocatorLocationEngine implements LocationEngine {
   }
 
   void _handleStreamDone() {
-    if (!_running || _streamRecoveryInFlight) return;
-    if (shouldRecoverEndedStream(
+    switch (endedStreamAction(
       running: _running,
       usingLocationManagerFallback: _usingLocationManagerFallback,
+      recoveryInFlight: _streamRecoveryInFlight,
       supportsLocationManagerFallback: Platform.isAndroid,
     )) {
-      _streamRecoveryInFlight = true;
-      unawaited(_recoverEndedStream());
-      return;
+      case LocationStreamEndAction.ignore:
+        return;
+      case LocationStreamEndAction.recover:
+        _streamRecoveryInFlight = true;
+        unawaited(_recoverEndedStream());
+        return;
+      case LocationStreamEndAction.report:
+        _reportEndedStream();
     }
-    _reportEndedStream();
   }
 
   Future<void> _recoverEndedStream() async {
@@ -295,7 +296,6 @@ class GeolocatorLocationEngine implements LocationEngine {
         await _stopTrackingOnly();
         return;
       }
-      _usingLocationManagerFallback = true;
       unawaited(_emitCurrentPosition(retries: 2, forceLocationManager: true));
     } catch (e, st) {
       developer.log(
@@ -335,7 +335,6 @@ class GeolocatorLocationEngine implements LocationEngine {
       );
       try {
         await _startStream(forceLocationManager: true);
-        _usingLocationManagerFallback = true;
         unawaited(_emitCurrentPosition(retries: 2, forceLocationManager: true));
       } catch (e, st) {
         developer.log(

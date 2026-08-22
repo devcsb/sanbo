@@ -178,6 +178,7 @@ class SessionController extends Notifier<LiveSessionState> {
   bool _appForeground = true;
   bool _appInactive = false;
   bool _locationStreamFailed = false;
+  bool _streamEndedDuringStart = false;
   bool _restorationComplete = false;
   bool _restoring = false;
   Future<void>? _restoreOperation;
@@ -479,7 +480,6 @@ class SessionController extends Notifier<LiveSessionState> {
       await failureCleanup;
     }
     if (state.isBusy || state.isTracking) return;
-    unawaited(_notifications.requestPermission());
     state = state.copyWith(
       isBusy: true,
       clearError: true,
@@ -522,9 +522,14 @@ class SessionController extends Notifier<LiveSessionState> {
       );
       return;
     }
+    // Request the Android notification permission only after the location
+    // dialog has completed. The controller is the single owner of this UX,
+    // so the location adapter must remain focused on location permission.
+    unawaited(_notifications.requestPermission());
 
     _endingSession = false;
     _locationStreamFailed = false;
+    _streamEndedDuringStart = false;
     _highSpeedWarningPublished = false;
     _sessionGeneration++;
     _maintenanceQueue.reopen();
@@ -582,9 +587,15 @@ class SessionController extends Notifier<LiveSessionState> {
         onError: (Object e) {
           _handleLocationStreamError(e, generation);
         },
+        onDone: () {
+          _handleLocationStreamDone(generation);
+        },
       );
       try {
         await _engine.start();
+        if (_streamEndedDuringStart) {
+          throw StateError('location_stream_ended');
+        }
       } catch (e) {
         await _sampleSub?.cancel();
         _sampleSub = null;
@@ -654,8 +665,11 @@ class SessionController extends Notifier<LiveSessionState> {
     }
     if (generation != _sessionGeneration ||
         _endingSession ||
-        _locationStreamFailed ||
-        !state.isTracking) {
+        _locationStreamFailed) {
+      return;
+    }
+    if (!state.isTracking) {
+      if (state.isBusy) _streamEndedDuringStart = true;
       return;
     }
     _locationStreamFailed = true;
@@ -691,6 +705,10 @@ class SessionController extends Notifier<LiveSessionState> {
     return error.toString().contains('location_stream_ended');
   }
 
+  void _handleLocationStreamDone(int generation) {
+    _handleLocationStreamError(StateError('location_stream_ended'), generation);
+  }
+
   Future<void> _cleanupAfterLocationStreamError() async {
     final subscription = _sampleSub;
     _sampleSub = null;
@@ -702,6 +720,15 @@ class SessionController extends Notifier<LiveSessionState> {
       // if the platform adapter also rejects its cleanup call.
     }
     await _maintenanceQueue.close();
+    final session = state.session;
+    if (session == null || _pendingPersist.isEmpty) return;
+    final batch = List<LocationSample>.of(_pendingPersist);
+    _pendingPersist.clear();
+    try {
+      await _repo.insertSamples(session.id, batch);
+    } catch (_) {
+      _pendingPersist.insertAll(0, batch);
+    }
   }
 
   void _onSample(LocationSample rawSample) {
@@ -898,10 +925,7 @@ class SessionController extends Notifier<LiveSessionState> {
         // pending high-speed state after the engine is armed.
         _sessionGuard.dismissHighSpeedWarning();
         _highSpeedWarningPublished = false;
-        state = state.copyWith(
-          clearActiveWarning: true,
-          statusMessage: '기록 중',
-        );
+        state = state.copyWith(clearActiveWarning: true, statusMessage: '기록 중');
         await _notifications.cancel(kind: warning.kind);
       }
       return;
@@ -920,6 +944,24 @@ class SessionController extends Notifier<LiveSessionState> {
     }
     state = state.copyWith(clearActiveWarning: true, statusMessage: '기록 중');
     await _notifications.cancel(kind: warning.kind);
+  }
+
+  /// Resumes from the recovery card. A recovered high-speed trace is already
+  /// a user-visible decision point, so starting it must dismiss the pending
+  /// guard event just like the notification's "계속 기록" action does.
+  Future<void> resumeRecoveredSession({TrackingMode? mode}) async {
+    final recovering =
+        state.needsRecovery && state.session != null && !state.isTracking;
+    await start(
+      mode: mode ?? state.session?.trackingMode ?? TrackingMode.balanced,
+    );
+    if (!recovering || !state.isTracking) return;
+    _sessionGuard.dismissHighSpeedWarning();
+    _highSpeedWarningPublished = false;
+    if (state.activeWarning?.kind == SessionWarningKind.highSpeed) {
+      state = state.copyWith(clearActiveWarning: true, statusMessage: '기록 중');
+      await _notifications.cancel(kind: SessionWarningKind.highSpeed);
+    }
   }
 
   Future<WalkSession?> stopFromHighSpeedWarning() async {
@@ -1136,7 +1178,10 @@ class SessionController extends Notifier<LiveSessionState> {
       // the aggregator emits a gap-window for every dead minute.
       final DateTime effectiveEnd;
       if (!state.isTracking) {
-        effectiveEnd = raw.isEmpty ? now : (lastUsableTs ?? nowUtc);
+        final candidate = raw.isEmpty ? nowUtc : (lastUsableTs ?? nowUtc);
+        effectiveEnd = candidate.isBefore(session.startedAt.toUtc())
+            ? session.startedAt
+            : candidate;
       } else {
         // Live stop: keep the future-date guard for GPS clocks running ahead
         // (compare on the absolute timeline, UTC GPS vs local wall clock).
@@ -1167,7 +1212,8 @@ class SessionController extends Notifier<LiveSessionState> {
       // this stop fails and the session is resumed.
       final pipelineRaw = [
         for (final sample in raw)
-          sample.timestamp.toUtc().isAfter(effectiveEnd.toUtc())
+          sample.timestamp.toUtc().isBefore(session.startedAt.toUtc()) ||
+                  sample.timestamp.toUtc().isAfter(effectiveEnd.toUtc())
               ? sample.copyWith(isFilteredOut: true)
               : sample,
       ];

@@ -4,7 +4,7 @@
 
 <br/>
 
-<img src="https://img.shields.io/badge/Flutter-3.44-02569B?style=flat-square&logo=flutter&logoColor=white" />
+<img src="https://img.shields.io/badge/Flutter-3.47-02569B?style=flat-square&logo=flutter&logoColor=white" />
 <img src="https://img.shields.io/badge/Dart-3.12-0175C2?style=flat-square&logo=dart&logoColor=white" />
 <img src="https://img.shields.io/badge/Android-API%2024+-3DDC84?style=flat-square&logo=android&logoColor=white" />
 <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" />
@@ -121,7 +121,7 @@
 ### 직접 빌드 (Android)
 
 **요구 사항**
-- Flutter 3.44+ / Dart 3.12+  
+- Flutter 3.47.1+ / Dart 3.12.2+
 - Android SDK (API 24+, JDK 17)  
 
 ```bash

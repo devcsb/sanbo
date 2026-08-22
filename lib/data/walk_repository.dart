@@ -439,10 +439,7 @@ ORDER BY day ASC
           !_sameDouble(left.stationaryRatio, right.stationaryRatio) ||
           left.quality != right.quality ||
           left.hypothesisLabel != right.hypothesisLabel ||
-          !_sameDouble(
-            left.hypothesisConfidence,
-            right.hypothesisConfidence,
-          ) ||
+          !_sameDouble(left.hypothesisConfidence, right.hypothesisConfidence) ||
           left.evidence.join('\u0000') != right.evidence.join('\u0000') ||
           left.displayLabel != right.displayLabel ||
           left.userExclusionId != right.userExclusionId) {
@@ -1135,6 +1132,18 @@ ORDER BY w.window_start ASC
         }
         if (!newSessionIds.contains(sessionId)) continue;
         final ts = _requiredDate(rawSample, 'ts');
+        final session = importedSessionRows[sessionId]!;
+        final sessionStart = _requiredDate(session, 'started_at').toUtc();
+        final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
+        final isFilteredOut = _requiredBoolInt(rawSample, 'is_filtered_out');
+        // Finalization retains clock-skewed provider fixes as filtered audit
+        // data, but an included sample outside the completed span could later
+        // be reinterpreted as route data when exclusions are rebuilt.
+        if (isFilteredOut == 0 &&
+            (ts.toUtc().isBefore(sessionStart) ||
+                ts.toUtc().isAfter(sessionEnd))) {
+          throw const FormatException('산책 범위를 벗어난 위치 데이터가 있습니다');
+        }
         final lat = _requiredCoordinate(rawSample, 'lat', -90, 90);
         final lon = _requiredCoordinate(rawSample, 'lon', -180, 180);
         final key = '$sessionId|${ts.toUtc().microsecondsSinceEpoch}|$lat|$lon';
@@ -1147,7 +1156,7 @@ ORDER BY w.window_start ASC
           'accuracy_m': _optionalDouble(rawSample, 'accuracy_m', min: 0),
           'speed_mps': _optionalDouble(rawSample, 'speed_mps', min: 0),
           'altitude_m': _optionalDouble(rawSample, 'altitude_m'),
-          'is_filtered_out': _requiredBoolInt(rawSample, 'is_filtered_out'),
+          'is_filtered_out': isFilteredOut,
         });
         importedSamples++;
       }
@@ -1239,6 +1248,24 @@ ORDER BY w.window_start ASC
           min: 1,
           max: 60,
         );
+        final minuteEnd = canonicalWindowStart.add(const Duration(minutes: 1));
+        final actualWindowStart = canonicalWindowStart.isAfter(sessionStart)
+            ? canonicalWindowStart
+            : sessionStart;
+        final actualWindowEnd = minuteEnd.isBefore(sessionEnd)
+            ? minuteEnd
+            : sessionEnd;
+        final expectedDurationS = positiveDurationSeconds(
+          actualWindowStart,
+          actualWindowEnd,
+        );
+        if (durationS != expectedDurationS) {
+          throw const FormatException('시간 구간 길이가 산책 범위와 맞지 않습니다');
+        }
+        final partial = _requiredBoolInt(rawWindow, 'partial');
+        if ((partial == 1) != (expectedDurationS < 60)) {
+          throw const FormatException('시간 구간 부분 여부가 산책 범위와 맞지 않습니다');
+        }
         final userExclusionId = _optionalString(
           rawWindow,
           'user_exclusion_id',
@@ -1249,14 +1276,6 @@ ORDER BY w.window_start ASC
           if (exclusion == null || exclusion['session_id'] != sessionId) {
             throw const FormatException('구간 제외 참조가 올바르지 않습니다');
           }
-          final minuteStart = canonicalWindowStart;
-          final minuteEnd = minuteStart.add(const Duration(minutes: 1));
-          final actualWindowStart = minuteStart.isAfter(sessionStart)
-              ? minuteStart
-              : sessionStart;
-          final actualWindowEnd = minuteEnd.isBefore(sessionEnd)
-              ? minuteEnd
-              : sessionEnd;
           final touching = validatedExclusions
               .where((candidate) {
                 if (candidate['session_id'] != sessionId) return false;
@@ -1326,7 +1345,7 @@ ORDER BY w.window_start ASC
           'session_id': sessionId,
           'window_start': _stableWindowStart(windowStart),
           'duration_s': durationS,
-          'partial': _requiredBoolInt(rawWindow, 'partial'),
+          'partial': partial,
           'sample_count': _requiredInt(rawWindow, 'sample_count', min: 0),
           'raw_sample_count': _requiredInt(
             rawWindow,

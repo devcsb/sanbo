@@ -92,6 +92,10 @@ class HomeScreen extends ConsumerWidget {
                                   unawaited(
                                     live.canRetryRecovery
                                         ? controller.retryRecovery()
+                                        : recovery
+                                        ? controller.resumeRecoveredSession(
+                                            mode: startMode,
+                                          )
                                         : controller.start(mode: startMode),
                                   );
                                 },
@@ -149,7 +153,7 @@ class HomeScreen extends ConsumerWidget {
                             unawaited(
                               ref
                                   .read(sessionControllerProvider.notifier)
-                                  .start(mode: startMode),
+                                  .resumeRecoveredSession(mode: startMode),
                             );
                           },
                           onSaveAndEnd: () => _finishAndOpenSummary(

@@ -249,6 +249,35 @@ void main() {
     },
   );
 
+  test('recovery card resume dismisses a rebuilt high-speed warning', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final now = DateTime(2026, 8, 21, 9);
+    final session = await repo.startSession(
+      mode: TrackingMode.balanced,
+      startedAt: now.subtract(const Duration(seconds: 60)),
+    );
+    await repo.insertSamples(session.id, _highSpeedSamples(session.startedAt));
+
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+    await controller.resumeRecoveredSession();
+
+    expect(container.read(sessionControllerProvider).isTracking, isTrue);
+    expect(container.read(sessionControllerProvider).activeWarning, isNull);
+  });
+
   test('recovery ignores stale high-speed samples', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

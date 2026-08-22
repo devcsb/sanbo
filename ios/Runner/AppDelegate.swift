@@ -52,6 +52,9 @@ final class NotificationTapBuffer {
       name: Self.methodChannelName,
       binaryMessenger: registrar.messenger()
     )
+    // The implicit engine can be recreated while the app remains alive.
+    // Require a fresh Dart readiness acknowledgement for every messenger.
+    notificationChannelReady = false
     notificationChannel = channel
     channel.setMethodCallHandler { [weak self] call, result in
       self?.handleMethodCall(call, result: result)

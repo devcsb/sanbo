@@ -440,6 +440,83 @@ void main() {
   );
 
   test(
+    'backup rejects window spans that cannot be produced by a completed session',
+    () async {
+      final source = await openTestRepository();
+      addTearDown(source.close);
+      final fixture = await _seedCompletedPartialMinuteWalk(source);
+      final raw = await source.createBackupJson();
+
+      final corruptions = <void Function(Map<String, dynamic>)>[
+        (backup) {
+          final window =
+              (_tables(backup)['minute_windows'] as List<dynamic>).single
+                  as Map<String, dynamic>;
+          window['duration_s'] = 11;
+        },
+        (backup) {
+          final window =
+              (_tables(backup)['minute_windows'] as List<dynamic>).single
+                  as Map<String, dynamic>;
+          window['partial'] = 0;
+        },
+        (backup) {
+          final sample =
+              (_tables(backup)['location_samples'] as List<dynamic>).first
+                  as Map<String, dynamic>;
+          sample['ts'] = fixture.session.endedAt!
+              .add(const Duration(microseconds: 1))
+              .toIso8601String();
+          sample['is_filtered_out'] = 0;
+        },
+      ];
+
+      for (final corrupt in corruptions) {
+        final target = await openTestRepository();
+        addTearDown(target.close);
+        final backup = jsonDecode(raw) as Map<String, dynamic>;
+        corrupt(backup);
+
+        await expectLater(
+          target.importBackupJson(jsonEncode(backup)),
+          throwsFormatException,
+        );
+        expect(await target.listCompleted(), isEmpty);
+      }
+    },
+  );
+
+  test(
+    'backup keeps filtered audit samples outside the completed session',
+    () async {
+      final source = await openTestRepository();
+      final target = await openTestRepository();
+      addTearDown(source.close);
+      addTearDown(target.close);
+      final fixture = await _seedCompletedPartialMinuteWalk(source);
+      final backup =
+          jsonDecode(await source.createBackupJson()) as Map<String, dynamic>;
+      final sample =
+          (_tables(backup)['location_samples'] as List<dynamic>).first
+              as Map<String, dynamic>;
+      sample['ts'] = fixture.session.endedAt!
+          .add(const Duration(minutes: 1))
+          .toIso8601String();
+      sample['is_filtered_out'] = 1;
+
+      final result = await target.importBackupJson(jsonEncode(backup));
+
+      expect(result.importedSamples, fixture.samples.length);
+      expect(
+        (await target.getSamples(
+          fixture.session.id,
+        )).any((item) => item.timestamp.isAfter(fixture.session.endedAt!)),
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'same-minute disjoint v2 exclusions import with their representative id',
     () async {
       final path =
