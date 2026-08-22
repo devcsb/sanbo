@@ -1436,6 +1436,7 @@ void main() {
 
     final controller = container.read(sessionControllerProvider.notifier);
     await controller.start();
+    final session = container.read(sessionControllerProvider).session!;
     now = start.add(const Duration(minutes: 2));
 
     final ended = await controller.stop();
@@ -1443,6 +1444,13 @@ void main() {
     expect(ended, isNull);
     expect(await repo.listCompleted(), isEmpty);
     expect(await repo.getActiveSession(), isNull);
+    expect(
+      (await repo.getSession(session.id))?.status,
+      SessionStatus.discarded,
+    );
+    final samples = await repo.getSamples(session.id);
+    expect(samples, hasLength(1));
+    expect(samples.single.isFilteredOut, isTrue);
     expect(container.read(sessionControllerProvider).notice, contains('저장하지'));
   });
 

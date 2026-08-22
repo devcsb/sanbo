@@ -325,6 +325,56 @@ WHERE status = ?
         sample.longitude <= 180;
   }
 
+  /// Mark a session discarded while retaining its raw audit samples. A
+  /// discarded session is intentionally excluded from history and backups,
+  /// but its filtered fixes remain available for diagnostics and reprocessing.
+  Future<WalkSession> finalizeDiscardedSession({
+    required WalkSession session,
+    required List<LocationSample> samples,
+    required List<MinuteWindow> windows,
+    required DateTime endedAt,
+  }) async {
+    final discarded = session.copyWith(
+      endedAt: endedAt,
+      status: SessionStatus.discarded,
+    );
+    await _db.transaction((txn) async {
+      await txn.delete(
+        'location_samples',
+        where: 'session_id = ?',
+        whereArgs: [session.id],
+      );
+      final sampleBatch = txn.batch();
+      for (final sample in samples.where(_isPersistableSample)) {
+        sampleBatch.insert(
+          'location_samples',
+          _sampleToRow(session.id, sample),
+        );
+      }
+      await sampleBatch.commit(noResult: true);
+
+      await txn.delete(
+        'minute_windows',
+        where: 'session_id = ?',
+        whereArgs: [session.id],
+      );
+      final windowBatch = txn.batch();
+      for (final window in windows) {
+        windowBatch.insert('minute_windows', _windowToRow(session.id, window));
+      }
+      await windowBatch.commit(noResult: true);
+
+      final updated = await txn.update(
+        'sessions',
+        _sessionToRow(discarded),
+        where: 'id = ?',
+        whereArgs: [session.id],
+      );
+      if (updated != 1) throw StateError('산책 폐기 상태를 저장하지 못했습니다');
+    });
+    return discarded;
+  }
+
   /// Atomically persist a finalized walk: replace samples, replace windows,
   /// and mark the session completed in a single transaction. Prevents a crash
   /// mid-finalize from leaving samples deleted-but-not-reinserted or the

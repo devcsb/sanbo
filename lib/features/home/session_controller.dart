@@ -1422,12 +1422,34 @@ class SessionController extends Notifier<LiveSessionState> {
         endedAt: effectiveEnd,
       );
 
-      // No usable GPS / too short — don't pollute history with noise.
+      // No usable GPS — keep the filtered audit samples, but hide this
+      // session from history and backups as discarded.
+      if (result.metrics.validSampleCount == 0) {
+        await _repo.finalizeDiscardedSession(
+          session: session,
+          samples: result.filteredSamples,
+          windows: result.windows,
+          endedAt: effectiveEnd,
+        );
+        _sessionSamples.clear();
+        _pendingPersist.clear();
+        _lastValidSample = null;
+        _liveDistanceM = 0;
+        _liveSpeedMps = 0;
+        _lastAccuracyM = null;
+        _validSampleCount = 0;
+        state = const LiveSessionState(
+          notice: 'GPS를 받지 못해 산책을 저장하지 않았어요. 야외에서 다시 시작해 주세요.',
+        );
+        return null;
+      }
+
+      // Too short / no real movement — don't pollute history with noise.
       final tooShort =
           result.metrics.durationS < 20 &&
           result.metrics.totalDistanceM < 15 &&
           result.metrics.validSampleCount < 5;
-      if (result.metrics.validSampleCount == 0 || tooShort) {
+      if (tooShort) {
         await _repo.deleteSession(session.id);
         _sessionSamples.clear();
         _pendingPersist.clear();
