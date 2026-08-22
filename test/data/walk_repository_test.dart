@@ -74,7 +74,11 @@ void main() {
     final first = windows.first;
 
     expect(first.windowStart.isUtc, isFalse);
-    expect(first.windowStart, DateTime(2026, 8, 21, 9));
+    expect(first.windowStart.year, 2026);
+    expect(first.windowStart.month, 8);
+    expect(first.windowStart.day, 21);
+    expect(first.windowStart.hour, 9);
+    expect(first.windowStart.minute, 0);
     expect(first.windowStart.toUtc(), DateTime.utc(2026, 8, 21));
   });
 
@@ -765,8 +769,11 @@ ORDER BY started_at ASC
       final repo = await openTestRepository();
       addTearDown(repo.close);
       for (var i = 0; i < 3; i++) {
-        final started = DateTime(2026, 7, 20, 10 + i);
-        final session = await repo.startSession(startedAt: started);
+        final started = DateTime.utc(2026, 7, 20, 10 + i);
+        final session = await repo.startSession(
+          startedAt: started,
+          timezone: 'UTC',
+        );
         await repo.completeSession(
           sessionId: session.id,
           endedAt: started.add(Duration(minutes: i + 1)),
