@@ -1178,6 +1178,7 @@ void main() {
       expect(live.isTracking, isTrue);
       expect(live.activeWarning, isNull);
       expect(fixture.notifications.tapDeliveries, 1);
+      expect(fixture.notifications.events, contains('cancel:highSpeed'));
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
     },

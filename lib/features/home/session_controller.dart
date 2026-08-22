@@ -1115,13 +1115,16 @@ class SessionController extends Notifier<LiveSessionState> {
   Future<void> resumeRecoveredSession({TrackingMode? mode}) async {
     final recovering =
         state.needsRecovery && state.session != null && !state.isTracking;
+    final hadRecoveredHighSpeedWarning =
+        state.activeWarning?.kind == SessionWarningKind.highSpeed ||
+        !_sessionGuard.highSpeedArmed;
     await start(
       mode: mode ?? state.session?.trackingMode ?? TrackingMode.balanced,
     );
     if (!recovering || !state.isTracking) return;
     _sessionGuard.dismissHighSpeedWarning();
     _highSpeedWarningPublished = false;
-    if (state.activeWarning?.kind == SessionWarningKind.highSpeed) {
+    if (hadRecoveredHighSpeedWarning) {
       state = state.copyWith(clearActiveWarning: true, statusMessage: '기록 중');
       await _enqueueNotification(
         () => _notifications.cancel(kind: SessionWarningKind.highSpeed),

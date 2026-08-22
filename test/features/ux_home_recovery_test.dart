@@ -49,6 +49,40 @@ class _FlakyActiveSessionRepository extends WalkRepository {
   }
 }
 
+class _RecordingSessionNotifications implements SessionNotificationService {
+  final events = <String>[];
+
+  @override
+  Future<void> cancel({required SessionWarningKind kind}) async {
+    events.add('cancel:${kind.name}');
+  }
+
+  @override
+  Future<void> cancelAllWarnings() async {}
+
+  @override
+  Future<void> initialize() async {}
+
+  @override
+  Future<NotificationPermissionResult> requestPermission() async {
+    return NotificationPermissionResult.granted;
+  }
+
+  @override
+  Future<void> showCompletion({
+    required String title,
+    required String body,
+  }) async {}
+
+  @override
+  Future<void> showWarning(SessionWarning warning, {String? sessionId}) async {
+    events.add('show:${warning.kind.name}');
+  }
+
+  @override
+  Stream<SessionNotificationTap> get taps => const Stream.empty();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
@@ -419,6 +453,7 @@ void main() {
       startedAt: now.subtract(const Duration(seconds: 60)),
     );
     await repo.insertSamples(session.id, _highSpeedSamples(session.startedAt));
+    final notifications = _RecordingSessionNotifications();
 
     final container = ProviderContainer(
       overrides: [
@@ -426,6 +461,7 @@ void main() {
         locationEngineProvider.overrideWithValue(
           SyntheticLocationEngine(permission: LocationPermissionState.granted),
         ),
+        sessionNotificationServiceProvider.overrideWithValue(notifications),
         sessionClockProvider.overrideWithValue(() => now),
       ],
     );
@@ -437,6 +473,7 @@ void main() {
 
     expect(container.read(sessionControllerProvider).isTracking, isTrue);
     expect(container.read(sessionControllerProvider).activeWarning, isNull);
+    expect(notifications.events, contains('cancel:highSpeed'));
   });
 
   test('recovery ignores stale high-speed samples', () async {
