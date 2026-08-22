@@ -815,7 +815,11 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
               foregroundColor: Theme.of(ctx).colorScheme.onError,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('차량 이동 구간 제외'),
+            child: Text(
+              segment.label == ActivityLabel.vehicle
+                  ? '차량 이동 구간 제외'
+                  : '이 구간 제외',
+            ),
           ),
         ],
       ),

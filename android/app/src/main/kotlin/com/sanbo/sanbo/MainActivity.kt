@@ -27,10 +27,16 @@ internal fun notificationSessionId(sessionId: String?): String? =
 internal fun notificationSessionId(intent: Intent?): String? =
     notificationSessionId(intent?.getStringExtra(notificationSessionIdExtra))
 
+internal fun shouldDeliverNotificationTap(
+    channelReady: Boolean,
+    hasChannel: Boolean,
+): Boolean = channelReady && hasChannel
+
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "sanbo/session_notifications"
     private val notificationChannelId = "sanbo_session_alerts"
     private var notificationMethodChannel: MethodChannel? = null
+    private var notificationChannelReady = false
     private var pendingKind: String? = null
     private var pendingSessionId: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
@@ -45,6 +51,12 @@ class MainActivity : FlutterActivity() {
         ).also { channel ->
             channel.setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "ready" -> {
+                        notificationChannelReady = true
+                        flushPendingTap()
+                        result.success(null)
+                    }
+                    "getTimezone" -> result.success(java.util.TimeZone.getDefault().id)
                     "requestPermission" -> requestNotificationPermission(result)
                     "show" -> {
                         val id = call.argument<Int>("id")
@@ -78,15 +90,6 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
-        }
-        pendingKind?.let { kind ->
-            val sessionId = pendingSessionId
-            pendingKind = null
-            pendingSessionId = null
-            notificationMethodChannel?.invokeMethod(
-                "notificationTapped",
-                mapOf("kind" to kind, "sessionId" to sessionId),
-            )
         }
         deliverOrQueueTap(intent)
     }
@@ -137,17 +140,32 @@ class MainActivity : FlutterActivity() {
         val kind = notificationKind(intent) ?: return
         val sessionId = notificationSessionId(intent) ?: return
         val channel = notificationMethodChannel
-        if (channel == null) {
+        if (!shouldDeliverNotificationTap(
+                channelReady = notificationChannelReady,
+                hasChannel = channel != null,
+            )
+        ) {
             pendingKind = kind
             pendingSessionId = sessionId
         } else {
-            channel.invokeMethod(
+            channel?.invokeMethod(
                 "notificationTapped",
                 mapOf("kind" to kind, "sessionId" to sessionId),
             )
         }
         intent?.removeExtra(notificationKindExtra)
         intent?.removeExtra(notificationSessionIdExtra)
+    }
+
+    private fun flushPendingTap() {
+        val kind = pendingKind ?: return
+        val sessionId = pendingSessionId
+        pendingKind = null
+        pendingSessionId = null
+        notificationMethodChannel?.invokeMethod(
+            "notificationTapped",
+            mapOf("kind" to kind, "sessionId" to sessionId),
+        )
     }
 
     private fun isSupportedNotification(

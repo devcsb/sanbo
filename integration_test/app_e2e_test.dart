@@ -25,12 +25,14 @@ void main() {
     final engine = SyntheticLocationEngine(
       permission: LocationPermissionState.granted,
     );
+    var now = DateTime.now();
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
           introSeenProvider.overrideWith((ref) => true),
         ],
         child: const SanboApp(),
@@ -63,6 +65,7 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 10));
     }
+    now = start.add(const Duration(seconds: 116));
 
     expect(find.text('산책 종료'), findsOneWidget);
     await tester.tap(find.text('산책 종료'));

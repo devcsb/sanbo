@@ -59,7 +59,7 @@ void main() {
       'Future<void> showCompletion({required String title, required String body})',
       'duration limit, stationary limit, duration warning, stationary warning, high-speed warning',
       'observedAt',
-      'notificationTapped({kind: highSpeed})',
+        'notificationTapped({kind: highSpeed, sessionId})',
     ]) {
       expect(guard, contains(contract));
     }

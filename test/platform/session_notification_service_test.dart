@@ -36,10 +36,26 @@ void main() {
     );
     await service.cancel(kind: SessionWarningKind.highSpeed);
 
-    expect(calls[0].arguments, containsPair('kind', 'highSpeed'));
-    expect(calls[0].arguments, containsPair('id', 4103));
-    expect(calls[0].arguments, containsPair('sessionId', 'session-1'));
-    expect(calls[1].arguments, containsPair('id', 4103));
+    final notificationCalls = calls.where((call) => call.method != 'ready').toList();
+    expect(notificationCalls[0].arguments, containsPair('kind', 'highSpeed'));
+    expect(notificationCalls[0].arguments, containsPair('id', 4103));
+    expect(notificationCalls[0].arguments, containsPair('sessionId', 'session-1'));
+    expect(notificationCalls[1].arguments, containsPair('id', 4103));
+  });
+
+  test('initialize sends the native readiness handshake once', () async {
+    final calls = <MethodCall>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          calls.add(call);
+          return null;
+        });
+    final service = PlatformSessionNotificationService();
+
+    await service.initialize();
+    await service.initialize();
+
+    expect(calls.map((call) => call.method), ['ready']);
   });
 
   test('cancel all warnings clears every distinct warning id', () async {
@@ -54,8 +70,9 @@ void main() {
 
     await service.cancelAllWarnings();
 
-    expect(calls.map((call) => call.method), ['cancel', 'cancel']);
-    expect(calls.map((call) => call.arguments), [
+    final notificationCalls = calls.where((call) => call.method != 'ready');
+    expect(notificationCalls.map((call) => call.method), ['cancel', 'cancel']);
+    expect(notificationCalls.map((call) => call.arguments), [
       {'id': 4101},
       {'id': 4103},
     ]);

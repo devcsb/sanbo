@@ -37,7 +37,10 @@ class SampleFilter {
     LocationSample? lastValid;
 
     for (final s in sorted) {
-      var filtered = false;
+      // Preserve an explicit boundary decision made by the caller, such as a
+      // GPS fix beyond the receipt-time future skew. Re-running the filter
+      // must not silently turn that sample back into a route anchor.
+      var filtered = s.isFilteredOut;
 
       // A malformed provider fix must never become the path anchor. Without
       // this guard, NaN coordinates make distance comparisons false and can

@@ -56,6 +56,15 @@ double pathDistanceMeters(
   return total;
 }
 
+/// Round a positive observed span up to the integer-second storage contract.
+/// Zero and negative spans remain zero.
+int positiveDurationSeconds(DateTime start, DateTime end) {
+  final microseconds = end.difference(start).inMicroseconds;
+  if (microseconds <= 0) return 0;
+  return (microseconds + Duration.microsecondsPerSecond - 1) ~/
+      Duration.microsecondsPerSecond;
+}
+
 double _toRad(double deg) => deg * math.pi / 180.0;
 
 var _timeZonesInitialized = false;
@@ -81,7 +90,7 @@ tz.Location? _locationFor(String? timezone) {
 /// Convert any DateTime to the session or device local timeline.
 DateTime asLocal(DateTime ts, {String? timezone}) {
   final location = _locationFor(timezone);
-  if (location == null) return ts.isUtc ? ts.toLocal() : ts;
+  if (location == null) return ts.toLocal();
   return tz.TZDateTime.from(ts.toUtc(), location);
 }
 

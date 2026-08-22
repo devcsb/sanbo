@@ -595,7 +595,7 @@ Future<void> WalkRepository.restoreRouteExclusion({
 });
 ```
 
-알림 권한 거부와 notification API 실패는 비치명이다. 위치 권한, location engine 시작, 세션 생성과 기록을 지연하거나 실패시키지 않는다. native payload는 `kind: highSpeed`이고 Dart 전달은 `notificationTapped({kind: highSpeed})`다. warm start에서는 tap을 받은 즉시 홈으로 이동해 활성 고속 경고를 표시한다. cold start에서는 native의 한 항목 버퍼를 `initialize()` 뒤 전달하고, 세션 복구가 끝난 뒤 `rebuildHighSpeedState`로 고속 상태와 경고를 재구성한다. 일반 종료, 고속 경고 종료와 discard는 `cancelAllWarnings()`로 4101과 4103을 모두 지운다. 고속 경고의 종료 성공도 `historyTickProvider`를 갱신하고 완료 상세 화면으로 이동한다.
+알림 권한 거부와 notification API 실패는 비치명이다. 위치 권한, location engine 시작, 세션 생성과 기록을 지연하거나 실패시키지 않는다. native payload는 `kind: highSpeed`와 `sessionId`이고 Dart 전달은 `notificationTapped({kind: highSpeed, sessionId})`다. Dart가 `ready` handshake를 보내기 전까지 Android와 iOS native가 cold tap을 한 항목 버퍼에 보관한다. warm start에서는 tap을 받은 즉시 홈으로 이동해 활성 고속 경고를 표시한다. cold start에서는 native 버퍼를 `initialize()` 뒤 전달하고, 세션 복구가 끝난 뒤 `rebuildHighSpeedState`로 고속 상태와 경고를 재구성한다. 일반 종료, 고속 경고 종료와 discard는 `cancelAllWarnings()`로 4101과 4103을 모두 지운다. 고속 경고의 종료 성공도 `historyTickProvider`를 갱신하고 완료 상세 화면으로 이동한다.
 
 ---
 

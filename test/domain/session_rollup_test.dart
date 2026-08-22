@@ -203,6 +203,38 @@ void main() {
     _expectFiniteZeroMetrics(result);
   });
 
+  test('rounds a positive sub-second summary consistently with its window', () {
+    final start = DateTime.utc(2026, 8, 21, 0, 0, 59, 500);
+    final end = start.add(const Duration(microseconds: 500000));
+    final session = _session(id: 'sub-second', start: start);
+    final sample = LocationSample(
+      timestamp: start,
+      latitude: 37.5,
+      longitude: 127,
+      accuracyM: 5,
+    );
+    final partition = RoutePartitioner.partition(
+      samples: [sample],
+      exclusions: const [],
+    );
+    final windows = WindowAggregator().aggregate(
+      partition: partition,
+      rawSamples: [sample],
+      exclusions: const [],
+      sessionStart: start,
+      sessionEnd: end,
+    );
+    final result = SessionRollup().compute(
+      session: session,
+      partition: partition,
+      exclusions: const [],
+      endedAt: end,
+    );
+
+    expect(windows.single.durationS, 1);
+    expect(result.durationS, windows.single.durationS);
+  });
+
   test('excludes every sample without creating route movement', () {
     final start = DateTime.utc(2026, 8, 21);
     final end = start.add(const Duration(minutes: 1));

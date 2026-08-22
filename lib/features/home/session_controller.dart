@@ -13,6 +13,7 @@ import '../../domain/services/session_guard.dart';
 import '../../domain/services/session_pipeline.dart';
 import '../../platform/location/location_engine.dart';
 import '../../platform/notifications/session_notification_service.dart';
+import '../../platform/session_timezone.dart';
 import '../history/history_providers.dart';
 import 'session_maintenance_queue.dart';
 
@@ -143,6 +144,10 @@ final sessionClockProvider = Provider<DateTime Function()>((ref) {
   return DateTime.now;
 });
 
+final sessionTimezoneProvider = Provider<Future<String> Function()>((ref) {
+  return currentSessionTimezone;
+});
+
 class SessionController extends Notifier<LiveSessionState> {
   Timer? _ticker;
   Timer? _checkpointTimer;
@@ -164,6 +169,7 @@ class SessionController extends Notifier<LiveSessionState> {
   late SessionGuard _sessionGuard;
   late SessionNotificationService _notifications;
   late DateTime Function() _clock;
+  late Future<String> Function() _timezone;
   final _maintenanceQueue = SessionMaintenanceQueue();
   var _sessionGeneration = 0;
   var _endingSession = false;
@@ -171,9 +177,11 @@ class SessionController extends Notifier<LiveSessionState> {
   bool _highSpeedWarningPublished = false;
   bool _appForeground = true;
   bool _appInactive = false;
+  bool _locationStreamFailed = false;
   bool _restorationComplete = false;
   bool _restoring = false;
   Future<void>? _restoreOperation;
+  Future<void>? _locationFailureCleanup;
   SessionNotificationTap? _pendingNotificationTap;
 
   static const _checkpointEvery = Duration(seconds: 30);
@@ -185,6 +193,7 @@ class SessionController extends Notifier<LiveSessionState> {
     _sessionGuard = SessionGuard(policy: ref.read(sessionGuardPolicyProvider));
     _notifications = ref.read(sessionNotificationServiceProvider);
     _clock = ref.read(sessionClockProvider);
+    _timezone = ref.read(sessionTimezoneProvider);
     ref.onDispose(() {
       _ticker?.cancel();
       _ticker = null;
@@ -465,6 +474,10 @@ class SessionController extends Notifier<LiveSessionState> {
     if (restoreOperation != null) {
       await restoreOperation;
     }
+    final failureCleanup = _locationFailureCleanup;
+    if (failureCleanup != null) {
+      await failureCleanup;
+    }
     if (state.isBusy || state.isTracking) return;
     unawaited(_notifications.requestPermission());
     state = state.copyWith(
@@ -511,6 +524,7 @@ class SessionController extends Notifier<LiveSessionState> {
     }
 
     _endingSession = false;
+    _locationStreamFailed = false;
     _highSpeedWarningPublished = false;
     _sessionGeneration++;
     _maintenanceQueue.reopen();
@@ -519,7 +533,11 @@ class SessionController extends Notifier<LiveSessionState> {
     try {
       session = await _repo.getActiveSession();
       final resuming = session != null;
-      session ??= await _repo.startSession(mode: mode, startedAt: _clock());
+      session ??= await _repo.startSession(
+        mode: mode,
+        startedAt: _clock(),
+        timezone: await _timezone(),
+      );
 
       if (resuming) {
         // Reconcile persisted and memory-only samples. A failed finalization
@@ -534,6 +552,10 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist
           ..clear()
           ..addAll(_missingSamples(existing, recovered));
+        _sessionGuard.rebuildHighSpeedState(
+          samples: _liveFilter.apply(recovered),
+          observedAt: _clock(),
+        );
       } else {
         _sessionSamples.clear();
         _pendingPersist.clear();
@@ -558,12 +580,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _sampleSub = _engine.samples.listen(
         _onSample,
         onError: (Object e) {
-          if (generation != _sessionGeneration || _endingSession) return;
-          final msg = _locationErrorMessage(e);
-          state = state.copyWith(
-            errorMessage: msg,
-            statusMessage: state.isTracking ? state.statusMessage : null,
-          );
+          _handleLocationStreamError(e, generation);
         },
       );
       try {
@@ -623,6 +640,68 @@ class SessionController extends Notifier<LiveSessionState> {
         errorMessage: '시작할 수 없습니다. 잠시 후 다시 시도해 주세요.',
       );
     }
+  }
+
+  void _handleLocationStreamError(Object error, int generation) {
+    if (!_isTerminalLocationStreamError(error)) {
+      if (generation == _sessionGeneration && !_endingSession) {
+        state = state.copyWith(
+          errorMessage: _locationErrorMessage(error),
+          statusMessage: state.isTracking ? state.statusMessage : null,
+        );
+      }
+      return;
+    }
+    if (generation != _sessionGeneration ||
+        _endingSession ||
+        _locationStreamFailed ||
+        !state.isTracking) {
+      return;
+    }
+    _locationStreamFailed = true;
+    _endingSession = true;
+    _sessionGeneration++;
+    _cancelSessionGuard();
+    _ticker?.cancel();
+    _ticker = null;
+    _checkpointTimer?.cancel();
+    _checkpointTimer = null;
+    _firstFixTimer?.cancel();
+    _firstFixTimer = null;
+    state = state.copyWith(
+      isTracking: false,
+      isBusy: false,
+      needsRecovery: true,
+      clearActiveWarning: true,
+      errorMessage: _locationErrorMessage(error),
+      statusMessage: '기록은 기기에 남아 있습니다.',
+    );
+    final cleanup = _cleanupAfterLocationStreamError();
+    _locationFailureCleanup = cleanup;
+    unawaited(
+      cleanup.whenComplete(() {
+        if (identical(_locationFailureCleanup, cleanup)) {
+          _locationFailureCleanup = null;
+        }
+      }),
+    );
+  }
+
+  bool _isTerminalLocationStreamError(Object error) {
+    return error.toString().contains('location_stream_ended');
+  }
+
+  Future<void> _cleanupAfterLocationStreamError() async {
+    final subscription = _sampleSub;
+    _sampleSub = null;
+    await subscription?.cancel();
+    try {
+      await _engine.stop();
+    } catch (_) {
+      // The stream has already failed. Keep the recoverable state visible even
+      // if the platform adapter also rejects its cleanup call.
+    }
+    await _maintenanceQueue.close();
   }
 
   void _onSample(LocationSample rawSample) {
@@ -698,7 +777,7 @@ class SessionController extends Notifier<LiveSessionState> {
     // Native location recording continues in the background, but rebuilding
     // the Riverpod/UI tree for every GPS fix does not. The latest aggregates
     // are published once when the app returns to the foreground.
-    if (_appForeground || clearVisibleStationaryWarning) {
+    if (!_appInactive && (_appForeground || clearVisibleStationaryWarning)) {
       state = state.copyWith(
         sampleCount: _sessionSamples.length,
         validSampleCount: _validSampleCount,
@@ -814,6 +893,15 @@ class SessionController extends Notifier<LiveSessionState> {
         state.session != null) {
       await start(mode: state.session!.trackingMode);
       if (state.isTracking) {
+        // A cold recovery rebuilds the guard from persisted fixes. Continuing
+        // is an explicit dismissal of the recovered warning, so clear the
+        // pending high-speed state after the engine is armed.
+        _sessionGuard.dismissHighSpeedWarning();
+        _highSpeedWarningPublished = false;
+        state = state.copyWith(
+          clearActiveWarning: true,
+          statusMessage: '기록 중',
+        );
         await _notifications.cancel(kind: warning.kind);
       }
       return;
@@ -993,7 +1081,12 @@ class SessionController extends Notifier<LiveSessionState> {
       _firstFixTimer = null;
       await _sampleSub?.cancel();
       _sampleSub = null;
-      await _engine.stop();
+      final failureCleanup = _locationFailureCleanup;
+      if (failureCleanup != null) {
+        await failureCleanup;
+      } else if (!_locationStreamFailed) {
+        await _engine.stop();
+      }
 
       // Flush remaining in-memory samples before rollup.
       await _flushPendingSamples(generation: generation, allowEnding: true);
@@ -1023,21 +1116,32 @@ class SessionController extends Notifier<LiveSessionState> {
       }
 
       final now = _clock();
+      final nowUtc = now.toUtc();
+      final maxFutureEnd = nowUtc.add(_sessionGuard.policy.maxSampleFutureSkew);
       final lastTs = raw.isEmpty
           ? now
           : raw.map((s) => s.timestamp).reduce((a, b) => a.isAfter(b) ? a : b);
+      final lastUsableTs = raw
+          .map((sample) => sample.timestamp.toUtc())
+          .where((timestamp) => !timestamp.isAfter(maxFutureEnd))
+          .fold<DateTime?>(
+            null,
+            (latest, timestamp) => latest == null || timestamp.isAfter(latest)
+                ? timestamp
+                : latest,
+          );
       // On recovery (not actively tracking) the app was killed for an unknown
       // gap, so `now` is far past the real end. Cap at the last real sample —
       // otherwise duration/moving-time absorb the dead gap (pace goes wild) and
       // the aggregator emits a gap-window for every dead minute.
       final DateTime effectiveEnd;
       if (!state.isTracking) {
-        effectiveEnd = raw.isEmpty ? now : lastTs.toLocal();
+        effectiveEnd = raw.isEmpty ? now : (lastUsableTs ?? nowUtc);
       } else {
         // Live stop: keep the future-date guard for GPS clocks running ahead
         // (compare on the absolute timeline, UTC GPS vs local wall clock).
-        effectiveEnd = lastTs.toUtc().isAfter(now.toUtc())
-            ? lastTs.toLocal().add(const Duration(seconds: 1))
+        effectiveEnd = lastTs.toUtc().isAfter(nowUtc)
+            ? (lastTs.toUtc().isAfter(maxFutureEnd) ? maxFutureEnd : lastTs)
             : now;
       }
 
@@ -1057,9 +1161,20 @@ class SessionController extends Notifier<LiveSessionState> {
         return null;
       }
 
+      // Keep provider fixes for audit/debugging, but make the receipt-time
+      // boundary explicit before the shared pipeline re-runs its filter. A
+      // far-future fix must never become an unfiltered recovery anchor after
+      // this stop fails and the session is resumed.
+      final pipelineRaw = [
+        for (final sample in raw)
+          sample.timestamp.toUtc().isAfter(effectiveEnd.toUtc())
+              ? sample.copyWith(isFilteredOut: true)
+              : sample,
+      ];
+
       final result = _pipeline.process(
         session: session,
-        rawSamples: raw,
+        rawSamples: pipelineRaw,
         endedAt: effectiveEnd,
       );
 
@@ -1143,7 +1258,12 @@ class SessionController extends Notifier<LiveSessionState> {
       _firstFixTimer = null;
       await _sampleSub?.cancel();
       _sampleSub = null;
-      await _engine.stop();
+      final failureCleanup = _locationFailureCleanup;
+      if (failureCleanup != null) {
+        await failureCleanup;
+      } else if (!_locationStreamFailed) {
+        await _engine.stop();
+      }
       await _repo.deleteSession(session.id);
       _sessionSamples.clear();
       _pendingPersist.clear();

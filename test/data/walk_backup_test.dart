@@ -548,6 +548,14 @@ void main() {
         ).toIso8601String();
       },
       (backup) {
+        final windows = _tables(backup)['minute_windows'] as List<dynamic>;
+        final window = windows.cast<Map<String, dynamic>>().first;
+        final start = DateTime.parse(window['window_start'] as String);
+        window['window_start'] = start
+            .add(const Duration(seconds: 30))
+            .toIso8601String();
+      },
+      (backup) {
         final exclusions = _tables(backup)['route_exclusions'] as List<dynamic>;
         final duplicate = Map<String, dynamic>.from(
           exclusions.single as Map<String, dynamic>,

@@ -81,7 +81,7 @@ class WindowAggregator {
       final windowEnd = cursor.add(const Duration(minutes: 1));
       final spanStart = startLocal.isAfter(cursor) ? startLocal : cursor;
       final spanEnd = endLocal.isBefore(windowEnd) ? endLocal : windowEnd;
-      final durationS = _positiveDurationSeconds(spanStart, spanEnd);
+      final durationS = positiveDurationSeconds(spanStart, spanEnd);
       final rawSampleCount = rawByMinute[cursor]?.length ?? 0;
       final exclusionId = excludedWindows[cursor];
       if (exclusionId != null) {
@@ -350,13 +350,6 @@ class WindowAggregator {
     }
     return WindowQuality.low;
   }
-}
-
-int _positiveDurationSeconds(DateTime start, DateTime end) {
-  final microseconds = end.difference(start).inMicroseconds;
-  if (microseconds <= 0) return 0;
-  return (microseconds + Duration.microsecondsPerSecond - 1) ~/
-      Duration.microsecondsPerSecond;
 }
 
 DateTime _later(DateTime a, DateTime b) => a.isAfter(b) ? a : b;

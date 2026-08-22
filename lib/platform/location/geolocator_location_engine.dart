@@ -28,10 +28,22 @@ class GeolocatorLocationEngine implements LocationEngine {
   StreamSubscription<Position>? _sub;
   bool _running = false;
   bool _usingLocationManagerFallback = false;
+  bool _streamRecoveryInFlight = false;
   Timer? _stallWatchdog;
   int _emitCount = 0;
 
   static const _logName = 'sanbo.location';
+
+  @visibleForTesting
+  static bool shouldRecoverEndedStream({
+    required bool running,
+    required bool usingLocationManagerFallback,
+    required bool supportsLocationManagerFallback,
+  }) {
+    return running &&
+        !usingLocationManagerFallback &&
+        supportsLocationManagerFallback;
+  }
 
   @override
   Stream<LocationSample> get samples => _controller.stream;
@@ -132,6 +144,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     await _stopTrackingOnly();
     _running = true;
     _usingLocationManagerFallback = false;
+    _streamRecoveryInFlight = false;
     _emitCount = 0;
 
     final perm = await Geolocator.checkPermission();
@@ -246,6 +259,7 @@ class GeolocatorLocationEngine implements LocationEngine {
       },
       onDone: () {
         developer.log('Position stream done', name: _logName);
+        _handleStreamDone();
       },
       cancelOnError: false,
     );
@@ -256,6 +270,56 @@ class GeolocatorLocationEngine implements LocationEngine {
       await ready.future.timeout(const Duration(milliseconds: 400));
     } on TimeoutException {
       // No fix yet is normal; subscription itself is fine.
+    }
+  }
+
+  void _handleStreamDone() {
+    if (!_running || _streamRecoveryInFlight) return;
+    if (shouldRecoverEndedStream(
+      running: _running,
+      usingLocationManagerFallback: _usingLocationManagerFallback,
+      supportsLocationManagerFallback: Platform.isAndroid,
+    )) {
+      _streamRecoveryInFlight = true;
+      unawaited(_recoverEndedStream());
+      return;
+    }
+    _reportEndedStream();
+  }
+
+  Future<void> _recoverEndedStream() async {
+    try {
+      if (!_running) return;
+      await _startStream(forceLocationManager: true);
+      if (!_running) {
+        await _stopTrackingOnly();
+        return;
+      }
+      _usingLocationManagerFallback = true;
+      unawaited(_emitCurrentPosition(retries: 2, forceLocationManager: true));
+    } catch (e, st) {
+      developer.log(
+        'Ended Fused stream fallback failed',
+        name: _logName,
+        error: e,
+        stackTrace: st,
+      );
+      _reportEndedStream(st);
+    } finally {
+      _streamRecoveryInFlight = false;
+    }
+  }
+
+  void _reportEndedStream([StackTrace? stackTrace]) {
+    if (!_running) return;
+    _running = false;
+    _stallWatchdog?.cancel();
+    _stallWatchdog = null;
+    if (!_controller.isClosed) {
+      _controller.addError(
+        StateError('location_stream_ended'),
+        stackTrace ?? StackTrace.current,
+      );
     }
   }
 

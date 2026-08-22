@@ -846,6 +846,7 @@ void main() {
     final repo = await openTestRepository();
     addTearDown(repo.close);
     final session = await repo.startSession(mode: TrackingMode.balanced);
+    final now = session.startedAt.add(const Duration(minutes: 1));
     await repo.insertSamples(
       session.id,
       _highSpeedTrace(session.startedAt, seconds: 60),
@@ -856,6 +857,7 @@ void main() {
         locationEngineProvider.overrideWithValue(
           SyntheticLocationEngine(permission: LocationPermissionState.granted),
         ),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container.dispose);
@@ -1056,6 +1058,7 @@ Future<_ColdWarningFixture> _coldWarningFixture(WidgetTester tester) async {
   final session = (await tester.runAsync<WalkSession>(
     () => repo.startSession(mode: TrackingMode.balanced),
   ))!;
+  final now = session.startedAt.add(const Duration(minutes: 1));
   await tester.runAsync(
     () => repo.insertSamples(
       session.id,
@@ -1084,6 +1087,7 @@ Future<_ColdWarningFixture> _coldWarningFixture(WidgetTester tester) async {
       locationEngineProvider.overrideWithValue(
         SyntheticLocationEngine(permission: LocationPermissionState.granted),
       ),
+      sessionClockProvider.overrideWithValue(() => now),
       sessionNotificationServiceProvider.overrideWithValue(notifications),
       routerProvider.overrideWithValue(router),
     ],

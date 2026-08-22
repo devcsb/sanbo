@@ -33,6 +33,7 @@ final class NotificationTapBuffer {
 
   private let tapBuffer = NotificationTapBuffer()
   private var notificationChannel: FlutterMethodChannel?
+  private var notificationChannelReady = false
 
   override func application(
     _ application: UIApplication,
@@ -56,12 +57,6 @@ final class NotificationTapBuffer {
       self?.handleMethodCall(call, result: result)
     }
     UNUserNotificationCenter.current().delegate = self
-    if let tap = tapBuffer.take() {
-      channel.invokeMethod(
-        "notificationTapped",
-        arguments: ["kind": tap.kind, "sessionId": tap.sessionId]
-      )
-    }
   }
 
   override func userNotificationCenter(
@@ -85,6 +80,12 @@ final class NotificationTapBuffer {
 
   private func handleMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     switch call.method {
+    case "ready":
+      notificationChannelReady = true
+      flushPendingTap()
+      result(nil)
+    case "getTimezone":
+      result(TimeZone.current.identifier)
     case "requestPermission":
       UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) {
         granted, error in
@@ -173,7 +174,7 @@ final class NotificationTapBuffer {
 
   private func deliverOrBuffer(kind: String?, sessionId: String?) {
     guard kind == "highSpeed", let sessionId, !sessionId.isEmpty else { return }
-    if let channel = notificationChannel {
+    if notificationChannelReady, let channel = notificationChannel {
       channel.invokeMethod(
         "notificationTapped",
         arguments: ["kind": kind!, "sessionId": sessionId]
@@ -181,6 +182,14 @@ final class NotificationTapBuffer {
     } else {
       tapBuffer.store(kind: kind, sessionId: sessionId)
     }
+  }
+
+  private func flushPendingTap() {
+    guard let channel = notificationChannel, let tap = tapBuffer.take() else { return }
+    channel.invokeMethod(
+      "notificationTapped",
+      arguments: ["kind": tap.kind, "sessionId": tap.sessionId]
+    )
   }
 
   private func isSupportedNotification(id: Int, kind: String?, sessionId: String?) -> Bool {

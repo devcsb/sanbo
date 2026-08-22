@@ -1,9 +1,37 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
+import 'package:sanbo/platform/location/geolocator_location_engine.dart';
 import 'package:sanbo/platform/location/location_request_policy.dart';
 
 void main() {
+  test('ended stream retries once only while tracking with fused location', () {
+    expect(
+      GeolocatorLocationEngine.shouldRecoverEndedStream(
+        running: true,
+        usingLocationManagerFallback: false,
+        supportsLocationManagerFallback: true,
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldRecoverEndedStream(
+        running: true,
+        usingLocationManagerFallback: true,
+        supportsLocationManagerFallback: true,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldRecoverEndedStream(
+        running: false,
+        usingLocationManagerFallback: false,
+        supportsLocationManagerFallback: true,
+      ),
+      isFalse,
+    );
+  });
+
   test('tracking modes map to deliberate battery request profiles', () {
     final saver = locationRequestProfile(TrackingMode.batterySaver);
     expect(saver.accuracy, LocationAccuracy.medium);

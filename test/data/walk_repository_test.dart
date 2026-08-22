@@ -7,6 +7,7 @@ import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/pipeline/segment_merger.dart';
+import 'package:sanbo/domain/pipeline/geo.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 import 'package:sanbo/domain/services/walk_stats.dart';
 
@@ -75,6 +76,103 @@ void main() {
     expect(first.windowStart.isUtc, isFalse);
     expect(first.windowStart, DateTime(2026, 8, 21, 9));
     expect(first.windowStart.toUtc(), DateTime.utc(2026, 8, 21));
+  });
+
+  test(
+    'mutates New York windows from a Seoul device using canonical UTC keys',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime.utc(2026, 8, 21, 5, 30);
+      final session = await repo.startSession(
+        timezone: 'America/New_York',
+        startedAt: start,
+      );
+      final window = MinuteWindow(
+        windowStart: floorToMinute(start, timezone: session.timezone),
+        durationS: 60,
+        partial: false,
+        sampleCount: 3,
+        rawSampleCount: 3,
+        distanceM: 10,
+        avgSpeedMps: 1,
+        maxSpeedMps: 1,
+        stationaryRatio: 0,
+        quality: WindowQuality.high,
+        hypothesisLabel: ActivityLabel.walkSteady,
+      );
+      await repo.replaceWindows(session.id, [window]);
+
+      final persisted = (await repo.getWindows(session.id)).single;
+      expect(persisted.windowStart.hour, 1);
+      expect(persisted.windowStart.toUtc(), start);
+
+      await repo.updateWindowUserLabel(
+        sessionId: session.id,
+        windowStart: persisted.windowStart,
+        userLabel: ActivityLabel.vehicle,
+      );
+      final place = await repo.rememberPlaceForWindows(
+        sessionId: session.id,
+        windowStarts: [persisted.windowStart],
+        latitude: 40.7,
+        longitude: -74,
+        name: '뉴욕 장소',
+      );
+
+      final updated = (await repo.getWindows(session.id)).single;
+      expect(updated.userLabel, ActivityLabel.vehicle);
+      expect(updated.placeId, place.id);
+    },
+  );
+
+  test('DST fold windows mutate the selected UTC occurrence only', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final session = await repo.startSession(
+      timezone: 'America/New_York',
+      startedAt: DateTime.utc(2026, 11, 1, 5, 30),
+    );
+    final first = floorToMinute(
+      DateTime.utc(2026, 11, 1, 5, 30),
+      timezone: session.timezone,
+    );
+    final second = floorToMinute(
+      DateTime.utc(2026, 11, 1, 6, 30),
+      timezone: session.timezone,
+    );
+    MinuteWindow makeWindow(DateTime windowStart) => MinuteWindow(
+      windowStart: windowStart,
+      durationS: 60,
+      partial: false,
+      sampleCount: 3,
+      rawSampleCount: 3,
+      distanceM: 10,
+      avgSpeedMps: 1,
+      maxSpeedMps: 1,
+      stationaryRatio: 0,
+      quality: WindowQuality.high,
+    );
+    await repo.replaceWindows(session.id, [
+      makeWindow(first),
+      makeWindow(second),
+    ]);
+
+    final persisted = await repo.getWindows(session.id);
+    expect(persisted, hasLength(2));
+    expect(persisted[0].windowStart.hour, 1);
+    expect(persisted[1].windowStart.hour, 1);
+    expect(persisted[0].windowStart.toUtc(), first.toUtc());
+    expect(persisted[1].windowStart.toUtc(), second.toUtc());
+
+    await repo.updateWindowUserLabel(
+      sessionId: session.id,
+      windowStart: persisted[1].windowStart,
+      userLabel: ActivityLabel.vehicle,
+    );
+    final updated = await repo.getWindows(session.id);
+    expect(updated[0].userLabel, isNull);
+    expect(updated[1].userLabel, ActivityLabel.vehicle);
   });
 
   test(

@@ -109,6 +109,27 @@ void main() {
     expect(filtered, everyElement(predicate<LocationSample>((s) => s.isFilteredOut)));
   });
 
+  test('preserves an explicit filtered boundary across reprocessing', () {
+    final filtered = SampleFilter().apply([
+      LocationSample(
+        timestamp: DateTime(2026, 1, 1),
+        latitude: 37.5,
+        longitude: 126.9,
+        accuracyM: 5,
+        isFilteredOut: true,
+      ),
+      LocationSample(
+        timestamp: DateTime(2026, 1, 1).add(const Duration(seconds: 8)),
+        latitude: 37.5001,
+        longitude: 126.9,
+        accuracyM: 5,
+      ),
+    ]);
+
+    expect(filtered.first.isFilteredOut, isTrue);
+    expect(filtered.last.isFilteredOut, isFalse);
+  });
+
   test('filters GPS jump as impossible speed', () {
     final t0 = DateTime(2026, 7, 12, 10, 0, 0);
     final raw = [

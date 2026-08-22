@@ -50,6 +50,17 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     if (_initialized) return;
     _initialized = true;
     _channel.setMethodCallHandler(_handleMethodCall);
+    // Native may receive a cold-start notification before Dart has attached
+    // the session controller. Explicitly acknowledge readiness so Android and
+    // iOS can flush their own pre-engine tap buffers only after this handler
+    // is installed.
+    try {
+      await _channel.invokeMethod<void>('ready');
+    } on MissingPluginException {
+      // Desktop, web, and widget tests do not install a native handler.
+    } on PlatformException {
+      // Notification readiness must never block location recording.
+    }
   }
 
   @override

@@ -53,16 +53,19 @@ class SessionRollup {
         throw StateError('겹치는 제외 구간이 있습니다');
       }
     }
-    final int fullDurationS = sessionEnd.difference(sessionStart).inSeconds;
-    final excludedSeconds = exclusions.fold<int>(
+    final fullDurationUs = sessionEnd.difference(sessionStart).inMicroseconds;
+    final excludedDurationUs = exclusions.fold<int>(
       0,
       (sum, exclusion) =>
-          sum + exclusion.endAt.difference(exclusion.startAt).inSeconds,
+          sum + exclusion.endAt.difference(exclusion.startAt).inMicroseconds,
     );
-    if (excludedSeconds < 0 || excludedSeconds > fullDurationS) {
+    if (excludedDurationUs < 0 || excludedDurationUs > fullDurationUs) {
       throw StateError('제외 시간이 전체 기록 시간을 벗어납니다');
     }
-    final int durationS = fullDurationS - excludedSeconds;
+    final durationS = positiveDurationSeconds(
+      sessionStart,
+      sessionEnd.subtract(Duration(microseconds: excludedDurationUs)),
+    );
 
     var distance = 0.0;
     var movingSeconds = 0.0;

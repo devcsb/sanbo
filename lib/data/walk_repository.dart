@@ -411,6 +411,12 @@ ORDER BY day ASC
   ) {
     if (requested.sessionId != authoritative.sessionId ||
         requested.label != authoritative.label ||
+        requested.sampleCount != authoritative.sampleCount ||
+        requested.userConfirmed != authoritative.userConfirmed ||
+        requested.quality != authoritative.quality ||
+        !_sameDouble(requested.confidenceMin, authoritative.confidenceMin) ||
+        !_sameDouble(requested.distanceM, authoritative.distanceM) ||
+        !_sameDouble(requested.avgSpeedMps, authoritative.avgSpeedMps) ||
         requested.durationS != authoritative.durationS ||
         !requested.start.isAtSameMomentAs(authoritative.start) ||
         !requested.endInclusive.isAtSameMomentAs(authoritative.endInclusive) ||
@@ -423,12 +429,31 @@ ORDER BY day ASC
       final left = requested.windows[index];
       final right = authoritative.windows[index];
       if (!left.windowStart.isAtSameMomentAs(right.windowStart) ||
+          left.durationS != right.durationS ||
+          left.partial != right.partial ||
+          left.sampleCount != right.sampleCount ||
+          left.rawSampleCount != right.rawSampleCount ||
+          !_sameDouble(left.distanceM, right.distanceM) ||
+          !_sameDouble(left.avgSpeedMps, right.avgSpeedMps) ||
+          !_sameDouble(left.maxSpeedMps, right.maxSpeedMps) ||
+          !_sameDouble(left.stationaryRatio, right.stationaryRatio) ||
+          left.quality != right.quality ||
+          left.hypothesisLabel != right.hypothesisLabel ||
+          !_sameDouble(
+            left.hypothesisConfidence,
+            right.hypothesisConfidence,
+          ) ||
+          left.evidence.join('\u0000') != right.evidence.join('\u0000') ||
           left.displayLabel != right.displayLabel ||
           left.userExclusionId != right.userExclusionId) {
         return false;
       }
     }
     return true;
+  }
+
+  bool _sameDouble(double left, double right) {
+    return (left - right).abs() <= 1e-6;
   }
 
   /// Removes one exclusion after reconstructing the completed route without
@@ -657,7 +682,8 @@ ORDER BY w.window_start ASC
       where: 'session_id = ?',
       whereArgs: [sessionId],
     );
-    final targetLocal = DateTime(
+    final targetInstant = windowStart.toUtc();
+    final targetWall = DateTime(
       windowStart.year,
       windowStart.month,
       windowStart.day,
@@ -669,15 +695,14 @@ ORDER BY w.window_start ASC
       if (raw == null) continue;
       final parsed = DateTime.tryParse(raw);
       if (parsed == null) continue;
-      final local = parsed.isUtc ? parsed.toLocal() : parsed;
-      final minute = DateTime(
-        local.year,
-        local.month,
-        local.day,
-        local.hour,
-        local.minute,
-      );
-      if (minute != targetLocal) continue;
+      final sameInstant = parsed.toUtc().isAtSameMomentAs(targetInstant);
+      final sameWallMinute =
+          parsed.year == targetWall.year &&
+          parsed.month == targetWall.month &&
+          parsed.day == targetWall.day &&
+          parsed.hour == targetWall.hour &&
+          parsed.minute == targetWall.minute;
+      if (!sameInstant && !sameWallMinute) continue;
       await _db.update(
         'minute_windows',
         payload,
@@ -865,18 +890,27 @@ ORDER BY w.window_start ASC
 
   /// Candidate ISO forms for a wall-clock minute key.
   List<String> _windowStartKeys(DateTime windowStart) {
-    final local = windowStart.isUtc ? windowStart.toLocal() : windowStart;
-    final floored = DateTime(
-      local.year,
-      local.month,
-      local.day,
-      local.hour,
-      local.minute,
+    final wallClock = DateTime(
+      windowStart.year,
+      windowStart.month,
+      windowStart.day,
+      windowStart.hour,
+      windowStart.minute,
+    );
+    final deviceLocal = windowStart.toLocal();
+    final deviceWallClock = DateTime(
+      deviceLocal.year,
+      deviceLocal.month,
+      deviceLocal.day,
+      deviceLocal.hour,
+      deviceLocal.minute,
     );
     final keys = <String>{
-      floored.toIso8601String(),
+      _stableWindowStart(windowStart),
       windowStart.toIso8601String(),
-      floored.toUtc().toIso8601String(),
+      wallClock.toIso8601String(),
+      deviceWallClock.toIso8601String(),
+      deviceWallClock.toUtc().toIso8601String(),
     };
     return keys.toList();
   }
@@ -1174,8 +1208,28 @@ ORDER BY w.window_start ASC
         }
         if (!newSessionIds.contains(sessionId)) continue;
         final windowStart = _requiredDate(rawWindow, 'window_start');
+        final session = importedSessionRows[sessionId]!;
+        final sessionStart = _requiredDate(session, 'started_at').toUtc();
+        final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
+        final timezone = session['timezone']! as String;
+        final canonicalWindowStart = windowStart.toUtc();
+        final expectedWindowStart = floorToMinute(
+          windowStart,
+          timezone: timezone,
+        ).toUtc();
+        final firstWindowStart = floorToMinute(
+          sessionStart,
+          timezone: timezone,
+        ).toUtc();
+        if (!canonicalWindowStart.isAtSameMomentAs(expectedWindowStart)) {
+          throw const FormatException('시간 구간 시작이 분 경계에 맞지 않습니다');
+        }
+        if (canonicalWindowStart.isBefore(firstWindowStart) ||
+            !canonicalWindowStart.isBefore(sessionEnd)) {
+          throw const FormatException('시간 구간이 산책 범위를 벗어났습니다');
+        }
         final windowKey =
-            '$sessionId|${windowStart.toUtc().millisecondsSinceEpoch}';
+            '$sessionId|${canonicalWindowStart.millisecondsSinceEpoch}';
         if (!windowKeys.add(windowKey)) {
           throw const FormatException('백업에 중복된 시간 구간이 있습니다');
         }
@@ -1195,10 +1249,7 @@ ORDER BY w.window_start ASC
           if (exclusion == null || exclusion['session_id'] != sessionId) {
             throw const FormatException('구간 제외 참조가 올바르지 않습니다');
           }
-          final session = importedSessionRows[sessionId]!;
-          final sessionStart = _requiredDate(session, 'started_at').toUtc();
-          final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
-          final minuteStart = windowStart.toUtc();
+          final minuteStart = canonicalWindowStart;
           final minuteEnd = minuteStart.add(const Duration(minutes: 1));
           final actualWindowStart = minuteStart.isAfter(sessionStart)
               ? minuteStart

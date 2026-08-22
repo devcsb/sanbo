@@ -23,10 +23,12 @@ void main() {
     final engine = SyntheticLocationEngine(
       permission: LocationPermissionState.granted,
     );
+    var now = DateTime.now();
     final container = ProviderContainer(
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
         locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container.dispose);
@@ -60,6 +62,7 @@ void main() {
       engine.emit(s);
     }
     controller.debugIngestSamples(utcTrace);
+    now = session.startedAt.add(const Duration(minutes: 3));
 
     final ended = await controller.stop();
     expect(ended, isNotNull);

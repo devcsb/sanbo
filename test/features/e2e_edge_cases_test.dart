@@ -77,10 +77,12 @@ void main() {
     final engine = SyntheticLocationEngine(
       permission: LocationPermissionState.granted,
     );
+    var now = DateTime.now();
     final container = ProviderContainer(
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
         locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container.dispose);
@@ -104,6 +106,7 @@ void main() {
       speedMps: 100,
     );
     controller.debugIngestSamples([...good, jump]);
+    now = session.startedAt.add(const Duration(minutes: 1, seconds: 2));
 
     final ended = await controller.stop();
     expect(ended, isNotNull);
@@ -213,10 +216,12 @@ void main() {
     final engine = SyntheticLocationEngine(
       permission: LocationPermissionState.granted,
     );
+    var now = DateTime.now();
     final container = ProviderContainer(
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
         locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container.dispose);
@@ -239,6 +244,7 @@ void main() {
     controller.debugIngestSamples(samples);
     // Simulate checkpoint persistence mid-walk.
     await repo.insertSamples(session.id, samples);
+    now = session.startedAt.add(const Duration(seconds: 96));
 
     // Cold-start recovery path.
     final container2 = ProviderContainer(
@@ -247,6 +253,7 @@ void main() {
         locationEngineProvider.overrideWithValue(
           SyntheticLocationEngine(permission: LocationPermissionState.granted),
         ),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container2.dispose);

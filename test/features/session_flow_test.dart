@@ -73,6 +73,51 @@ class _ThrowingStartEngine extends SyntheticLocationEngine {
   }
 }
 
+class _ErroringLocationEngine implements LocationEngine {
+  _ErroringLocationEngine();
+
+  final _samples = StreamController<LocationSample>.broadcast();
+  TrackingMode _mode = TrackingMode.balanced;
+  bool running = false;
+  int stopCalls = 0;
+
+  void emitError(Object error) {
+    if (!_samples.isClosed) _samples.addError(error);
+  }
+
+  @override
+  Stream<LocationSample> get samples => _samples.stream;
+
+  @override
+  TrackingMode get mode => _mode;
+
+  @override
+  Future<void> setMode(TrackingMode mode) async => _mode = mode;
+
+  @override
+  Future<LocationPermissionState> checkPermission() async =>
+      LocationPermissionState.granted;
+
+  @override
+  Future<LocationPermissionState> requestPermission() async =>
+      LocationPermissionState.granted;
+
+  @override
+  Future<bool> openSystemSettings() async => true;
+
+  @override
+  Future<void> start() async => running = true;
+
+  @override
+  Future<void> stop() async {
+    running = false;
+    stopCalls++;
+  }
+
+  @override
+  Future<void> dispose() async => _samples.close();
+}
+
 class _DelayedInsertRepository extends WalkRepository {
   _DelayedInsertRepository(super.db);
 
@@ -151,11 +196,13 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
+      var now = DateTime.now();
 
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
         ],
       );
       addTearDown(container.dispose);
@@ -173,6 +220,7 @@ void main() {
         step: const Duration(seconds: 3),
       );
       controller.debugIngestSamples(trace);
+      now = session.startedAt.add(const Duration(minutes: 2));
 
       final live = container.read(sessionControllerProvider);
       expect(live.sampleCount, trace.length);
@@ -198,6 +246,148 @@ void main() {
       expect(listed.map((s) => s.id), contains(ended.id));
     },
   );
+
+  test('location stream errors enter a stopped recovery state', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = _ErroringLocationEngine();
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+
+    await controller.start();
+    expect(controller.state.isTracking, isTrue);
+
+    engine.emitError(StateError('location_stream_ended'));
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    final state = controller.state;
+    expect(state.isTracking, isFalse);
+    expect(state.isBusy, isFalse);
+    expect(state.needsRecovery, isTrue);
+    expect(state.errorMessage, isNotNull);
+    expect(state.statusMessage, '기록은 기기에 남아 있습니다.');
+    expect(engine.stopCalls, 1);
+  });
+
+  test('ordinary location stream errors remain non-terminal', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = _ErroringLocationEngine();
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+
+    await controller.start();
+    engine.emitError(StateError('temporary_location_error'));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(controller.state.isTracking, isTrue);
+    expect(controller.state.needsRecovery, isFalse);
+    expect(controller.state.errorMessage, isNotNull);
+    expect(engine.stopCalls, 0);
+  });
+
+  test('stop clamps a far-future GPS fix to the receipt skew policy', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    var now = DateTime.utc(2026, 8, 21, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final session = controller.state.session!;
+    final trace = buildWalkTrace(
+      start: session.startedAt,
+      duration: const Duration(minutes: 1),
+      step: const Duration(seconds: 4),
+    );
+    controller.debugIngestSamples(trace);
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: session.startedAt.add(const Duration(hours: 1)),
+        latitude: 37.6,
+        longitude: 127.1,
+        accuracyM: 5,
+      ),
+    ]);
+    now = session.startedAt.add(const Duration(minutes: 1));
+
+    final ended = await controller.stop();
+
+    expect(ended, isNotNull);
+    expect(ended!.durationS, lessThan(120));
+    expect(ended.durationS, greaterThanOrEqualTo(60));
+    expect(ended.endedAt!.difference(now).inSeconds, lessThanOrEqualTo(5));
+    final stored = await repo.getSamples(ended.id);
+    expect(
+      stored.singleWhere((sample) => sample.timestamp.isAfter(now)).isFilteredOut,
+      isTrue,
+    );
+  });
+
+  test('recovery also marks a far-future fix outside the persisted route', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final start = DateTime.utc(2026, 8, 21, 9);
+    final now = start.add(const Duration(minutes: 2));
+    final session = await repo.startSession(startedAt: start);
+    final trace = buildWalkTrace(
+      start: start,
+      duration: const Duration(minutes: 2),
+      speedMps: 1.3,
+      step: const Duration(seconds: 4),
+    );
+    final future = LocationSample(
+      timestamp: start.add(const Duration(hours: 1)),
+      latitude: 37.6,
+      longitude: 127.1,
+      accuracyM: 5,
+    );
+    await repo.insertSamples(session.id, [...trace, future]);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+
+    final ended = await controller.stop();
+
+    expect(ended, isNotNull);
+    expect(ended!.durationS, lessThan(180));
+    final stored = await repo.getSamples(ended.id);
+    expect(
+      stored.singleWhere((sample) => sample.timestamp == future.timestamp).isFilteredOut,
+      isTrue,
+    );
+  });
 
   test('stream emit path also accumulates samples', () async {
     final repo = await openTestRepository();
@@ -243,10 +433,12 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
+      var now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
         ],
       );
       addTearDown(container.dispose);
@@ -265,6 +457,7 @@ void main() {
             altitudeM: index == 3 ? double.negativeInfinity : 25,
           ),
       ]);
+      now = session.startedAt.add(const Duration(seconds: 36));
 
       final ended = await controller.stop();
       expect(ended, isNotNull);
@@ -286,10 +479,12 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
+      final now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
         ],
       );
       addTearDown(container.dispose);
@@ -556,10 +751,12 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
+      final now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
         ],
       );
       addTearDown(container.dispose);
@@ -567,7 +764,7 @@ void main() {
       final controller = container.read(sessionControllerProvider.notifier);
       await controller.start(mode: TrackingMode.balanced);
       final session = container.read(sessionControllerProvider).session!;
-      controller.setAppForeground(false);
+      controller.setAppInactive();
       await Future<void>.delayed(Duration.zero);
 
       final fixes = [
@@ -605,10 +802,12 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
+      var now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
         ],
       );
       addTearDown(container.dispose);
@@ -628,6 +827,7 @@ void main() {
           ),
       ];
       controller.debugIngestSamples(fixes);
+      now = session.startedAt.add(const Duration(seconds: 24));
       await repo.insertStarted.future;
 
       final stopFuture = controller.stop();
@@ -811,10 +1011,12 @@ void main() {
     final engine = SyntheticLocationEngine(
       permission: LocationPermissionState.granted,
     );
+    var now = DateTime.now();
     final container = ProviderContainer(
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
         locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container.dispose);
@@ -834,12 +1036,14 @@ void main() {
     // Insert samples via stop's pending flush: call stop after "crash" recovery path.
     // Instead: write samples directly (what checkpoint would do), then restore.
     await repo.insertSamples(session.id, trace);
+    now = session.startedAt.add(const Duration(minutes: 1));
 
     // New controller instance simulating cold start.
     final container2 = ProviderContainer(
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
         locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container2.dispose);
@@ -868,10 +1072,12 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
+      var now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
         ],
       );
       addTearDown(container.dispose);
@@ -885,6 +1091,7 @@ void main() {
         step: const Duration(seconds: 4),
       );
       controller.debugIngestSamples(trace);
+      now = session.startedAt.add(const Duration(minutes: 1));
 
       expect(await controller.stop(), isNull);
       expect(await repo.getSamples(session.id), isEmpty);
