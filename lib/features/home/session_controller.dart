@@ -1422,12 +1422,12 @@ class SessionController extends Notifier<LiveSessionState> {
         endedAt: effectiveEnd,
       );
 
-      // Too short / no real movement — don't pollute history with noise.
+      // No usable GPS / too short — don't pollute history with noise.
       final tooShort =
           result.metrics.durationS < 20 &&
           result.metrics.totalDistanceM < 15 &&
           result.metrics.validSampleCount < 5;
-      if (tooShort) {
+      if (result.metrics.validSampleCount == 0 || tooShort) {
         await _repo.deleteSession(session.id);
         _sessionSamples.clear();
         _pendingPersist.clear();

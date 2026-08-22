@@ -1411,6 +1411,41 @@ void main() {
     expect(state.statusMessage, 'GPS 대기 중');
   });
 
+  test('long session with only filtered fixes is discarded', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final start = DateTime(2026, 7, 29, 9);
+    var now = start;
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          _ImmediateFixEngine(
+            LocationSample(
+              timestamp: start.subtract(const Duration(seconds: 10)),
+              latitude: 37.5665,
+              longitude: 126.978,
+              accuracyM: 6,
+            ),
+          ),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    now = start.add(const Duration(minutes: 2));
+
+    final ended = await controller.stop();
+
+    expect(ended, isNull);
+    expect(await repo.listCompleted(), isEmpty);
+    expect(await repo.getActiveSession(), isNull);
+    expect(container.read(sessionControllerProvider).notice, contains('저장하지'));
+  });
+
   test('engine start failure keeps the new session recoverable', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
