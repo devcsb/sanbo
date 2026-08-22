@@ -1375,6 +1375,42 @@ void main() {
     },
   );
 
+  test('filtered first fix still triggers the GPS watchdog guidance', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final start = DateTime(2026, 7, 29, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          _ImmediateFixEngine(
+            LocationSample(
+              timestamp: start.subtract(const Duration(seconds: 10)),
+              latitude: 37.5665,
+              longitude: 126.978,
+              accuracyM: 6,
+            ),
+          ),
+        ),
+        sessionClockProvider.overrideWithValue(() => start),
+        firstFixWatchdogDurationProvider.overrideWithValue(
+          const Duration(milliseconds: 1),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+
+    final state = controller.state;
+    expect(state.sampleCount, 1);
+    expect(state.validSampleCount, 0);
+    expect(state.errorMessage, contains('위치를 아직 받지 못했어요'));
+    expect(state.statusMessage, 'GPS 대기 중');
+  });
+
   test('engine start failure keeps the new session recoverable', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

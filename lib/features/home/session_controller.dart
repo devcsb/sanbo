@@ -144,6 +144,10 @@ final sessionClockProvider = Provider<DateTime Function()>((ref) {
   return DateTime.now;
 });
 
+final firstFixWatchdogDurationProvider = Provider<Duration>((ref) {
+  return const Duration(seconds: 20);
+});
+
 final sessionTimezoneProvider = Provider<Future<String> Function()>((ref) {
   return currentSessionTimezone;
 });
@@ -1186,13 +1190,15 @@ class SessionController extends Notifier<LiveSessionState> {
   void _armFirstFixWatchdog() {
     _firstFixTimer?.cancel();
     final generation = _sessionGeneration;
-    _firstFixTimer = Timer(const Duration(seconds: 20), () {
+    _firstFixTimer = Timer(ref.read(firstFixWatchdogDurationProvider), () {
       if (!state.isTracking ||
           _endingSession ||
           generation != _sessionGeneration) {
         return;
       }
-      if (state.sampleCount > 0) return;
+      // Raw provider rows can be cached, stale, malformed, or filtered out.
+      // Only a route-usable fix proves that GPS has actually become ready.
+      if (_validSampleCount > 0) return;
       state = state.copyWith(
         errorMessage:
             '위치를 아직 받지 못했어요. 기기 위치 서비스와 정확한 위치 권한을 확인하고, '
