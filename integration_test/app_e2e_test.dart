@@ -89,6 +89,7 @@ void main() {
     final start = session!.startedAt;
 
     const degPerMeter = 1 / 111320.0;
+    now = start.add(const Duration(seconds: 116));
     for (var i = 0; i < 30; i++) {
       engine.emit(
         LocationSample(
@@ -101,8 +102,6 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 10));
     }
-    now = start.add(const Duration(seconds: 116));
-
     expect(find.text('산책 종료'), findsOneWidget);
     await tester.tap(find.text('산책 종료'));
     for (var i = 0; i < 20; i++) {

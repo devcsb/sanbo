@@ -105,8 +105,8 @@ void main() {
       accuracyM: 5,
       speedMps: 100,
     );
-    controller.debugIngestSamples([...good, jump]);
     now = session.startedAt.add(const Duration(minutes: 1, seconds: 2));
+    controller.debugIngestSamples([...good, jump]);
 
     final ended = await controller.stop();
     expect(ended, isNotNull);

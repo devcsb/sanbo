@@ -229,8 +229,8 @@ void main() {
         speedMps: 1.3,
         step: const Duration(seconds: 3),
       );
-      controller.debugIngestSamples(trace);
       now = session.startedAt.add(const Duration(minutes: 2));
+      controller.debugIngestSamples(trace);
 
       final live = container.read(sessionControllerProvider);
       expect(live.sampleCount, trace.length);
@@ -437,6 +437,74 @@ void main() {
   });
 
   test(
+    'live ingest does not anchor on cached pre-session or far-future fixes',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      var now = DateTime.utc(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = controller.state.session!;
+
+      LocationSample fix(int second, double longitude) => LocationSample(
+        timestamp: session.startedAt.add(Duration(seconds: second)),
+        latitude: 37.5,
+        longitude: longitude,
+        accuracyM: 5,
+      );
+
+      controller.debugIngestSamples([fix(-10, 126.9), fix(0, 127.0)]);
+      now = session.startedAt;
+      controller.debugIngestSamples([fix(3600, 127.2)]);
+      for (var second = 8; second <= 48; second += 8) {
+        now = session.startedAt.add(Duration(seconds: second));
+        controller.debugIngestSamples([fix(second, 127.0 + second * 0.0001)]);
+      }
+
+      final live = controller.state;
+      expect(live.validSampleCount, 7);
+      expect(live.liveDistanceM, greaterThan(300));
+      expect(live.liveDistanceM, lessThan(500));
+
+      now = session.startedAt.add(const Duration(seconds: 48));
+      final ended = await controller.stop();
+      expect(ended, isNotNull);
+      final stored = await repo.getSamples(session.id);
+      expect(
+        stored
+            .singleWhere(
+              (sample) =>
+                  sample.timestamp ==
+                  session.startedAt.subtract(const Duration(seconds: 10)),
+            )
+            .isFilteredOut,
+        isTrue,
+      );
+      expect(
+        stored
+            .singleWhere(
+              (sample) =>
+                  sample.timestamp ==
+                  session.startedAt.add(const Duration(hours: 1)),
+            )
+            .isFilteredOut,
+        isTrue,
+      );
+    },
+  );
+
+  test(
     'recovery also marks a far-future fix outside the persisted route',
     () async {
       final repo = await openTestRepository();
@@ -492,7 +560,7 @@ void main() {
     final start = DateTime.utc(2026, 8, 21, 9);
     final session = await repo.startSession(startedAt: start);
     final cached = LocationSample(
-      timestamp: start.subtract(const Duration(minutes: 5)),
+      timestamp: start.subtract(const Duration(seconds: 10)),
       latitude: 37.5,
       longitude: 127,
       accuracyM: 5,
@@ -517,6 +585,7 @@ void main() {
     addTearDown(container.dispose);
     final controller = container.read(sessionControllerProvider.notifier);
     await controller.restoreIfNeeded();
+    expect(controller.state.liveDistanceM, 0);
 
     final ended = await controller.stop();
 
@@ -619,7 +688,7 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
-      final now = DateTime.now();
+      var now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
@@ -632,6 +701,7 @@ void main() {
       final controller = container.read(sessionControllerProvider.notifier);
       await controller.start();
       final session = container.read(sessionControllerProvider).session!;
+      now = session.startedAt.add(const Duration(seconds: 8));
       controller.debugIngestSamples([
         LocationSample(
           timestamp: session.startedAt,
@@ -706,6 +776,7 @@ void main() {
     () async {
       final repo = await openTestRepository();
       addTearDown(repo.close);
+      var now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
@@ -714,12 +785,14 @@ void main() {
               permission: LocationPermissionState.granted,
             ),
           ),
+          sessionClockProvider.overrideWithValue(() => now),
         ],
       );
       addTearDown(container.dispose);
       final controller = container.read(sessionControllerProvider.notifier);
       await controller.start();
       final start = controller.state.session!.startedAt;
+      now = start.add(const Duration(seconds: 10));
       controller.debugIngestSamples([
         LocationSample(
           timestamp: start,
@@ -746,10 +819,12 @@ void main() {
     final engine = SyntheticLocationEngine(
       permission: LocationPermissionState.granted,
     );
+    var now = DateTime.now();
     final container = ProviderContainer(
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
         locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
       ],
     );
     addTearDown(container.dispose);
@@ -757,6 +832,7 @@ void main() {
     final controller = container.read(sessionControllerProvider.notifier);
     await controller.start();
     final session = container.read(sessionControllerProvider).session!;
+    now = session.startedAt.add(const Duration(minutes: 10, seconds: 8));
     controller.debugIngestSamples([
       LocationSample(
         timestamp: session.startedAt,
@@ -810,6 +886,7 @@ void main() {
     final controller = container.read(sessionControllerProvider.notifier);
     await controller.start();
     final session = controller.state.session!;
+    now = session.startedAt.add(const Duration(minutes: 4));
     LocationSample fix(int second, double longitude) => LocationSample(
       timestamp: session.startedAt.add(Duration(seconds: second)),
       latitude: 37.5,
@@ -943,7 +1020,7 @@ void main() {
       final engine = SyntheticLocationEngine(
         permission: LocationPermissionState.granted,
       );
-      final now = DateTime.now();
+      var now = DateTime.now();
       final container = ProviderContainer(
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
@@ -969,6 +1046,7 @@ void main() {
             speedMps: 1.2,
           ),
       ];
+      now = session.startedAt.add(const Duration(seconds: 24));
       controller.debugIngestSamples(fixes);
       await Future<void>.delayed(const Duration(milliseconds: 30));
 
@@ -1203,6 +1281,9 @@ void main() {
           locationEngineProvider.overrideWithValue(
             _ImmediateFixEngine(firstFix),
           ),
+          sessionClockProvider.overrideWithValue(
+            () => DateTime(2026, 7, 29, 9),
+          ),
         ],
       );
       addTearDown(container.dispose);
@@ -1214,6 +1295,40 @@ void main() {
       expect(state.sampleCount, 1);
       expect(state.validSampleCount, 1);
       expect(state.statusMessage, '기록 중');
+    },
+  );
+
+  test(
+    'synchronous cached first fix before session start is filtered',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime(2026, 7, 29, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            _ImmediateFixEngine(
+              LocationSample(
+                timestamp: start.subtract(const Duration(seconds: 10)),
+                latitude: 37.5665,
+                longitude: 126.978,
+                accuracyM: 6,
+              ),
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => start),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container.read(sessionControllerProvider.notifier).start();
+
+      final state = container.read(sessionControllerProvider);
+      expect(state.isTracking, isTrue);
+      expect(state.sampleCount, 1);
+      expect(state.validSampleCount, 0);
+      expect(state.liveDistanceM, 0);
     },
   );
 

@@ -179,6 +179,7 @@ class SessionController extends Notifier<LiveSessionState> {
   bool _appInactive = false;
   bool _locationStreamFailed = false;
   bool _streamEndedDuringStart = false;
+  DateTime? _liveSessionStartedAt;
   bool _restorationComplete = false;
   bool _restoring = false;
   Future<void>? _restoreOperation;
@@ -268,16 +269,40 @@ class SessionController extends Notifier<LiveSessionState> {
   LocationEngine get _engine => ref.read(locationEngineProvider);
   SessionPipeline get _pipeline => ref.read(sessionPipelineProvider);
 
-  void _recomputeLiveMetricsFromBuffer() {
-    final filtered = _liveFilter.apply(_sessionSamples);
+  void _recomputeLiveMetricsFromBuffer({
+    DateTime? sessionStart,
+    DateTime? observedAt,
+  }) {
+    final bounded = _liveSamplesWithinBoundary(
+      _sessionSamples,
+      sessionStart: sessionStart ?? state.session?.startedAt,
+      observedAt: observedAt,
+    );
+    final filtered = _liveFilter.apply(bounded);
     final valid = filtered.where((s) => !s.isFilteredOut).toList();
     _lastValidSample = valid.isEmpty ? null : valid.last;
     _validSampleCount = valid.length;
     _liveSpeedMps = _liveSpeedFromSamples(valid);
-    _lastAccuracyM = _sessionSamples.isEmpty
-        ? null
-        : _sessionSamples.last.accuracyM;
+    _lastAccuracyM = bounded.isEmpty ? null : bounded.last.accuracyM;
     _liveDistanceM = _trustedLiveDistance(valid);
+  }
+
+  List<LocationSample> _liveSamplesWithinBoundary(
+    Iterable<LocationSample> samples, {
+    DateTime? sessionStart,
+    DateTime? observedAt,
+  }) {
+    final startUtc = sessionStart?.toUtc();
+    final endUtc = observedAt?.toUtc().add(
+      _sessionGuard.policy.maxSampleFutureSkew,
+    );
+    return [
+      for (final sample in samples)
+        if ((startUtc == null ||
+                !sample.timestamp.toUtc().isBefore(startUtc)) &&
+            (endUtc == null || !sample.timestamp.toUtc().isAfter(endUtc)))
+          sample,
+    ];
   }
 
   double _trustedLiveDistance(List<LocationSample> valid) {
@@ -347,10 +372,19 @@ class SessionController extends Notifier<LiveSessionState> {
         ..addAll(existing);
       _pendingPersist.clear();
 
-      _recomputeLiveMetricsFromBuffer();
+      final recoveryNow = _clock();
+      final boundedExisting = _liveSamplesWithinBoundary(
+        existing,
+        sessionStart: active.startedAt,
+        observedAt: recoveryNow,
+      );
+      _recomputeLiveMetricsFromBuffer(
+        sessionStart: active.startedAt,
+        observedAt: recoveryNow,
+      );
       _sessionGuard.rebuildHighSpeedState(
-        samples: _liveFilter.apply(existing),
-        observedAt: _clock(),
+        samples: _liveFilter.apply(boundedExisting),
+        observedAt: recoveryNow,
       );
       state = LiveSessionState(
         session: active,
@@ -616,9 +650,15 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist
           ..clear()
           ..addAll(_missingSamples(existing, recovered));
+        final recoveryNow = _clock();
+        final boundedRecovered = _liveSamplesWithinBoundary(
+          recovered,
+          sessionStart: session.startedAt,
+          observedAt: recoveryNow,
+        );
         _sessionGuard.rebuildHighSpeedState(
-          samples: _liveFilter.apply(recovered),
-          observedAt: _clock(),
+          samples: _liveFilter.apply(boundedRecovered),
+          observedAt: recoveryNow,
         );
       } else {
         _sessionSamples.clear();
@@ -631,7 +671,13 @@ class SessionController extends Notifier<LiveSessionState> {
       }
 
       // Rebuild live metrics from memory buffer.
-      _recomputeLiveMetricsFromBuffer();
+      _recomputeLiveMetricsFromBuffer(
+        sessionStart: session.startedAt,
+        observedAt: _clock(),
+      );
+      // Arm the session boundary before engine.start(). Some providers emit
+      // a cached first fix synchronously while start is still in flight.
+      _liveSessionStartedAt = session.startedAt;
 
       await _engine.setMode(mode);
       if (!resuming) {
@@ -656,6 +702,7 @@ class SessionController extends Notifier<LiveSessionState> {
           throw StateError('location_stream_ended');
         }
       } catch (e) {
+        _liveSessionStartedAt = null;
         await _sampleSub?.cancel();
         _sampleSub = null;
         try {
@@ -698,6 +745,7 @@ class SessionController extends Notifier<LiveSessionState> {
       );
       _startSessionGuard();
     } catch (e) {
+      _liveSessionStartedAt = null;
       await _sampleSub?.cancel();
       _sampleSub = null;
       try {
@@ -736,6 +784,7 @@ class SessionController extends Notifier<LiveSessionState> {
     }
     _locationStreamFailed = true;
     _endingSession = true;
+    _liveSessionStartedAt = null;
     _sessionGeneration++;
     _ticker?.cancel();
     _ticker = null;
@@ -799,6 +848,20 @@ class SessionController extends Notifier<LiveSessionState> {
   void _onSample(LocationSample rawSample) {
     if (_endingSession) return;
     final sample = rawSample.normalizedMetadata();
+    final sessionStart = state.session?.startedAt ?? _liveSessionStartedAt;
+    final receiptNow = _clock().toUtc();
+    final sampleAt = sample.timestamp.toUtc();
+    // Providers can deliver a cached fix from before the walk started or a
+    // clock-skewed fix far ahead of the receipt time. Keep those raw rows for
+    // audit, but mark them out of the live route before they can become an
+    // incremental anchor. Stop/finalization applies the same boundary again
+    // so a process death cannot resurrect the rejected fix.
+    final outsideLiveBoundary =
+        sessionStart != null &&
+        (sampleAt.isBefore(sessionStart.toUtc()) ||
+            sampleAt.isAfter(
+              receiptNow.add(_sessionGuard.policy.maxSampleFutureSkew),
+            ));
     final prev = _lastValidSample;
     // Guard against out-of-order fixes (clock adjust / provider reordering):
     // the filter sorts ascending, so an older-than-prev sample would otherwise
@@ -809,9 +872,12 @@ class SessionController extends Notifier<LiveSessionState> {
     // Preserve that continuity break across a process death. Reprocessing the
     // raw timestamp-sorted list during recovery must not silently reconnect a
     // fix that arrived out of order while the app was alive.
-    final storedSample = ordered
-        ? sample
-        : sample.copyWith(isFilteredOut: true);
+    final LocationSample storedSample;
+    if (outsideLiveBoundary || !ordered) {
+      storedSample = sample.copyWith(isFilteredOut: true);
+    } else {
+      storedSample = sample;
+    }
     _sessionSamples.add(storedSample);
     _pendingPersist.add(storedSample);
 
@@ -865,7 +931,10 @@ class SessionController extends Notifier<LiveSessionState> {
     }
     _lastAccuracyM = sample.accuracyM ?? _lastAccuracyM;
 
-    if (_sessionSamples.isNotEmpty) {
+    // A raw provider row is not proof that a usable fix arrived. Keep the
+    // first-fix watchdog armed after cached, malformed, or filtered samples so
+    // the user still receives GPS guidance when no valid fix is available.
+    if (acceptedByIncrementalFilter) {
       _firstFixTimer?.cancel();
       _firstFixTimer = null;
     }
@@ -1212,6 +1281,7 @@ class SessionController extends Notifier<LiveSessionState> {
     if (session == null || state.isBusy) return null;
     final generation = ++_sessionGeneration;
     _endingSession = true;
+    _liveSessionStartedAt = null;
     state = state.copyWith(isBusy: true, clearError: true);
     try {
       await _maintenanceQueue.close();
@@ -1394,6 +1464,7 @@ class SessionController extends Notifier<LiveSessionState> {
     if (session == null || state.isBusy) return;
     ++_sessionGeneration;
     _endingSession = true;
+    _liveSessionStartedAt = null;
     state = state.copyWith(isBusy: true);
     try {
       await _maintenanceQueue.close();
