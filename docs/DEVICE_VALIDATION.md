@@ -98,6 +98,18 @@ scripts/run_ios_simulator_smoke.sh
 실제 `GeolocatorLocationEngine`으로 거리 누적과 완료 저장을 검사한다. 결과는
 물리 iPhone의 백그라운드와 절전 정책 검증으로 승격하지 않는다.
 
+## 최근 자동 검증 로그
+
+2026-08-23에 Flutter 3.47.1 환경에서 다음 결과를 확인했다.
+
+- `bash scripts/run_quality_loop.sh --debug-apk`: 정적 분석, 전체 Flutter 테스트 332개, Android debug APK와 생성 파일 검사를 모두 통과
+- `bash scripts/run_native_platform_tests.sh`: Android native unit test와 iOS simulator XCTest 통과
+- `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_SCREEN_OFF=1 SANBO_ANDROID_CLEAR_DATA=1 bash scripts/run_android_emulator_smoke.sh`: Android emulator 실제 provider 경로 통과, 거리 25.14m, 유효 샘플 5개
+- `IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA bash scripts/run_ios_simulator_smoke.sh`: iOS simulator 실제 Core Location 경로 통과
+
+이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
+`미판정` 상태를 `통과`로 바꾸지 않는다.
+
 | 확인 | 플랫폼 | 기기·OS | 권한 상태 | 기대 상태 | 관측 결과 | 통과/실패 |
 |------|--------|---------|-----------|-----------|-----------|-----------|
 | [ ] foreground warning without system banner | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 앱 전면에서 28.8km/h 누적 60초 뒤 고속 종료 확인만 보이고 시스템 배너는 없다 | 미기록 | 미판정 |
