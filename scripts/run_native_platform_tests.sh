@@ -8,6 +8,15 @@ step() {
   printf '\n[native] %s\n' "$1"
 }
 
+if [[ ! -f "$ROOT/.dart_tool/package_config.json" ]]; then
+  command -v flutter >/dev/null 2>&1 || {
+    echo "Flutter is required to resolve project dependencies" >&2
+    exit 1
+  }
+  step "Resolve Flutter dependencies"
+  (cd "$ROOT" && flutter pub get)
+fi
+
 if [[ ! -f "$ROOT/android/local.properties" ]]; then
   android_sdk="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
   [[ -n "$android_sdk" ]] || {
