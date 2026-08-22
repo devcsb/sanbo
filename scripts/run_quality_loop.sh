@@ -58,7 +58,7 @@ flutter test --no-pub --concurrency=1
 case "$build_mode" in
   debug|all)
     step "Android debug APK"
-    flutter build apk --debug
+    flutter build apk --debug --target lib/main.dart
     ;;
 esac
 
@@ -77,7 +77,7 @@ case "$build_mode" in
     # Do not use --no-pub here: Flutter's build preparation refreshes the
     # platform registrant and excludes dev-only integration_test plugins from
     # the release Java compilation.
-    flutter build apk --release --split-per-abi
+    flutter build apk --release --split-per-abi --target lib/main.dart
     if ! command -v apkanalyzer >/dev/null 2>&1; then
       echo "required release tool unavailable: apkanalyzer" >&2
       exit 1
