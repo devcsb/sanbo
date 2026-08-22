@@ -194,6 +194,30 @@ void main() {
     );
   });
 
+  test('background location defers provider recovery until foreground', () {
+    expect(
+      GeolocatorLocationEngine.shouldDeferRecovery(
+        running: true,
+        appForeground: false,
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldDeferRecovery(
+        running: true,
+        appForeground: true,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldDeferRecovery(
+        running: false,
+        appForeground: false,
+      ),
+      isFalse,
+    );
+  });
+
   test('stale stream events are ignored after a new stream is armed', () {
     expect(
       GeolocatorLocationEngine.shouldHandleStreamEvent(

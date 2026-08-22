@@ -1286,6 +1286,7 @@ class SessionController extends Notifier<LiveSessionState> {
     _appInactive = false;
     if (_appForeground == foreground && !(foreground && wasInactive)) return;
     _appForeground = foreground;
+    unawaited(_engine.setAppForeground(foreground));
     if (!foreground) {
       _ticker?.cancel();
       _ticker = null;

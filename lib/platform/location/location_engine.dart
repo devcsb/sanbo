@@ -18,6 +18,12 @@ abstract class LocationEngine {
   Stream<LocationSample> get samples;
   TrackingMode get mode;
   Future<void> setMode(TrackingMode mode);
+
+  /// Lets a platform engine defer provider restarts until Android allows a
+  /// foreground-only location permission again. Implementations that do not
+  /// need lifecycle coordination may keep the default no-op.
+  Future<void> setAppForeground(bool foreground) async {}
+
   Future<LocationPermissionState> checkPermission();
   Future<LocationPermissionState> requestPermission();
 

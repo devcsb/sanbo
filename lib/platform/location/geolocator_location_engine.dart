@@ -31,6 +31,8 @@ class GeolocatorLocationEngine implements LocationEngine {
   bool _running = false;
   bool _usingLocationManagerFallback = false;
   bool _streamRecoveryInFlight = false;
+  bool _recoveryPendingWhileBackground = false;
+  bool _appForeground = true;
   Timer? _stallWatchdog;
   DateTime? _lastEmitAt;
   int _streamGeneration = 0;
@@ -106,6 +108,12 @@ class GeolocatorLocationEngine implements LocationEngine {
   }
 
   @visibleForTesting
+  static bool shouldDeferRecovery({
+    required bool running,
+    required bool appForeground,
+  }) => running && !appForeground;
+
+  @visibleForTesting
   static bool shouldHandleStreamEvent({
     required int currentGeneration,
     required int eventGeneration,
@@ -169,6 +177,21 @@ class GeolocatorLocationEngine implements LocationEngine {
   @override
   Future<void> setMode(TrackingMode mode) async {
     _mode = mode;
+  }
+
+  @override
+  Future<void> setAppForeground(bool foreground) async {
+    final becameForeground = !_appForeground && foreground;
+    _appForeground = foreground;
+    if (!becameForeground ||
+        !_recoveryPendingWhileBackground ||
+        !_running ||
+        _streamRecoveryInFlight) {
+      return;
+    }
+    _recoveryPendingWhileBackground = false;
+    _streamRecoveryInFlight = true;
+    unawaited(_recoverEndedStream());
   }
 
   @override
@@ -272,6 +295,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     _running = true;
     _usingLocationManagerFallback = false;
     _streamRecoveryInFlight = false;
+    _recoveryPendingWhileBackground = false;
     _lastEmitAt = null;
     _emitCount = 0;
 
@@ -459,6 +483,14 @@ class GeolocatorLocationEngine implements LocationEngine {
   Future<void> _recoverEndedStream() async {
     try {
       if (!_running) return;
+      if (shouldDeferRecovery(
+        running: _running,
+        appForeground: _appForeground,
+      )) {
+        _recoveryPendingWhileBackground = true;
+        return;
+      }
+      _recoveryPendingWhileBackground = false;
       await _startStream(forceLocationManager: true);
       if (!_running) {
         await _stopTrackingOnly();
@@ -481,6 +513,7 @@ class GeolocatorLocationEngine implements LocationEngine {
   void _reportEndedStream([StackTrace? stackTrace]) {
     if (!_running) return;
     _running = false;
+    _recoveryPendingWhileBackground = false;
     _stallWatchdog?.cancel();
     _stallWatchdog = null;
     if (!_controller.isClosed) {

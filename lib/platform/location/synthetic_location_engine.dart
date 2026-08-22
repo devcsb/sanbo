@@ -53,6 +53,9 @@ class SyntheticLocationEngine implements LocationEngine {
   }
 
   @override
+  Future<void> setAppForeground(bool foreground) async {}
+
+  @override
   Future<LocationPermissionState> checkPermission() async => permission;
 
   @override

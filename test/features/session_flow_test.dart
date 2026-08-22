@@ -55,6 +55,9 @@ class _ImmediateFixEngine implements LocationEngine {
   Future<void> setMode(TrackingMode mode) async => _mode = mode;
 
   @override
+  Future<void> setAppForeground(bool foreground) async {}
+
+  @override
   Future<void> start() async => _samples.add(firstFix);
 
   @override
@@ -100,6 +103,9 @@ class _ErroringLocationEngine implements LocationEngine {
 
   @override
   Future<void> setMode(TrackingMode mode) async => _mode = mode;
+
+  @override
+  Future<void> setAppForeground(bool foreground) async {}
 
   @override
   Future<LocationPermissionState> checkPermission() async =>
