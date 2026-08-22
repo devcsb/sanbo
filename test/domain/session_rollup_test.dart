@@ -288,6 +288,7 @@ void main() {
       sessionStart: start,
       sessionEnd: end,
     );
+    expect(windows.single.userExclusionId, exclusion.id);
     final result = SessionRollup().compute(
       session: session,
       partition: partition,
@@ -299,7 +300,6 @@ void main() {
     expect(exclusion.contains(atEnd.timestamp), isFalse);
     expect(partition.includedSamples, [before, atEnd]);
     expect(partition.segments, isEmpty);
-    expect(windows.single.userExclusionId, exclusion.id);
     _expectFiniteZeroMetrics(result);
     expect(result.durationS, 50);
   });

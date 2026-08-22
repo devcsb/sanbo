@@ -6,16 +6,26 @@ class RunnerTests: XCTestCase {
   func testBufferReturnsOneHighSpeedTapAndClearsIt() {
     let buffer = NotificationTapBuffer()
 
-    buffer.store(kind: "highSpeed")
+    buffer.store(kind: "highSpeed", sessionId: "session-1")
 
-    XCTAssertEqual(buffer.take(), "highSpeed")
+    let tap = buffer.take()
+    XCTAssertEqual(tap?.kind, "highSpeed")
+    XCTAssertEqual(tap?.sessionId, "session-1")
     XCTAssertNil(buffer.take())
   }
 
   func testBufferIgnoresUnsupportedKinds() {
     let buffer = NotificationTapBuffer()
 
-    buffer.store(kind: "stationary")
+    buffer.store(kind: "stationary", sessionId: "session-1")
+
+    XCTAssertNil(buffer.take())
+  }
+
+  func testBufferIgnoresHighSpeedTapWithoutSessionId() {
+    let buffer = NotificationTapBuffer()
+
+    buffer.store(kind: "highSpeed", sessionId: nil)
 
     XCTAssertNil(buffer.take())
   }

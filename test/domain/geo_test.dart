@@ -29,6 +29,35 @@ void main() {
       final floor = floorToMinute(ts);
       expect(floor, DateTime(2026, 7, 12, 14, 3));
     });
+
+    test('uses the persisted IANA timezone including DST boundaries', () {
+      final beforeFallback = DateTime.utc(2026, 11, 1, 5, 30, 45);
+      final afterFallback = DateTime.utc(2026, 11, 1, 6, 30, 45);
+
+      expect(
+        floorToMinute(beforeFallback, timezone: 'America/New_York').toUtc(),
+        DateTime.utc(2026, 11, 1, 5, 30),
+      );
+      expect(
+        floorToMinute(afterFallback, timezone: 'America/New_York').toUtc(),
+        DateTime.utc(2026, 11, 1, 6, 30),
+      );
+    });
+
+    test('returns a session-local minute while preserving the instant', () {
+      final floored = floorToMinute(
+        DateTime.utc(2026, 8, 21, 15, 3, 45),
+        timezone: 'Asia/Seoul',
+      );
+
+      expect(floored.isUtc, isFalse);
+      expect(floored.year, 2026);
+      expect(floored.month, 8);
+      expect(floored.day, 22);
+      expect(floored.hour, 0);
+      expect(floored.minute, 3);
+      expect(floored.toUtc(), DateTime.utc(2026, 8, 21, 15, 3));
+    });
   });
 
   group('pathDistanceMeters', () {

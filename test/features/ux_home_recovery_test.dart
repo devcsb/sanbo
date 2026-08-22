@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sanbo/data/walk_repository.dart';
+import 'package:sanbo/data/app_database.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/session_warning.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
@@ -11,6 +13,24 @@ import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/synthetic_location_engine.dart';
 
 import '../helpers/test_db.dart';
+
+class _DelayedRestoreRepository extends WalkRepository {
+  _DelayedRestoreRepository(super.db);
+
+  final restoreStarted = Completer<void>();
+  final releaseRestore = Completer<void>();
+  var delayNextRestore = true;
+
+  @override
+  Future<List<LocationSample>> getSamples(String sessionId) async {
+    if (delayNextRestore) {
+      delayNextRestore = false;
+      restoreStarted.complete();
+      await releaseRestore.future;
+    }
+    return super.getSamples(sessionId);
+  }
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +59,46 @@ void main() {
     expect(live.session, isNotNull);
     expect(live.statusMessage, isNotNull);
   });
+
+  test(
+    'start waits for an in-flight recovery before resuming the session',
+    () async {
+      ensureSqfliteFfi();
+      final db = await openAppDatabase(
+        path:
+            '${Directory.systemTemp.path}/sanbo_restore_start_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      final repo = _DelayedRestoreRepository(db);
+      addTearDown(repo.close);
+      await repo.startSession(mode: TrackingMode.balanced);
+
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      final restore = controller.restoreIfNeeded();
+      await repo.restoreStarted.future;
+      final start = controller.start();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(container.read(sessionControllerProvider).isTracking, isFalse);
+      expect(container.read(sessionControllerProvider).isBusy, isFalse);
+
+      repo.releaseRestore.complete();
+      await restore;
+      await start;
+
+      expect(container.read(sessionControllerProvider).isTracking, isTrue);
+    },
+  );
 
   test('restoreIfNeeded surfaces a recoverable storage error', () async {
     final repo = await openTestRepository();

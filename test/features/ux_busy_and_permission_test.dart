@@ -144,7 +144,7 @@ class _NeverCompletingPermissionNotifications
   }) async {}
 
   @override
-  Future<void> showWarning(SessionWarning warning) async {}
+  Future<void> showWarning(SessionWarning warning, {String? sessionId}) async {}
 
   @override
   Stream<SessionNotificationTap> get taps => const Stream.empty();

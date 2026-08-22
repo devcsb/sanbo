@@ -172,6 +172,57 @@ void main() {
     },
   );
 
+  test('all-points exclusion keeps the sample exactly at session end', () {
+    final start = DateTime.utc(2026, 8, 21);
+    final end = start.add(const Duration(minutes: 1));
+    final session = WalkSession(
+      id: 'end-boundary',
+      startedAt: start,
+      endedAt: end,
+      timezone: 'Asia/Seoul',
+      trackingMode: TrackingMode.balanced,
+      status: SessionStatus.completed,
+    );
+    final stored = [
+      LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: end,
+        latitude: 37.5001,
+        longitude: 127,
+        accuracyM: 5,
+      ),
+    ];
+    final initial = SessionPipeline().process(
+      session: session,
+      rawSamples: stored,
+      endedAt: end,
+    );
+    final exclusion = RouteExclusion(
+      id: 'all',
+      sessionId: session.id,
+      startAt: start,
+      endAt: end,
+      reason: RouteExclusionReason.vehicle,
+      createdAt: start,
+    );
+
+    final result = SessionPipeline().recalculateCompleted(
+      session: session,
+      storedSamples: stored,
+      exclusions: [exclusion],
+      previousWindows: initial.windows,
+    );
+
+    expect(result.metrics.validSampleCount, 1);
+    expect(result.windows.single.rawSampleCount, 2);
+    expect(result.windows.single.sampleCount, 0);
+  });
+
   test('live processing preserves the automatic-filter boundary', () {
     final start = DateTime.utc(2026, 8, 21);
     final raw = [

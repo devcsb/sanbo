@@ -158,7 +158,7 @@ class SessionGuard {
         samples.where((sample) {
             final timestamp = sample.timestamp.toUtc();
             return !timestamp.isBefore(windowStart) &&
-                !timestamp.isAfter(receivedUtc);
+                !timestamp.isAfter(receivedUtc.add(policy.maxSampleFutureSkew));
           }).toList()
           ..sort((a, b) => a.timestamp.toUtc().compareTo(b.timestamp.toUtc()));
     final lastTrustedIndex = recentSamples.lastIndexWhere(_trustedForHighSpeed);
@@ -174,8 +174,15 @@ class SessionGuard {
     final receiptOffset = receivedUtc.difference(
       recentSamples[lastTrustedIndex].timestamp.toUtc(),
     );
-    for (final sample in recentSamples.take(lastTrustedIndex + 1)) {
+    for (final sample in recentSamples) {
       observe(sample, observedAt: sample.timestamp.toUtc().add(receiptOffset));
+    }
+    // A low-trust/future fix after the last trusted fix is a continuity break.
+    // Do not resurrect a warning that was raised while replaying the prefix.
+    if (recentSamples.length > lastTrustedIndex + 1) {
+      _highSpeedWarningIssued = false;
+      _highSpeedPending = false;
+      _highSpeedPendingAt = null;
     }
   }
 

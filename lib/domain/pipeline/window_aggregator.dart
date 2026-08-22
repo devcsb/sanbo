@@ -42,35 +42,46 @@ class WindowAggregator {
     required List<RouteExclusion> exclusions,
     required DateTime sessionStart,
     required DateTime sessionEnd,
+    String? timezone,
   }) {
     if (!sessionEnd.isAfter(sessionStart)) return const [];
 
-    final startLocal = asLocal(sessionStart);
-    final endLocal = asLocal(sessionEnd);
-    final rawByMinute = _bucketSamples(rawSamples, sessionStart, sessionEnd);
+    final startLocal = asLocal(sessionStart, timezone: timezone);
+    final endLocal = asLocal(sessionEnd, timezone: timezone);
+    final rawByMinute = _bucketSamples(
+      rawSamples,
+      sessionStart,
+      sessionEnd,
+      timezone: timezone,
+      includeSessionEnd: true,
+    );
     final includedByMinute = _bucketSamples(
       partition.includedSamples,
       sessionStart,
       sessionEnd,
+      timezone: timezone,
+      includeSessionEnd: true,
     );
     final motionByMinute = _allocateMotion(
       partition.segments,
       sessionStart,
       sessionEnd,
+      timezone: timezone,
     );
     final excludedWindows = _excludedWindows(
       exclusions,
       sessionStart,
       sessionEnd,
+      timezone: timezone,
     );
 
     final windows = <MinuteWindow>[];
-    var cursor = floorToMinute(startLocal);
+    var cursor = floorToMinute(startLocal, timezone: timezone);
     while (cursor.isBefore(endLocal)) {
       final windowEnd = cursor.add(const Duration(minutes: 1));
       final spanStart = startLocal.isAfter(cursor) ? startLocal : cursor;
       final spanEnd = endLocal.isBefore(windowEnd) ? endLocal : windowEnd;
-      final durationS = spanEnd.difference(spanStart).inSeconds;
+      final durationS = _positiveDurationSeconds(spanStart, spanEnd);
       final rawSampleCount = rawByMinute[cursor]?.length ?? 0;
       final exclusionId = excludedWindows[cursor];
       if (exclusionId != null) {
@@ -102,18 +113,22 @@ class WindowAggregator {
   Map<DateTime, List<LocationSample>> _bucketSamples(
     List<LocationSample> samples,
     DateTime sessionStart,
-    DateTime sessionEnd,
-  ) {
+    DateTime sessionEnd, {
+    String? timezone,
+    bool includeSessionEnd = false,
+  }) {
     final result = <DateTime, List<LocationSample>>{};
     for (final sample in samples) {
       if (sample.timestamp.isBefore(sessionStart) ||
-          sample.timestamp.isAfter(sessionEnd)) {
+          sample.timestamp.isAfter(sessionEnd) ||
+          (!includeSessionEnd &&
+              sample.timestamp.isAtSameMomentAs(sessionEnd))) {
         continue;
       }
       final timestampForBucket = sample.timestamp.isAtSameMomentAs(sessionEnd)
           ? sample.timestamp.subtract(const Duration(microseconds: 1))
           : sample.timestamp;
-      final key = floorToMinute(asLocal(timestampForBucket));
+      final key = floorToMinute(timestampForBucket, timezone: timezone);
       result.putIfAbsent(key, () => []).add(sample);
     }
     return result;
@@ -122,8 +137,9 @@ class WindowAggregator {
   Map<DateTime, _WindowMotion> _allocateMotion(
     List<RouteSegment> segments,
     DateTime sessionStart,
-    DateTime sessionEnd,
-  ) {
+    DateTime sessionEnd, {
+    String? timezone,
+  }) {
     final motionByMinute = <DateTime, _WindowMotion>{};
     for (final segment in segments) {
       final segmentStart = segment.start.timestamp;
@@ -131,8 +147,8 @@ class WindowAggregator {
       final durationUs = segment.duration.inMicroseconds;
       if (durationUs <= 0 || !segment.distanceM.isFinite) continue;
 
-      var cursor = floorToMinute(asLocal(segmentStart));
-      final segmentEndLocal = asLocal(segmentEnd);
+      var cursor = floorToMinute(segmentStart, timezone: timezone);
+      final segmentEndLocal = asLocal(segmentEnd, timezone: timezone);
       while (cursor.isBefore(segmentEndLocal)) {
         final windowEnd = cursor.add(const Duration(minutes: 1));
         final overlapStart = _later(_later(segmentStart, sessionStart), cursor);
@@ -165,31 +181,32 @@ class WindowAggregator {
   Map<DateTime, String> _excludedWindows(
     List<RouteExclusion> exclusions,
     DateTime sessionStart,
-    DateTime sessionEnd,
-  ) {
+    DateTime sessionEnd, {
+    String? timezone,
+  }) {
     final result = <DateTime, String>{};
     final ordered = [...exclusions]
       ..sort((a, b) {
         final byStart = a.startAt.compareTo(b.startAt);
         return byStart != 0 ? byStart : a.id.compareTo(b.id);
       });
-    for (final exclusion in ordered) {
-      final start = _later(exclusion.startAt, sessionStart);
-      final end = _earlier(exclusion.endAt, sessionEnd);
-      if (!start.isBefore(end)) continue;
-      var cursor = floorToMinute(asLocal(start));
-      final endLocal = asLocal(end);
-      while (cursor.isBefore(endLocal)) {
-        final windowEnd = cursor.add(const Duration(minutes: 1));
-        if (exclusion.overlaps(cursor, windowEnd)) {
-          final prior = result[cursor];
-          // A minute can contain multiple non-overlapping exclusions. Keep
-          // the earliest range's ID as a stable representative for the
-          // single `user_exclusion_id` column.
-          if (prior == null) result[cursor] = exclusion.id;
-        }
-        cursor = windowEnd;
+    var cursor = floorToMinute(sessionStart, timezone: timezone);
+    final endLocal = asLocal(sessionEnd, timezone: timezone);
+    while (cursor.isBefore(endLocal)) {
+      final windowEnd = cursor.add(const Duration(minutes: 1));
+      final spanStart = _later(cursor, sessionStart);
+      final spanEnd = _earlier(windowEnd, sessionEnd);
+      final touching = ordered
+          .where((exclusion) => exclusion.overlaps(spanStart, spanEnd))
+          .toList(growable: false);
+      if (touching.isNotEmpty) {
+        // v2 backups may contain partial or disjoint exclusions in one minute
+        // even though newly-created route edits are authoritative full-minute
+        // selections. The row has one representative ID, so preserve the
+        // stable first touching ID for that legacy shape.
+        result[cursor] = touching.first.id;
       }
+      cursor = windowEnd;
     }
     return result;
   }
@@ -333,6 +350,13 @@ class WindowAggregator {
     }
     return WindowQuality.low;
   }
+}
+
+int _positiveDurationSeconds(DateTime start, DateTime end) {
+  final microseconds = end.difference(start).inMicroseconds;
+  if (microseconds <= 0) return 0;
+  return (microseconds + Duration.microsecondsPerSecond - 1) ~/
+      Duration.microsecondsPerSecond;
 }
 
 DateTime _later(DateTime a, DateTime b) => a.isAfter(b) ? a : b;

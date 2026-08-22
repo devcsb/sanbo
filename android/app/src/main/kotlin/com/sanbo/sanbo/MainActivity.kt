@@ -14,17 +14,25 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 internal const val notificationKindExtra = "sanbo_notification_kind"
+internal const val notificationSessionIdExtra = "sanbo_notification_session_id"
 
 internal fun notificationKind(kind: String?): String? = kind?.takeIf { it == "highSpeed" }
 
 internal fun notificationKind(intent: Intent?): String? =
     notificationKind(intent?.getStringExtra(notificationKindExtra))
 
+internal fun notificationSessionId(sessionId: String?): String? =
+    sessionId?.takeIf { it.isNotEmpty() }
+
+internal fun notificationSessionId(intent: Intent?): String? =
+    notificationSessionId(intent?.getStringExtra(notificationSessionIdExtra))
+
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "sanbo/session_notifications"
     private val notificationChannelId = "sanbo_session_alerts"
     private var notificationMethodChannel: MethodChannel? = null
     private var pendingKind: String? = null
+    private var pendingSessionId: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -43,15 +51,16 @@ class MainActivity : FlutterActivity() {
                         val title = call.argument<String>("title")
                         val body = call.argument<String>("body")
                         val kind = call.argument<String>("kind")
+                        val sessionId = call.argument<String>("sessionId")
                         if (id == null ||
-                            !isSupportedNotification(id, kind) ||
+                            !isSupportedNotification(id, kind, sessionId) ||
                             title == null ||
                             body == null
                         ) {
                             result.error("invalid_arguments", "Notification fields are missing or invalid.", null)
                             return@setMethodCallHandler
                         }
-                        showNotification(id, title, body, kind)
+                        showNotification(id, title, body, kind, sessionId)
                         result.success(null)
                     }
 
@@ -71,8 +80,13 @@ class MainActivity : FlutterActivity() {
             }
         }
         pendingKind?.let { kind ->
+            val sessionId = pendingSessionId
             pendingKind = null
-            notificationMethodChannel?.invokeMethod("notificationTapped", mapOf("kind" to kind))
+            pendingSessionId = null
+            notificationMethodChannel?.invokeMethod(
+                "notificationTapped",
+                mapOf("kind" to kind, "sessionId" to sessionId),
+            )
         }
         deliverOrQueueTap(intent)
     }
@@ -121,18 +135,28 @@ class MainActivity : FlutterActivity() {
 
     private fun deliverOrQueueTap(intent: Intent?) {
         val kind = notificationKind(intent) ?: return
+        val sessionId = notificationSessionId(intent) ?: return
         val channel = notificationMethodChannel
         if (channel == null) {
             pendingKind = kind
+            pendingSessionId = sessionId
         } else {
-            channel.invokeMethod("notificationTapped", mapOf("kind" to kind))
+            channel.invokeMethod(
+                "notificationTapped",
+                mapOf("kind" to kind, "sessionId" to sessionId),
+            )
         }
         intent?.removeExtra(notificationKindExtra)
+        intent?.removeExtra(notificationSessionIdExtra)
     }
 
-    private fun isSupportedNotification(id: Int?, kind: String?): Boolean = when (id) {
+    private fun isSupportedNotification(
+        id: Int?,
+        kind: String?,
+        sessionId: String?,
+    ): Boolean = when (id) {
         stationaryWarningId -> kind == "stationary" || kind == "duration"
-        highSpeedWarningId -> kind == "highSpeed"
+        highSpeedWarningId -> kind == "highSpeed" && !sessionId.isNullOrEmpty()
         completionNotificationId -> kind == null
         else -> false
     }
@@ -149,10 +173,19 @@ class MainActivity : FlutterActivity() {
         notificationManager().createNotificationChannel(channel)
     }
 
-    private fun showNotification(id: Int, title: String, body: String, kind: String?) {
+    private fun showNotification(
+        id: Int,
+        title: String,
+        body: String,
+        kind: String?,
+        sessionId: String?,
+    ) {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
             if (kind != null) putExtra(notificationKindExtra, kind)
+            if (!sessionId.isNullOrEmpty()) {
+                putExtra(notificationSessionIdExtra, sessionId)
+            }
         }
         val contentIntent = PendingIntent.getActivity(
             this,

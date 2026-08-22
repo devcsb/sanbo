@@ -61,7 +61,7 @@ class _FakeSessionNotifications implements SessionNotificationService {
   }
 
   @override
-  Future<void> showWarning(SessionWarning warning) async {
+  Future<void> showWarning(SessionWarning warning, {String? sessionId}) async {
     warnings.add('${warning.title}|${warning.message}');
   }
 
@@ -71,12 +71,12 @@ class _FakeSessionNotifications implements SessionNotificationService {
     return tap;
   });
 
-  void emitTap(SessionWarningKind kind) {
-    _tapController.add(SessionNotificationTap(kind));
+  void emitTap(SessionWarningKind kind, {String? sessionId}) {
+    _tapController.add(SessionNotificationTap(kind, sessionId: sessionId));
   }
 
-  void emitColdTap(SessionWarningKind kind) {
-    _pendingColdTap = SessionNotificationTap(kind);
+  void emitColdTap(SessionWarningKind kind, {String? sessionId}) {
+    _pendingColdTap = SessionNotificationTap(kind, sessionId: sessionId);
   }
 
   void _flushPendingColdTap() {
@@ -434,6 +434,94 @@ void main() {
     },
   );
 
+  test(
+    'transient inactive does not publish, while actual pause publishes once',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final notifications = _FakeSessionNotifications();
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      controller.setAppInactive();
+      final startedAt = container
+          .read(sessionControllerProvider)
+          .session!
+          .startedAt;
+      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await _pumpGuard();
+      expect(notifications.warnings, isEmpty);
+
+      controller.setAppForeground(false);
+      await _pumpGuard();
+      expect(notifications.warnings, hasLength(1));
+
+      controller.setAppInactive();
+      await _pumpGuard();
+      expect(notifications.warnings, hasLength(1));
+    },
+  );
+
+  test(
+    'latched foreground high-speed warning is published after backgrounding',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final notifications = _FakeSessionNotifications();
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final startedAt = container
+          .read(sessionControllerProvider)
+          .session!
+          .startedAt;
+      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await _pumpGuard();
+
+      expect(
+        container.read(sessionControllerProvider).activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+      expect(notifications.warnings, isEmpty);
+
+      controller.setAppForeground(false);
+      await _pumpGuard();
+
+      expect(notifications.warnings, hasLength(1));
+    },
+  );
+
   test('a live filter rejection breaks high-speed accumulation', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
@@ -674,7 +762,7 @@ void main() {
     (tester) async {
       final repo = (await tester.runAsync<WalkRepository>(openTestRepository))!;
       addTearDown(repo.close);
-      await tester.runAsync(
+      final session = await tester.runAsync<WalkSession>(
         () => repo.startSession(mode: TrackingMode.balanced),
       );
       final notifications = _FakeSessionNotifications();
@@ -704,7 +792,10 @@ void main() {
       router.go('/settings');
       await tester.pump();
       await tester.pump();
-      notifications.emitTap(SessionWarningKind.highSpeed);
+      notifications.emitTap(
+        SessionWarningKind.highSpeed,
+        sessionId: session!.id,
+      );
       await tester.pump();
 
       expect(router.routeInformationProvider.value.uri.path, '/');
@@ -740,7 +831,10 @@ void main() {
       final controller = container.read(sessionControllerProvider.notifier);
 
       controller.handleNotificationTap(
-        const SessionNotificationTap(SessionWarningKind.highSpeed),
+        const SessionNotificationTap(
+          SessionWarningKind.highSpeed,
+          sessionId: 'ended-session',
+        ),
       );
       await controller.restoreIfNeeded();
 
@@ -768,7 +862,10 @@ void main() {
     final controller = container.read(sessionControllerProvider.notifier);
 
     controller.handleNotificationTap(
-      const SessionNotificationTap(SessionWarningKind.highSpeed),
+      SessionNotificationTap(
+        SessionWarningKind.highSpeed,
+        sessionId: session.id,
+      ),
     );
     await controller.restoreIfNeeded();
 
@@ -778,6 +875,33 @@ void main() {
     expect(await controller.stopFromHighSpeedWarning(), isNull);
     expect(await repo.getActiveSession(), isNull);
     expect(await repo.listCompleted(), hasLength(1));
+  });
+
+  test('a notification tap for an older session is ignored', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final session = await repo.startSession(mode: TrackingMode.balanced);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+
+    await controller.restoreIfNeeded();
+    controller.handleNotificationTap(
+      const SessionNotificationTap(
+        SessionWarningKind.highSpeed,
+        sessionId: 'older-session',
+      ),
+    );
+
+    expect(controller.state.session?.id, session.id);
+    expect(controller.state.activeWarning, isNull);
   });
 
   test(
@@ -804,7 +928,10 @@ void main() {
       final controller = container.read(sessionControllerProvider.notifier);
 
       controller.handleNotificationTap(
-        const SessionNotificationTap(SessionWarningKind.highSpeed),
+        SessionNotificationTap(
+          SessionWarningKind.highSpeed,
+          sessionId: session.id,
+        ),
       );
       await controller.restoreIfNeeded();
       await controller.continueAfterWarning();
@@ -936,7 +1063,10 @@ Future<_ColdWarningFixture> _coldWarningFixture(WidgetTester tester) async {
     ),
   );
   final notifications = _FakeSessionNotifications();
-  notifications.emitColdTap(SessionWarningKind.highSpeed);
+  notifications.emitColdTap(
+    SessionWarningKind.highSpeed,
+    sessionId: session.id,
+  );
   final router = GoRouter(
     initialLocation: '/settings',
     routes: [

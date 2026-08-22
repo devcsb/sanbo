@@ -7,9 +7,10 @@ import '../../domain/models/session_warning.dart';
 enum NotificationPermissionResult { granted, denied, unsupported, failed }
 
 class SessionNotificationTap {
-  const SessionNotificationTap(this.kind);
+  const SessionNotificationTap(this.kind, {this.sessionId});
 
   final SessionWarningKind kind;
+  final String? sessionId;
 }
 
 abstract class SessionNotificationService {
@@ -19,7 +20,7 @@ abstract class SessionNotificationService {
 
   Stream<SessionNotificationTap> get taps;
 
-  Future<void> showWarning(SessionWarning warning);
+  Future<void> showWarning(SessionWarning warning, {String? sessionId});
 
   Future<void> showCompletion({required String title, required String body});
 
@@ -66,12 +67,13 @@ class PlatformSessionNotificationService implements SessionNotificationService {
   }
 
   @override
-  Future<void> showWarning(SessionWarning warning) {
+  Future<void> showWarning(SessionWarning warning, {String? sessionId}) {
     return _show(
       id: _idFor(warning.kind),
       kind: warning.kind,
       title: warning.title,
       body: warning.message,
+      sessionId: sessionId,
     );
   }
 
@@ -109,6 +111,7 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     required String title,
     required String body,
     SessionWarningKind? kind,
+    String? sessionId,
   }) async {
     try {
       await _channel.invokeMethod<void>('show', {
@@ -116,6 +119,7 @@ class PlatformSessionNotificationService implements SessionNotificationService {
         'title': title,
         'body': body,
         if (kind != null) 'kind': kind.name,
+        'sessionId': sessionId,
       });
     } on MissingPluginException {
       // Desktop, web, and widget tests do not install a native handler.
@@ -128,7 +132,12 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     if (call.method != 'notificationTapped') return null;
     final arguments = call.arguments;
     if (arguments is! Map || arguments['kind'] != 'highSpeed') return null;
-    const tap = SessionNotificationTap(SessionWarningKind.highSpeed);
+    final sessionId = arguments['sessionId'];
+    if (sessionId is! String || sessionId.isEmpty) return null;
+    final tap = SessionNotificationTap(
+      SessionWarningKind.highSpeed,
+      sessionId: sessionId,
+    );
     if (_tapController.hasListener) {
       _tapController.add(tap);
     } else {

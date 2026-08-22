@@ -14,4 +14,9 @@ class NotificationIntentContractTest {
     fun `unknown kinds are ignored`() {
         assertNull(notificationKind("stationary"))
     }
+
+    @Test
+    fun `tap payload keeps the session id from the notification intent`() {
+        assertEquals("session-1", notificationSessionId("session-1"))
+    }
 }

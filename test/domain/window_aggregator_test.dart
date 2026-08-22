@@ -7,46 +7,108 @@ import 'package:sanbo/domain/pipeline/route_partitioner.dart';
 import 'package:sanbo/domain/pipeline/window_aggregator.dart';
 
 void main() {
-  test('uses the first touching exclusion id for a shared minute', () {
+  test(
+    'keeps a deterministic representative when legacy exclusions share a minute row',
+    () {
+      final start = DateTime.utc(2026, 8, 21);
+      final sample = LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      );
+      final exclusions = [
+        RouteExclusion(
+          id: 'first',
+          sessionId: 'walk-1',
+          startAt: start.add(const Duration(seconds: 10)),
+          endAt: start.add(const Duration(seconds: 30)),
+          reason: RouteExclusionReason.vehicle,
+          createdAt: start,
+        ),
+        RouteExclusion(
+          id: 'second',
+          sessionId: 'walk-1',
+          startAt: start.add(const Duration(seconds: 30)),
+          endAt: start.add(const Duration(minutes: 1)),
+          reason: RouteExclusionReason.vehicle,
+          createdAt: start,
+        ),
+      ];
+      final partition = RoutePartitioner.partition(
+        samples: [sample],
+        exclusions: exclusions,
+      );
+
+      final windows = WindowAggregator().aggregate(
+        partition: partition,
+        rawSamples: [sample],
+        exclusions: exclusions,
+        sessionStart: start,
+        sessionEnd: start.add(const Duration(minutes: 1)),
+      );
+
+      expect(windows.single.userExclusionId, 'first');
+    },
+  );
+
+  test('keeps a representative for a legacy partial minute exclusion', () {
     final start = DateTime.utc(2026, 8, 21);
+    final sample = LocationSample(
+      timestamp: start.add(const Duration(seconds: 5)),
+      latitude: 37.5,
+      longitude: 127,
+      accuracyM: 5,
+    );
+    final exclusion = RouteExclusion(
+      id: 'partial',
+      sessionId: 'walk-1',
+      startAt: start.add(const Duration(seconds: 10)),
+      endAt: start.add(const Duration(seconds: 30)),
+      reason: RouteExclusionReason.vehicle,
+      createdAt: start,
+    );
+    final partition = RoutePartitioner.partition(
+      samples: [sample],
+      exclusions: [exclusion],
+    );
+
+    final windows = WindowAggregator().aggregate(
+      partition: partition,
+      rawSamples: [sample],
+      exclusions: [exclusion],
+      sessionStart: start,
+      sessionEnd: start.add(const Duration(minutes: 1)),
+    );
+
+    expect(windows.single.userExclusionId, exclusion.id);
+  });
+
+  test('rounds a positive sub-second partial window up for persistence', () {
+    final start = DateTime.utc(2026, 8, 21, 0, 0, 59, 500);
+    final end = start.add(const Duration(microseconds: 500000));
     final sample = LocationSample(
       timestamp: start,
       latitude: 37.5,
       longitude: 127,
       accuracyM: 5,
     );
-    final exclusions = [
-      RouteExclusion(
-        id: 'first',
-        sessionId: 'walk-1',
-        startAt: start.add(const Duration(seconds: 10)),
-        endAt: start.add(const Duration(seconds: 30)),
-        reason: RouteExclusionReason.vehicle,
-        createdAt: start,
-      ),
-      RouteExclusion(
-        id: 'second',
-        sessionId: 'walk-1',
-        startAt: start.add(const Duration(seconds: 30)),
-        endAt: start.add(const Duration(minutes: 1)),
-        reason: RouteExclusionReason.vehicle,
-        createdAt: start,
-      ),
-    ];
     final partition = RoutePartitioner.partition(
       samples: [sample],
-      exclusions: exclusions,
+      exclusions: const [],
     );
 
     final windows = WindowAggregator().aggregate(
       partition: partition,
       rawSamples: [sample],
-      exclusions: exclusions,
+      exclusions: const [],
       sessionStart: start,
-      sessionEnd: start.add(const Duration(minutes: 1)),
+      sessionEnd: end,
     );
 
-    expect(windows.single.userExclusionId, 'first');
+    expect(windows, hasLength(1));
+    expect(windows.single.durationS, 1);
+    expect(windows.single.partial, isTrue);
   });
 
   test('buckets samples into minute windows with walk hypothesis', () {

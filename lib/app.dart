@@ -28,7 +28,7 @@ class _SanboAppState extends ConsumerState<SanboApp> {
         ref.read(sessionControllerProvider.notifier).setAppForeground(true);
       },
       onInactive: () =>
-          ref.read(sessionControllerProvider.notifier).setAppForeground(false),
+          ref.read(sessionControllerProvider.notifier).setAppInactive(),
       onPause: () =>
           ref.read(sessionControllerProvider.notifier).setAppForeground(false),
       onHide: () =>

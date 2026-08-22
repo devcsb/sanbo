@@ -1,5 +1,8 @@
 import 'dart:math' as math;
 
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
+
 /// Maximum interval for treating two GPS fixes as an observed path segment.
 /// Longer intervals are unobserved and must not be bridged with a straight
 /// line in live or completed-session metrics.
@@ -55,15 +58,56 @@ double pathDistanceMeters(
 
 double _toRad(double deg) => deg * math.pi / 180.0;
 
-/// Convert any DateTime to the device local timeline (defensive vs UTC GPS).
-DateTime asLocal(DateTime ts) => ts.isUtc ? ts.toLocal() : ts;
+var _timeZonesInitialized = false;
+
+void _ensureTimeZonesInitialized() {
+  if (_timeZonesInitialized) return;
+  tz_data.initializeTimeZones();
+  _timeZonesInitialized = true;
+}
+
+tz.Location? _locationFor(String? timezone) {
+  if (timezone == null || timezone.isEmpty) return null;
+  try {
+    _ensureTimeZonesInitialized();
+    return tz.getLocation(timezone);
+  } on tz.LocationNotFoundException {
+    // A future or corrupted archive can contain a zone unavailable in the
+    // bundled tzdata. Fall back to the device zone instead of losing a walk.
+    return null;
+  }
+}
+
+/// Convert any DateTime to the session or device local timeline.
+DateTime asLocal(DateTime ts, {String? timezone}) {
+  final location = _locationFor(timezone);
+  if (location == null) return ts.isUtc ? ts.toLocal() : ts;
+  return tz.TZDateTime.from(ts.toUtc(), location);
+}
 
 /// Floor [ts] to **local** wall-clock minute boundary.
 ///
-/// Always converts UTC → local first. Geolocator samples are UTC; session
-/// bounds use `DateTime.now()` (local). Without this, minute keys diverge
-/// in non-UTC zones (e.g. KST) and every window becomes an empty gap.
-DateTime floorToMinute(DateTime ts) {
-  final local = asLocal(ts);
-  return DateTime(local.year, local.month, local.day, local.hour, local.minute);
+/// Always converts an instant to the session wall-clock zone first.
+DateTime floorToMinute(DateTime ts, {String? timezone}) {
+  final local = asLocal(ts, timezone: timezone);
+  final location = _locationFor(timezone);
+  if (location == null) {
+    return DateTime(
+      local.year,
+      local.month,
+      local.day,
+      local.hour,
+      local.minute,
+    );
+  }
+  // Constructing TZDateTime from wall-clock fields loses the fold during a
+  // fall-back hour. Truncate the original instant instead, which preserves
+  // the correct UTC occurrence of an ambiguous local minute.
+  final elapsedInMinute = Duration(
+    seconds: local.second,
+    milliseconds: local.millisecond,
+    microseconds: local.microsecond,
+  );
+  final flooredUtc = ts.toUtc().subtract(elapsedInMinute);
+  return tz.TZDateTime.from(flooredUtc, location);
 }

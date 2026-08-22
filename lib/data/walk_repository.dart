@@ -181,9 +181,13 @@ ORDER BY day ASC
     String sessionId,
     List<LocationSample> samples,
   ) async {
-    if (samples.isEmpty) return;
+    final persistable = samples
+        .where(_isPersistableSample)
+        .map((sample) => sample.normalizedMetadata())
+        .toList(growable: false);
+    if (persistable.isEmpty) return;
     final batch = _db.batch();
-    for (final s in samples) {
+    for (final s in persistable) {
       batch.insert('location_samples', _sampleToRow(sessionId, s));
     }
     await batch.commit(noResult: true);
@@ -201,6 +205,15 @@ ORDER BY day ASC
       'altitude_m': s.altitudeM,
       'is_filtered_out': s.isFilteredOut ? 1 : 0,
     };
+  }
+
+  bool _isPersistableSample(LocationSample sample) {
+    return sample.latitude.isFinite &&
+        sample.latitude >= -90 &&
+        sample.latitude <= 90 &&
+        sample.longitude.isFinite &&
+        sample.longitude >= -180 &&
+        sample.longitude <= 180;
   }
 
   /// Atomically persist a finalized walk: replace samples, replace windows,
@@ -238,7 +251,7 @@ ORDER BY day ASC
         whereArgs: [session.id],
       );
       final sampleBatch = txn.batch();
-      for (final s in samples) {
+      for (final s in samples.where(_isPersistableSample)) {
         sampleBatch.insert('location_samples', _sampleToRow(session.id, s));
       }
       await sampleBatch.commit(noResult: true);
@@ -304,7 +317,19 @@ ORDER BY day ASC
   }
 
   Future<List<MinuteWindow>> getWindows(String sessionId) async {
-    return _getWindowsIn(_db, sessionId);
+    final sessionRows = await _db.query(
+      'sessions',
+      columns: const ['timezone'],
+      where: 'id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    if (sessionRows.isEmpty) return const [];
+    return _getWindowsIn(
+      _db,
+      sessionId,
+      timezone: sessionRows.single['timezone']! as String,
+    );
   }
 
   Future<List<RouteExclusion>> getRouteExclusions(String sessionId) async {
@@ -447,8 +472,9 @@ ORDER BY day ASC
 
   Future<List<MinuteWindow>> _getWindowsIn(
     DatabaseExecutor executor,
-    String sessionId,
-  ) async {
+    String sessionId, {
+    required String timezone,
+  }) async {
     final rows = await executor.rawQuery(
       '''
 SELECT w.*,
@@ -461,7 +487,7 @@ ORDER BY w.window_start ASC
 ''',
       [sessionId],
     );
-    return rows.map(_windowFromRow).toList();
+    return rows.map((row) => _windowFromRow(row, timezone: timezone)).toList();
   }
 
   Future<_RouteEditSnapshot> _loadRouteEditSnapshot(
@@ -485,7 +511,11 @@ ORDER BY w.window_start ASC
       whereArgs: [sessionId],
       orderBy: 'ts ASC',
     )).map(_sampleFromRow).toList(growable: false);
-    final windows = await _getWindowsIn(executor, sessionId);
+    final windows = await _getWindowsIn(
+      executor,
+      sessionId,
+      timezone: session.timezone,
+    );
     final exclusions = (await executor.query(
       'route_exclusions',
       where: 'session_id = ?',
@@ -1168,8 +1198,6 @@ ORDER BY w.window_start ASC
           final session = importedSessionRows[sessionId]!;
           final sessionStart = _requiredDate(session, 'started_at').toUtc();
           final sessionEnd = _requiredDate(session, 'ended_at').toUtc();
-          final exclusionStart = _requiredDate(exclusion, 'start_at').toUtc();
-          final exclusionEnd = _requiredDate(exclusion, 'end_at').toUtc();
           final minuteStart = windowStart.toUtc();
           final minuteEnd = minuteStart.add(const Duration(minutes: 1));
           final actualWindowStart = minuteStart.isAfter(sessionStart)
@@ -1178,10 +1206,18 @@ ORDER BY w.window_start ASC
           final actualWindowEnd = minuteEnd.isBefore(sessionEnd)
               ? minuteEnd
               : sessionEnd;
-          final overlaps =
-              actualWindowStart.isBefore(exclusionEnd) &&
-              exclusionStart.isBefore(actualWindowEnd);
-          if (!overlaps) {
+          final touching = validatedExclusions
+              .where((candidate) {
+                if (candidate['session_id'] != sessionId) return false;
+                final candidateStart = _requiredDate(candidate, 'start_at');
+                final candidateEnd = _requiredDate(candidate, 'end_at');
+                return actualWindowStart.isBefore(candidateEnd) &&
+                    candidateStart.isBefore(actualWindowEnd);
+              })
+              .toList(growable: false);
+          if (!touching.any(
+            (candidate) => candidate['id'] == userExclusionId,
+          )) {
             throw const FormatException('제외 범위 밖의 구간이 있습니다');
           }
         }
@@ -1570,13 +1606,13 @@ ORDER BY w.window_start ASC
   }
 
   String _stableWindowStart(DateTime ts) {
-    final local = ts.isUtc ? ts.toLocal() : ts;
-    final floored = DateTime(
-      local.year,
-      local.month,
-      local.day,
-      local.hour,
-      local.minute,
+    final instant = ts.toUtc();
+    final floored = DateTime.utc(
+      instant.year,
+      instant.month,
+      instant.day,
+      instant.hour,
+      instant.minute,
     );
     return floored.toIso8601String();
   }
@@ -1746,13 +1782,17 @@ ORDER BY w.window_start ASC
     'user_exclusion_id': w.userExclusionId,
   };
 
-  MinuteWindow _windowFromRow(Map<String, Object?> r) {
+  MinuteWindow _windowFromRow(
+    Map<String, Object?> r, {
+    required String timezone,
+  }) {
     final evidenceRaw = r['evidence_json'] as String? ?? '[]';
     final evidence = (jsonDecode(evidenceRaw) as List<dynamic>)
         .map((e) => e.toString())
         .toList();
+    final persistedStart = DateTime.parse(r['window_start']! as String);
     return MinuteWindow(
-      windowStart: DateTime.parse(r['window_start']! as String),
+      windowStart: asLocal(persistedStart, timezone: timezone),
       durationS: r['duration_s']! as int,
       partial: (r['partial'] as int) == 1,
       sampleCount: r['sample_count']! as int,

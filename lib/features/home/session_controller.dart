@@ -168,9 +168,12 @@ class SessionController extends Notifier<LiveSessionState> {
   var _sessionGeneration = 0;
   var _endingSession = false;
   bool _autoStopInProgress = false;
+  bool _highSpeedWarningPublished = false;
   bool _appForeground = true;
+  bool _appInactive = false;
   bool _restorationComplete = false;
   bool _restoring = false;
+  Future<void>? _restoreOperation;
   SessionNotificationTap? _pendingNotificationTap;
 
   static const _checkpointEvery = Duration(seconds: 30);
@@ -198,7 +201,30 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   /// Call after app start (bootstrap) to recover incomplete sessions.
-  Future<void> restoreIfNeeded() async {
+  Future<void> restoreIfNeeded() {
+    final ongoing = _restoreOperation;
+    if (ongoing != null) return ongoing;
+
+    final operation = _restoreIfNeeded();
+    _restoreOperation = operation;
+    unawaited(
+      operation.then<void>(
+        (_) {
+          if (identical(_restoreOperation, operation)) {
+            _restoreOperation = null;
+          }
+        },
+        onError: (Object _, StackTrace _) {
+          if (identical(_restoreOperation, operation)) {
+            _restoreOperation = null;
+          }
+        },
+      ),
+    );
+    return operation;
+  }
+
+  Future<void> _restoreIfNeeded() async {
     if (_restoring) return;
     _restoring = true;
     try {
@@ -339,7 +365,7 @@ class SessionController extends Notifier<LiveSessionState> {
   Future<void> restorePendingNotificationTap() async {
     final tap = _pendingNotificationTap;
     _pendingNotificationTap = null;
-    if (tap == null || state.session == null) return;
+    if (tap == null || tap.sessionId != state.session?.id) return;
     _presentNotificationTap(tap);
   }
 
@@ -349,7 +375,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _pendingNotificationTap = tap;
       return;
     }
-    if (state.session == null) return;
+    if (tap.sessionId == null || tap.sessionId != state.session?.id) return;
     _presentNotificationTap(tap);
   }
 
@@ -389,6 +415,7 @@ class SessionController extends Notifier<LiveSessionState> {
 
   void _cancelSessionGuard() {
     _sessionGuard.reset();
+    _highSpeedWarningPublished = false;
     unawaited(_notifications.cancelAllWarnings());
   }
 
@@ -434,6 +461,10 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   Future<void> start({TrackingMode mode = TrackingMode.balanced}) async {
+    final restoreOperation = _restoreOperation;
+    if (restoreOperation != null) {
+      await restoreOperation;
+    }
     if (state.isBusy || state.isTracking) return;
     unawaited(_notifications.requestPermission());
     state = state.copyWith(
@@ -480,6 +511,7 @@ class SessionController extends Notifier<LiveSessionState> {
     }
 
     _endingSession = false;
+    _highSpeedWarningPublished = false;
     _sessionGeneration++;
     _maintenanceQueue.reopen();
 
@@ -726,7 +758,7 @@ class SessionController extends Notifier<LiveSessionState> {
           activeWarning: warning,
           statusMessage: '정지 상태 확인 중',
         );
-        await _notifications.showWarning(warning);
+        await _notifications.showWarning(warning, sessionId: session.id);
         return;
       case SessionGuardEvent.stationaryLimit:
         if (deferAutoStop) {
@@ -748,7 +780,7 @@ class SessionController extends Notifier<LiveSessionState> {
           activeWarning: warning,
           statusMessage: '자동 종료 예정',
         );
-        await _notifications.showWarning(warning);
+        await _notifications.showWarning(warning, sessionId: session.id);
         return;
       case SessionGuardEvent.durationLimit:
         if (deferAutoStop) {
@@ -766,7 +798,8 @@ class SessionController extends Notifier<LiveSessionState> {
           statusMessage: '기록 종료 확인 중',
         );
         if (!_appForeground) {
-          await _notifications.showWarning(warning);
+          await _notifications.showWarning(warning, sessionId: session.id);
+          _highSpeedWarningPublished = true;
         }
         return;
     }
@@ -792,6 +825,7 @@ class SessionController extends Notifier<LiveSessionState> {
         break;
       case SessionWarningKind.highSpeed:
         _sessionGuard.dismissHighSpeedWarning();
+        _highSpeedWarningPublished = false;
         break;
       case SessionWarningKind.duration:
         return;
@@ -829,6 +863,7 @@ class SessionController extends Notifier<LiveSessionState> {
             message: '앱을 열어 ‘저장하고 종료’를 다시 눌러 주세요. 기록은 기기에 남아 있습니다.',
             actions: {},
           ),
+          sessionId: state.session?.id,
         );
         return;
       }
@@ -892,12 +927,35 @@ class SessionController extends Notifier<LiveSessionState> {
 
   /// Suppress high-frequency presentation work while native GPS collection
   /// continues in the background, then publish one caught-up snapshot.
+  /// iOS may emit `inactive` while the app is still visible (for example when
+  /// a notification is presented). That transient state must not publish a
+  /// background warning or latch it as delivered.
+  void setAppInactive() {
+    if (_appInactive) return;
+    _appInactive = true;
+    _ticker?.cancel();
+    _ticker = null;
+  }
+
+  /// Suppress high-frequency presentation work while native GPS collection
+  /// continues in the background, then publish one caught-up snapshot.
   void setAppForeground(bool foreground) {
-    if (_appForeground == foreground) return;
+    final wasInactive = _appInactive;
+    _appInactive = false;
+    if (_appForeground == foreground && !(foreground && wasInactive)) return;
     _appForeground = foreground;
     if (!foreground) {
       _ticker?.cancel();
       _ticker = null;
+      final warning = state.activeWarning;
+      final session = state.session;
+      if (state.isTracking &&
+          session != null &&
+          warning?.kind == SessionWarningKind.highSpeed &&
+          !_highSpeedWarningPublished) {
+        _highSpeedWarningPublished = true;
+        unawaited(_notifications.showWarning(warning!, sessionId: session.id));
+      }
       unawaited(_runMaintenance());
       return;
     }

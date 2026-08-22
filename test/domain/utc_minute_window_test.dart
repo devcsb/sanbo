@@ -105,4 +105,37 @@ void main() {
       isTrue,
     );
   });
+
+  test(
+    'SessionPipeline buckets by the session timezone, not device timezone',
+    () {
+      final sessionStart = DateTime.utc(2026, 1, 15, 5);
+      final sessionEnd = sessionStart.add(const Duration(minutes: 1));
+      final session = WalkSession(
+        id: 'timezone-reg',
+        startedAt: sessionStart,
+        timezone: 'America/New_York',
+        trackingMode: TrackingMode.balanced,
+      );
+      final samples = [
+        for (var second = 0; second < 60; second += 20)
+          LocationSample(
+            timestamp: sessionStart.add(Duration(seconds: second + 5)),
+            latitude: 40 + second * 0.00001,
+            longitude: -73,
+            accuracyM: 5,
+            speedMps: 1,
+          ),
+      ];
+
+      final result = SessionPipeline().process(
+        session: session,
+        rawSamples: samples,
+        endedAt: sessionEnd,
+      );
+
+      expect(result.windows.single.windowStart.toUtc(), sessionStart);
+      expect(result.windows.single.sampleCount, 3);
+    },
+  );
 }

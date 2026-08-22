@@ -32,11 +32,13 @@ void main() {
           SessionWarningAction.continueRecording,
         },
       ),
+      sessionId: 'session-1',
     );
     await service.cancel(kind: SessionWarningKind.highSpeed);
 
     expect(calls[0].arguments, containsPair('kind', 'highSpeed'));
     expect(calls[0].arguments, containsPair('id', 4103));
+    expect(calls[0].arguments, containsPair('sessionId', 'session-1'));
     expect(calls[1].arguments, containsPair('id', 4103));
   });
 
@@ -70,13 +72,17 @@ void main() {
         .handlePlatformMessage(
           channel.name,
           channel.codec.encodeMethodCall(
-            const MethodCall('notificationTapped', {'kind': 'highSpeed'}),
+            const MethodCall('notificationTapped', {
+              'kind': 'highSpeed',
+              'sessionId': 'session-1',
+            }),
           ),
           (_) {},
         );
     await pumpEventQueue();
 
     expect(received.map((event) => event.kind), [SessionWarningKind.highSpeed]);
+    expect(received.single.sessionId, 'session-1');
   });
 
   test(
@@ -89,7 +95,10 @@ void main() {
           .handlePlatformMessage(
             channel.name,
             channel.codec.encodeMethodCall(
-              const MethodCall('notificationTapped', {'kind': 'highSpeed'}),
+              const MethodCall('notificationTapped', {
+                'kind': 'highSpeed',
+                'sessionId': 'session-1',
+              }),
             ),
             (_) {},
           );
@@ -102,8 +111,29 @@ void main() {
       expect(received.map((event) => event.kind), [
         SessionWarningKind.highSpeed,
       ]);
+      expect(received.single.sessionId, 'session-1');
     },
   );
+
+  test('notificationTapped without a session id is ignored', () async {
+    final service = PlatformSessionNotificationService();
+    await service.initialize();
+    final received = <SessionNotificationTap>[];
+    final subscription = service.taps.listen(received.add);
+    addTearDown(subscription.cancel);
+
+    await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .handlePlatformMessage(
+          channel.name,
+          channel.codec.encodeMethodCall(
+            const MethodCall('notificationTapped', {'kind': 'highSpeed'}),
+          ),
+          (_) {},
+        );
+    await pumpEventQueue();
+
+    expect(received, isEmpty);
+  });
 
   test('permission and display failures remain nonfatal', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

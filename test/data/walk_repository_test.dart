@@ -64,6 +64,19 @@ void main() {
     expect(days[2].walkCount, 0);
   });
 
+  test('restores persisted window minutes in the session timezone', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+
+    final fixture = await seedCompletedTwoMinuteWalk(repo);
+    final windows = await repo.getWindows(fixture.session.id);
+    final first = windows.first;
+
+    expect(first.windowStart.isUtc, isFalse);
+    expect(first.windowStart, DateTime(2026, 8, 21, 9));
+    expect(first.windowStart.toUtc(), DateTime.utc(2026, 8, 21));
+  });
+
   test(
     'daily stats excludes the end boundary and includes zero days',
     () async {
@@ -783,6 +796,78 @@ GROUP BY substr(started_at, 1, 10)
     expect(await repo.getSamples(session.id), isEmpty);
     expect(await repo.getWindows(session.id), isEmpty);
   });
+
+  test(
+    'does not persist non-finite or out-of-range location samples',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final session = await repo.startSession(
+        startedAt: DateTime.utc(2026, 8, 21),
+      );
+
+      await repo.insertSamples(session.id, [
+        LocationSample(
+          timestamp: session.startedAt,
+          latitude: double.nan,
+          longitude: 127,
+        ),
+        LocationSample(
+          timestamp: session.startedAt.add(const Duration(seconds: 1)),
+          latitude: 37.5,
+          longitude: double.infinity,
+        ),
+        LocationSample(
+          timestamp: session.startedAt.add(const Duration(seconds: 2)),
+          latitude: 37.5,
+          longitude: 127,
+          speedMps: double.infinity,
+          accuracyM: double.nan,
+        ),
+      ]);
+
+      final samples = await repo.getSamples(session.id);
+      expect(samples, hasLength(1));
+      expect(samples.single.latitude, 37.5);
+      expect(samples.single.longitude, 127);
+      expect(samples.single.speedMps, isNull);
+      expect(samples.single.accuracyM, isNull);
+
+      await repo.completeSession(
+        sessionId: session.id,
+        endedAt: session.startedAt.add(const Duration(seconds: 3)),
+        totalDistanceM: 0,
+        durationS: 3,
+        movingTimeS: 0,
+        stationaryTimeS: 3,
+        avgSpeedMps: 0,
+        validSampleCount: 1,
+      );
+
+      final finalizeSession = await repo.startSession(
+        startedAt: session.startedAt.add(const Duration(minutes: 1)),
+      );
+      await repo.finalizeSession(
+        session: finalizeSession,
+        samples: [
+          LocationSample(
+            timestamp: finalizeSession.startedAt,
+            latitude: double.infinity,
+            longitude: 127,
+          ),
+        ],
+        windows: const [],
+        endedAt: finalizeSession.startedAt.add(const Duration(seconds: 1)),
+        totalDistanceM: 0,
+        durationS: 1,
+        movingTimeS: 0,
+        stationaryTimeS: 1,
+        avgSpeedMps: 0,
+        validSampleCount: 0,
+      );
+      expect(await repo.getSamples(finalizeSession.id), isEmpty);
+    },
+  );
 
   test('session notes can be updated', () async {
     final repo = await openTestRepository();

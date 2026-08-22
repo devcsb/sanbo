@@ -771,6 +771,40 @@ void main() {
     },
   );
 
+  test('rebuild breaks continuity when the latest fix is low trust', () {
+    final guard = SessionGuard();
+    final observedAt = start.add(const Duration(seconds: 70));
+    final samples = <LocationSample>[
+      for (var second = 0; second <= 60; second += 10)
+        movingFix(start.add(Duration(seconds: second)), second * 8.0),
+      movingFix(observedAt, 560, accuracy: 100),
+    ];
+
+    guard.rebuildHighSpeedState(samples: samples, observedAt: observedAt);
+
+    expect(
+      guard.evaluate(startedAt: start, now: observedAt).event,
+      SessionGuardEvent.none,
+    );
+  });
+
+  test('rebuild breaks continuity for a low-trust fix within future skew', () {
+    final guard = SessionGuard();
+    final observedAt = start.add(const Duration(seconds: 70));
+    final samples = <LocationSample>[
+      for (var second = 0; second <= 60; second += 10)
+        movingFix(start.add(Duration(seconds: second)), second * 8.0),
+      movingFix(observedAt.add(const Duration(seconds: 5)), 560, accuracy: 100),
+    ];
+
+    guard.rebuildHighSpeedState(samples: samples, observedAt: observedAt);
+
+    expect(
+      guard.evaluate(startedAt: start, now: observedAt).event,
+      SessionGuardEvent.none,
+    );
+  });
+
   test(
     'returns events in duration, stationary, warning, then high-speed priority',
     () {

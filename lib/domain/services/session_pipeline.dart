@@ -32,8 +32,14 @@ class SessionPipeline {
     required DateTime endedAt,
   }) {
     final markedSamples = filter.apply(rawSamples);
+    final routeSamples = _samplesWithinSession(
+      markedSamples,
+      sessionStart: session.startedAt,
+      sessionEnd: endedAt,
+      includeSessionEnd: true,
+    );
     final partition = RoutePartitioner.partition(
-      samples: markedSamples,
+      samples: routeSamples,
       exclusions: const [],
     );
     final windows = aggregator.aggregate(
@@ -42,6 +48,7 @@ class SessionPipeline {
       exclusions: const [],
       sessionStart: session.startedAt,
       sessionEnd: endedAt,
+      timezone: session.timezone,
     );
     final metrics = rollup.compute(
       session: session,
@@ -83,7 +90,12 @@ class SessionPipeline {
       }
     }
     final partition = RoutePartitioner.partition(
-      samples: storedSamples,
+      samples: _samplesWithinSession(
+        storedSamples,
+        sessionStart: session.startedAt,
+        sessionEnd: endedAt,
+        includeSessionEnd: true,
+      ),
       exclusions: normalized,
     );
     final metadata = {
@@ -95,6 +107,7 @@ class SessionPipeline {
       rawSamples: storedSamples,
       sessionStart: session.startedAt,
       sessionEnd: endedAt,
+      timezone: session.timezone,
     );
     final windows = rebuilt
         .map(
@@ -116,6 +129,24 @@ class SessionPipeline {
       fragments: partition.fragments,
       metrics: metrics,
     );
+  }
+
+  List<LocationSample> _samplesWithinSession(
+    Iterable<LocationSample> samples, {
+    required DateTime sessionStart,
+    required DateTime sessionEnd,
+    required bool includeSessionEnd,
+  }) {
+    final start = sessionStart.toUtc();
+    final end = sessionEnd.toUtc();
+    return [
+      for (final sample in samples)
+        if (!sample.timestamp.toUtc().isBefore(start) &&
+            (sample.timestamp.toUtc().isBefore(end) ||
+                (includeSessionEnd &&
+                    sample.timestamp.toUtc().isAtSameMomentAs(end))))
+          sample,
+    ];
   }
 
   MinuteWindow _restoreMetadata(MinuteWindow rebuilt, MinuteWindow? previous) {

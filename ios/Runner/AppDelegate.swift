@@ -2,16 +2,25 @@ import Flutter
 import UIKit
 import UserNotifications
 
-final class NotificationTapBuffer {
-  private var pendingKind: String?
+struct NotificationTap {
+  let kind: String
+  let sessionId: String
+}
 
-  func store(kind: String?) {
-    pendingKind = kind == "highSpeed" ? kind : nil
+final class NotificationTapBuffer {
+  private var pendingTap: NotificationTap?
+
+  func store(kind: String?, sessionId: String?) {
+    guard kind == "highSpeed", let sessionId, !sessionId.isEmpty else {
+      pendingTap = nil
+      return
+    }
+    pendingTap = NotificationTap(kind: kind!, sessionId: sessionId)
   }
 
-  func take() -> String? {
-    defer { pendingKind = nil }
-    return pendingKind
+  func take() -> NotificationTap? {
+    defer { pendingTap = nil }
+    return pendingTap
   }
 }
 
@@ -47,8 +56,11 @@ final class NotificationTapBuffer {
       self?.handleMethodCall(call, result: result)
     }
     UNUserNotificationCenter.current().delegate = self
-    if let kind = tapBuffer.take() {
-      channel.invokeMethod("notificationTapped", arguments: ["kind": kind])
+    if let tap = tapBuffer.take() {
+      channel.invokeMethod(
+        "notificationTapped",
+        arguments: ["kind": tap.kind, "sessionId": tap.sessionId]
+      )
     }
   }
 
@@ -66,7 +78,8 @@ final class NotificationTapBuffer {
     withCompletionHandler completionHandler: @escaping @Sendable () -> Void
   ) {
     let kind = response.notification.request.content.userInfo["kind"] as? String
-    deliverOrBuffer(kind: kind)
+    let sessionId = response.notification.request.content.userInfo["sessionId"] as? String
+    deliverOrBuffer(kind: kind, sessionId: sessionId)
     completionHandler()
   }
 
@@ -89,7 +102,11 @@ final class NotificationTapBuffer {
         let id = arguments["id"] as? Int,
         let title = arguments["title"] as? String,
         let body = arguments["body"] as? String,
-        isSupportedNotification(id: id, kind: arguments["kind"] as? String)
+        isSupportedNotification(
+          id: id,
+          kind: arguments["kind"] as? String,
+          sessionId: arguments["sessionId"] as? String
+        )
       else {
         result(FlutterError(code: "invalid_arguments", message: "Notification fields are missing or invalid.", details: nil))
         return
@@ -99,6 +116,7 @@ final class NotificationTapBuffer {
         title: title,
         body: body,
         kind: arguments["kind"] as? String,
+        sessionId: arguments["sessionId"] as? String,
         result: result
       )
     case "cancel":
@@ -124,6 +142,7 @@ final class NotificationTapBuffer {
     title: String,
     body: String,
     kind: String?,
+    sessionId: String?,
     result: @escaping FlutterResult
   ) {
     let content = UNMutableNotificationContent()
@@ -132,6 +151,9 @@ final class NotificationTapBuffer {
     content.sound = .default
     if let kind {
       content.userInfo["kind"] = kind
+    }
+    if let sessionId, !sessionId.isEmpty {
+      content.userInfo["sessionId"] = sessionId
     }
     let request = UNNotificationRequest(
       identifier: String(id),
@@ -149,21 +171,24 @@ final class NotificationTapBuffer {
     }
   }
 
-  private func deliverOrBuffer(kind: String?) {
-    guard kind == "highSpeed" else { return }
+  private func deliverOrBuffer(kind: String?, sessionId: String?) {
+    guard kind == "highSpeed", let sessionId, !sessionId.isEmpty else { return }
     if let channel = notificationChannel {
-      channel.invokeMethod("notificationTapped", arguments: ["kind": kind!])
+      channel.invokeMethod(
+        "notificationTapped",
+        arguments: ["kind": kind!, "sessionId": sessionId]
+      )
     } else {
-      tapBuffer.store(kind: kind)
+      tapBuffer.store(kind: kind, sessionId: sessionId)
     }
   }
 
-  private func isSupportedNotification(id: Int, kind: String?) -> Bool {
+  private func isSupportedNotification(id: Int, kind: String?, sessionId: String?) -> Bool {
     switch id {
     case Self.stationaryWarningId:
       return kind == "stationary" || kind == "duration"
     case Self.highSpeedWarningId:
-      return kind == "highSpeed"
+      return kind == "highSpeed" && sessionId != nil && !sessionId!.isEmpty
     case Self.completionNotificationId:
       return kind == nil
     default:

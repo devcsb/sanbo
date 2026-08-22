@@ -395,62 +395,126 @@ void main() {
     );
   });
 
-  test('same-minute disjoint exclusions export and import together', () async {
-    final path =
-        '${Directory.systemTemp.path}/sanbo_disjoint_exclusions_${DateTime.now().microsecondsSinceEpoch}.db';
-    final source = await openTestRepository(path: path);
-    final target = await openTestRepository();
-    addTearDown(source.close);
-    addTearDown(target.close);
-    final fixture = await seedCompletedTwoMinuteWalk(source);
-    final minute = fixture.windows.first.windowStart.toUtc();
-    final legacyDb = await databaseFactory.openDatabase(
-      path,
-      options: OpenDatabaseOptions(singleInstance: false),
-    );
-    addTearDown(legacyDb.close);
-    await legacyDb.insert('route_exclusions', {
-      'id': 'same-minute-a',
-      'session_id': fixture.session.id,
-      'start_at': minute.add(const Duration(seconds: 10)).toIso8601String(),
-      'end_at': minute.add(const Duration(seconds: 20)).toIso8601String(),
-      'reason': 'vehicle',
-      'created_at': minute.toIso8601String(),
-    });
-    await legacyDb.insert('route_exclusions', {
-      'id': 'same-minute-b',
-      'session_id': fixture.session.id,
-      'start_at': minute.add(const Duration(seconds: 30)).toIso8601String(),
-      'end_at': minute.add(const Duration(seconds: 40)).toIso8601String(),
-      'reason': 'vehicle',
-      'created_at': minute.add(const Duration(seconds: 1)).toIso8601String(),
-    });
-    await legacyDb.update(
-      'minute_windows',
-      {'user_exclusion_id': 'same-minute-a'},
-      where: 'session_id = ? AND window_start = ?',
-      whereArgs: [
-        fixture.session.id,
-        fixture.windows.first.windowStart.toIso8601String(),
-      ],
-    );
+  test(
+    'sub-second partial minute from the app round-trips through backup',
+    () async {
+      final source = await openTestRepository();
+      final target = await openTestRepository();
+      addTearDown(source.close);
+      addTearDown(target.close);
 
-    final result = await target.importBackupJson(
-      await source.createBackupJson(),
-    );
+      final start = DateTime.utc(2026, 8, 21, 0, 0, 59, 500);
+      final end = start.add(const Duration(microseconds: 500000));
+      final session = await source.startSession(startedAt: start);
+      final sample = LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+      );
+      final result = SessionPipeline().process(
+        session: session,
+        rawSamples: [sample],
+        endedAt: end,
+      );
+      expect(result.windows.single.durationS, 1);
+      await source.finalizeSession(
+        session: session,
+        samples: result.filteredSamples,
+        windows: result.windows,
+        endedAt: end,
+        totalDistanceM: result.metrics.totalDistanceM,
+        durationS: result.metrics.durationS,
+        movingTimeS: result.metrics.movingTimeS,
+        stationaryTimeS: result.metrics.stationaryTimeS,
+        avgSpeedMps: result.metrics.avgSpeedMps,
+        validSampleCount: result.metrics.validSampleCount,
+      );
 
-    expect(result.importedSessions, 1);
-    expect(
-      (await target.getRouteExclusions(
-        fixture.session.id,
-      )).map((item) => item.id),
-      ['same-minute-a', 'same-minute-b'],
-    );
-    expect(
-      (await target.getWindows(fixture.session.id)).first.userExclusionId,
-      'same-minute-a',
-    );
-  });
+      final imported = await target.importBackupJson(
+        await source.createBackupJson(),
+      );
+      expect(imported.importedWindows, 1);
+      expect((await target.getWindows(session.id)).single.durationS, 1);
+    },
+  );
+
+  test(
+    'same-minute disjoint v2 exclusions import with their representative id',
+    () async {
+      final path =
+          '${Directory.systemTemp.path}/sanbo_disjoint_exclusions_${DateTime.now().microsecondsSinceEpoch}.db';
+      final source = await openTestRepository(path: path);
+      final target = await openTestRepository();
+      addTearDown(source.close);
+      addTearDown(target.close);
+      final fixture = await seedCompletedTwoMinuteWalk(source);
+      final minute = fixture.windows.first.windowStart.toUtc();
+      final legacyDb = await databaseFactory.openDatabase(
+        path,
+        options: OpenDatabaseOptions(singleInstance: false),
+      );
+      addTearDown(legacyDb.close);
+      await legacyDb.insert('route_exclusions', {
+        'id': 'same-minute-a',
+        'session_id': fixture.session.id,
+        'start_at': minute.add(const Duration(seconds: 10)).toIso8601String(),
+        'end_at': minute.add(const Duration(seconds: 20)).toIso8601String(),
+        'reason': 'vehicle',
+        'created_at': minute.toIso8601String(),
+      });
+      await legacyDb.insert('route_exclusions', {
+        'id': 'same-minute-b',
+        'session_id': fixture.session.id,
+        'start_at': minute.add(const Duration(seconds: 30)).toIso8601String(),
+        'end_at': minute.add(const Duration(seconds: 40)).toIso8601String(),
+        'reason': 'vehicle',
+        'created_at': minute.add(const Duration(seconds: 1)).toIso8601String(),
+      });
+      await legacyDb.update(
+        'minute_windows',
+        {'user_exclusion_id': 'same-minute-a'},
+        where: 'session_id = ? AND window_start = ?',
+        whereArgs: [
+          fixture.session.id,
+          fixture.windows.first.windowStart.toIso8601String(),
+        ],
+      );
+
+      final backup =
+          jsonDecode(await source.createBackupJson()) as Map<String, dynamic>;
+      final tables = _tables(backup);
+      // Keep only the legacy representative on the minute row.
+      final window = (tables['minute_windows'] as List<dynamic>)
+          .cast<Map<String, dynamic>>()
+          .firstWhere((row) => row['window_start'] == minute.toIso8601String());
+      window['user_exclusion_id'] = 'same-minute-a';
+
+      final imported = await target.importBackupJson(jsonEncode(backup));
+      expect(imported.importedSessions, 1);
+      expect(
+        (await target.getRouteExclusions(
+          fixture.session.id,
+        )).map((item) => item.id),
+        containsAll(<String>['same-minute-a', 'same-minute-b']),
+      );
+      expect(
+        (await target.getWindows(fixture.session.id)).first.userExclusionId,
+        'same-minute-a',
+      );
+
+      await target.restoreRouteExclusion(
+        sessionId: fixture.session.id,
+        exclusionId: 'same-minute-a',
+      );
+      expect(
+        (await target.getRouteExclusions(
+          fixture.session.id,
+        )).map((item) => item.id),
+        contains('same-minute-b'),
+      );
+    },
+  );
 
   test('corrupt v2 exclusions reject the full import', () async {
     final source = await openTestRepository();
