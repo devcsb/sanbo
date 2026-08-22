@@ -324,6 +324,7 @@ void main() {
 
       final live = container.read(sessionControllerProvider);
       expect(live.isTracking, isFalse);
+      expect(live.isBusy, isFalse);
       expect(live.needsRecovery, isTrue);
       expect(live.session?.id, session.id);
       expect(live.errorMessage, contains('저장에 실패'));

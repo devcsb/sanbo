@@ -191,6 +191,52 @@ void main() {
   });
 
   test(
+    'notification tap after recovery failure waits for a successful retry',
+    () async {
+      ensureSqfliteFfi();
+      final db = await openAppDatabase(
+        path:
+            '${Directory.systemTemp.path}/sanbo_tap_late_retry_${DateTime.now().microsecondsSinceEpoch}.db',
+      );
+      final repo = _FlakyActiveSessionRepository(db);
+      addTearDown(repo.close);
+      repo.failNextActiveLookup = false;
+      final session = await repo.startSession(mode: TrackingMode.balanced);
+      repo.failNextActiveLookup = true;
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.restoreIfNeeded();
+      expect(controller.state.canRetryRecovery, isTrue);
+
+      controller.handleNotificationTap(
+        SessionNotificationTap(
+          SessionWarningKind.highSpeed,
+          sessionId: session.id,
+        ),
+      );
+      expect(controller.state.activeWarning, isNull);
+
+      await controller.retryRecovery();
+
+      expect(
+        controller.state.activeWarning?.kind,
+        SessionWarningKind.highSpeed,
+      );
+    },
+  );
+
+  test(
     'recovery stop caps duration at last sample, not wall-clock now',
     () async {
       final repo = await openTestRepository();

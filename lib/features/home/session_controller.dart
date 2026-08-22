@@ -391,7 +391,7 @@ class SessionController extends Notifier<LiveSessionState> {
 
   void handleNotificationTap(SessionNotificationTap tap) {
     if (tap.kind != SessionWarningKind.highSpeed) return;
-    if (!_restorationComplete || _restoring) {
+    if (!_restorationComplete || _restoring || state.canRetryRecovery) {
       _pendingNotificationTap = tap;
       return;
     }
@@ -833,7 +833,8 @@ class SessionController extends Notifier<LiveSessionState> {
         lastAccuracyM: _lastAccuracyM,
         statusMessage: _validSampleCount == 0 ? 'GPS 보정 중' : '기록 중',
         clearError:
-            state.permissionState != LocationPermissionState.grantedForegroundOnly,
+            state.permissionState !=
+            LocationPermissionState.grantedForegroundOnly,
         clearActiveWarning: clearVisibleStationaryWarning,
       );
     }

@@ -69,10 +69,14 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     final active = _readyAttempt;
     if (active != null) return active;
     final attempt = _sendReady();
-    _readyAttempt = attempt;
-    return attempt.whenComplete(() {
-      if (identical(_readyAttempt, attempt)) _readyAttempt = null;
+    late final Future<void> trackedAttempt;
+    trackedAttempt = attempt.whenComplete(() {
+      if (identical(_readyAttempt, trackedAttempt)) {
+        _readyAttempt = null;
+      }
     });
+    _readyAttempt = trackedAttempt;
+    return trackedAttempt;
   }
 
   Future<void> _sendReady() async {
@@ -212,7 +216,18 @@ class PlatformSessionNotificationService implements SessionNotificationService {
 
   void _onTapListen() {
     _flushPendingTap();
-    unawaited(_tryReady());
+    unawaited(_retryReadinessAfterListener());
+  }
+
+  Future<void> _retryReadinessAfterListener() async {
+    await _tryReady();
+    // If the listener joined while the first native handshake was still in
+    // flight, that attempt may fail after bootstrap has already returned. A
+    // second attempt here closes that race without retrying indefinitely when
+    // notifications are unsupported.
+    if (!_readyAcknowledged && _tapController.hasListener) {
+      await _tryReady();
+    }
   }
 
   int _idFor(SessionWarningKind kind) => switch (kind) {

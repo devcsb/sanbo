@@ -111,6 +111,33 @@ void main() {
     },
   );
 
+  test(
+    'readiness handshake retries after a listener joins an in-flight failure',
+    () async {
+      var readyAttempts = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'ready') {
+              readyAttempts++;
+              if (readyAttempts == 1) {
+                await Future<void>.delayed(const Duration(milliseconds: 10));
+                throw PlatformException(code: 'engine_not_ready');
+              }
+            }
+            return null;
+          });
+      final service = PlatformSessionNotificationService();
+
+      final initialized = service.initialize();
+      final subscription = service.taps.listen((_) {});
+      addTearDown(subscription.cancel);
+      await initialized;
+      await pumpEventQueue();
+
+      expect(readyAttempts, 2);
+    },
+  );
+
   test('cancel all warnings clears every distinct warning id', () async {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
