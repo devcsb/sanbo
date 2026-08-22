@@ -185,7 +185,7 @@ for index in 0 1 2 3 4; do
 done
 
 dump_ui
-metric="$(rg -o 'content-desc=\"시간[^\"]+\"' "$ui_xml" | head -n 1 | sed -E 's/^content-desc="(.*)"$/\1/')"
+metric="$(grep -Eo 'content-desc=\"시간[^\"]+\"' "$ui_xml" | head -n 1 | sed -E 's/^content-desc="(.*)"$/\1/')"
 [[ -n "$metric" ]] || fail '실시간 거리 요약을 찾지 못했습니다.'
 echo "[android-smoke] $metric"
 distance_km="$(python3 - "$metric" <<'PY'
@@ -221,7 +221,7 @@ for _ in 1 2 3 4 5 6; do
   fi
   sleep 1
 done
-((active_provider == 1)) || fail '세션 중 fused provider 요청이 확인되지 않았습니다.'
+((active_provider == 1)) || fail '세션 중 Android location provider 요청이 확인되지 않았습니다.'
 
 step "세션 종료와 저장 확인"
 tap_desc '산책 종료' 10 || fail '산책 종료 버튼을 찾지 못했습니다.'

@@ -83,6 +83,16 @@ scripts/run_android_emulator_smoke.sh
 `SANBO_ANDROID_CLEAR_DATA=1`을 명시한다. 에뮬레이터 결과는 아래 물리 기기 행의
 통과 판정으로 승격하지 않는다.
 
+iOS simulator의 실제 Core Location 경로는 다음 명령으로 반복한다.
+
+```bash
+scripts/run_ios_simulator_smoke.sh
+```
+
+이 명령은 simulator 앱을 설치한 뒤 `location-always` 권한과 waypoint를 준비하고,
+실제 `GeolocatorLocationEngine`으로 거리 누적과 완료 저장을 검사한다. 결과는
+물리 iPhone의 백그라운드와 절전 정책 검증으로 승격하지 않는다.
+
 | 확인 | 플랫폼 | 기기·OS | 권한 상태 | 기대 상태 | 관측 결과 | 통과/실패 |
 |------|--------|---------|-----------|-----------|-----------|-----------|
 | [ ] foreground warning without system banner | Android | 미기록 | 위치: 미기록, 알림: 미기록 | 앱 전면에서 28.8km/h 누적 60초 뒤 고속 종료 확인만 보이고 시스템 배너는 없다 | 미기록 | 미판정 |
