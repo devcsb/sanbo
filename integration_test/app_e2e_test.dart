@@ -61,6 +61,7 @@ void main() {
     final engine = SyntheticLocationEngine(
       permission: LocationPermissionState.granted,
     );
+    final notifications = _RecordingSessionNotifications();
     var now = DateTime.now();
 
     await tester.pumpWidget(
@@ -68,6 +69,7 @@ void main() {
         overrides: [
           walkRepositoryProvider.overrideWithValue(repo),
           locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
           sessionClockProvider.overrideWithValue(() => now),
           introSeenProvider.overrideWith((ref) => true),
         ],
