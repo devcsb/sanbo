@@ -133,8 +133,7 @@ class GeolocatorLocationEngine implements LocationEngine {
   static bool shouldRequestAlwaysLocation({
     required bool isApplePlatform,
     required LocationPermissionState permission,
-  }) =>
-      isApplePlatform && permission == LocationPermissionState.granted;
+  }) => isApplePlatform && permission == LocationPermissionState.granted;
 
   @visibleForTesting
   static LocationPermissionState stateAfterAlwaysPermission({
@@ -147,6 +146,12 @@ class GeolocatorLocationEngine implements LocationEngine {
     }
     return foregroundPermission;
   }
+
+  @visibleForTesting
+  static bool isAlwaysLocationGranted({
+    required bool permissionHandlerGranted,
+    required bool geolocatorReportsAlways,
+  }) => permissionHandlerGranted || geolocatorReportsAlways;
 
   @visibleForTesting
   static bool shouldAcceptOneShotResult({
@@ -179,7 +184,17 @@ class GeolocatorLocationEngine implements LocationEngine {
       if (status.isGranted) return true;
       // iOS only presents this upgrade after while-in-use was granted. The
       // geolocator request above establishes that foreground permission first.
-      return (await ph.Permission.locationAlways.request()).isGranted;
+      final requested = await ph.Permission.locationAlways.request();
+      if (requested.isGranted) return true;
+      // permission_handler can briefly return a stale denied status after iOS
+      // has already applied the Always upgrade. Ask Geolocator for the native
+      // truth before preserving the foreground-only state.
+      final geolocatorPermission = await Geolocator.checkPermission();
+      return isAlwaysLocationGranted(
+        permissionHandlerGranted: false,
+        geolocatorReportsAlways:
+            geolocatorPermission == LocationPermission.always,
+      );
     } catch (error, stackTrace) {
       developer.log(
         'iOS background location permission upgrade was unavailable',

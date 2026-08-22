@@ -83,6 +83,20 @@ void main() {
       ),
       LocationPermissionState.granted,
     );
+    expect(
+      GeolocatorLocationEngine.isAlwaysLocationGranted(
+        permissionHandlerGranted: false,
+        geolocatorReportsAlways: true,
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.isAlwaysLocationGranted(
+        permissionHandlerGranted: false,
+        geolocatorReportsAlways: false,
+      ),
+      isFalse,
+    );
   });
 
   test(
