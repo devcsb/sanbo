@@ -30,6 +30,7 @@ class _FakeSessionNotifications implements SessionNotificationService {
   int cancelAllCalls = 0;
   Completer<void>? cancelAllRelease;
   Completer<void>? cancelRelease;
+  Completer<void>? showRelease;
   int tapDeliveries = 0;
   SessionNotificationTap? _pendingColdTap;
   late final _tapController =
@@ -72,6 +73,8 @@ class _FakeSessionNotifications implements SessionNotificationService {
   Future<void> showWarning(SessionWarning warning, {String? sessionId}) async {
     warnings.add('${warning.title}|${warning.message}');
     events.add('show:${warning.kind.name}');
+    final release = showRelease;
+    if (release != null) await release.future;
   }
 
   @override
@@ -549,6 +552,85 @@ void main() {
         SessionWarningKind.highSpeed,
       );
       expect(notifications.warnings, hasLength(1));
+    },
+  );
+
+  test(
+    'foreground return cancels a previously published high-speed notification',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final notifications = _FakeSessionNotifications();
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      controller.setAppForeground(false);
+      final startedAt = controller.state.session!.startedAt;
+      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await _pumpGuard();
+      expect(notifications.events, contains('show:highSpeed'));
+
+      controller.setAppForeground(true);
+      await _pumpGuard();
+
+      expect(notifications.events, contains('cancel:highSpeed'));
+    },
+  );
+
+  test(
+    'foreground return cancels a high-speed notification while show is pending',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final notifications = _FakeSessionNotifications()
+        ..showRelease = Completer<void>();
+      var now = DateTime(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      controller.setAppForeground(false);
+      final startedAt = controller.state.session!.startedAt;
+      for (final sample in _highSpeedTrace(startedAt, seconds: 60)) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
+      await _pumpGuard();
+      expect(notifications.events, contains('show:highSpeed'));
+      expect(notifications.events, isNot(contains('cancel:highSpeed')));
+
+      controller.setAppForeground(true);
+      notifications.showRelease!.complete();
+      await _pumpGuard();
+
+      expect(notifications.events, ['show:highSpeed', 'cancel:highSpeed']);
     },
   );
 

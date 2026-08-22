@@ -229,8 +229,10 @@ void main() {
         speedMps: 1.3,
         step: const Duration(seconds: 3),
       );
-      now = session.startedAt.add(const Duration(minutes: 2));
-      controller.debugIngestSamples(trace);
+      for (final sample in trace) {
+        now = sample.timestamp;
+        controller.debugIngestSamples([sample]);
+      }
 
       final live = container.read(sessionControllerProvider);
       expect(live.sampleCount, trace.length);
@@ -501,6 +503,43 @@ void main() {
             .isFilteredOut,
         isTrue,
       );
+    },
+  );
+
+  test(
+    'live ingest does not accept a stale cached fix as the first anchor',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      var now = DateTime.utc(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = controller.state.session!;
+
+      now = session.startedAt.add(const Duration(minutes: 1));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: session.startedAt.add(const Duration(seconds: 20)),
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+      ]);
+
+      expect(controller.state.sampleCount, 1);
+      expect(controller.state.validSampleCount, 0);
+      expect(controller.state.liveDistanceM, 0);
     },
   );
 
@@ -886,21 +925,25 @@ void main() {
     final controller = container.read(sessionControllerProvider.notifier);
     await controller.start();
     final session = controller.state.session!;
-    now = session.startedAt.add(const Duration(minutes: 4));
     LocationSample fix(int second, double longitude) => LocationSample(
       timestamp: session.startedAt.add(Duration(seconds: second)),
       latitude: 37.5,
       longitude: longitude,
       accuracyM: 5,
     );
-    controller.debugIngestSamples([
-      fix(0, 127.0000),
-      fix(60, 127.0050),
-      fix(120, 127.0100),
-      fix(90, 127.0075),
-      fix(180, 127.0150),
-      fix(240, 127.0200),
-    ]);
+    final received = [
+      (sample: fix(0, 127.0000), receivedAt: 0),
+      (sample: fix(60, 127.0050), receivedAt: 60),
+      (sample: fix(120, 127.0100), receivedAt: 120),
+      // The provider delivers this older fix after the 120-second fix.
+      (sample: fix(90, 127.0075), receivedAt: 120),
+      (sample: fix(180, 127.0150), receivedAt: 180),
+      (sample: fix(240, 127.0200), receivedAt: 240),
+    ];
+    for (final item in received) {
+      now = session.startedAt.add(Duration(seconds: item.receivedAt));
+      controller.debugIngestSamples([item.sample]);
+    }
     expect(controller.state.sampleCount, 6);
     expect(controller.state.validSampleCount, greaterThanOrEqualTo(5));
     expect(controller.state.liveDistanceM, greaterThan(100));

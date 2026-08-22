@@ -89,11 +89,12 @@ void main() {
     final start = session!.startedAt;
 
     const degPerMeter = 1 / 111320.0;
-    now = start.add(const Duration(seconds: 116));
     for (var i = 0; i < 30; i++) {
+      final timestamp = start.add(Duration(seconds: i * 4));
+      now = timestamp;
       engine.emit(
         LocationSample(
-          timestamp: start.add(Duration(seconds: i * 4)),
+          timestamp: timestamp,
           latitude: 37.5 + i * 4 * 1.2 * degPerMeter,
           longitude: 127.0,
           accuracyM: 5,

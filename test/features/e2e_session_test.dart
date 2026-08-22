@@ -58,11 +58,11 @@ void main() {
         )
         .toList();
     expect(utcTrace.every((s) => s.timestamp.isUtc), isTrue);
-    now = session.startedAt.add(const Duration(minutes: 3));
     for (final s in utcTrace) {
+      now = s.timestamp;
       engine.emit(s);
+      await Future<void>.delayed(Duration.zero);
     }
-    controller.debugIngestSamples(utcTrace);
 
     final ended = await controller.stop();
     expect(ended, isNotNull);

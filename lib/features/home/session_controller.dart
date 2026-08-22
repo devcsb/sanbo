@@ -852,13 +852,17 @@ class SessionController extends Notifier<LiveSessionState> {
     final receiptNow = _clock().toUtc();
     final sampleAt = sample.timestamp.toUtc();
     // Providers can deliver a cached fix from before the walk started or a
-    // clock-skewed fix far ahead of the receipt time. Keep those raw rows for
-    // audit, but mark them out of the live route before they can become an
-    // incremental anchor. Stop/finalization applies the same boundary again
-    // so a process death cannot resurrect the rejected fix.
+    // delayed fix from a provider buffer, or a clock-skewed fix far ahead of
+    // the receipt time. Keep those raw rows for audit, but mark them out of
+    // the live route before they can become an incremental anchor. Stop/
+    // finalization applies the same boundary again so a process death cannot
+    // resurrect the rejected fix.
     final outsideLiveBoundary =
         sessionStart != null &&
         (sampleAt.isBefore(sessionStart.toUtc()) ||
+            sampleAt.isBefore(
+              receiptNow.subtract(_sessionGuard.policy.maxSampleAge),
+            ) ||
             sampleAt.isAfter(
               receiptNow.add(_sessionGuard.policy.maxSampleFutureSkew),
             ));
@@ -1054,10 +1058,15 @@ class SessionController extends Notifier<LiveSessionState> {
           statusMessage: '기록 종료 확인 중',
         );
         if (!_appForeground) {
+          // Treat the notification as published as soon as its serialized
+          // show operation is queued. A foreground transition can happen
+          // while the native call is still awaiting completion; marking it
+          // here lets setAppForeground enqueue a guaranteed show → cancel
+          // pair instead of leaving a late system banner visible.
+          _highSpeedWarningPublished = true;
           await _enqueueNotification(
             () => _notifications.showWarning(warning, sessionId: session.id),
           );
-          _highSpeedWarningPublished = true;
         }
         return;
     }
@@ -1272,6 +1281,18 @@ class SessionController extends Notifier<LiveSessionState> {
             : state.statusMessage,
       );
       _startTicker(session.startedAt);
+    }
+    if (_highSpeedWarningPublished) {
+      // A notification shown while backgrounded must not remain alongside the
+      // in-app warning after the user returns. Queue the cancellation behind
+      // any in-flight show call, then allow a later background transition to
+      // publish the warning again if it is still unresolved.
+      _highSpeedWarningPublished = false;
+      unawaited(
+        _enqueueNotification(
+          () => _notifications.cancel(kind: SessionWarningKind.highSpeed),
+        ),
+      );
     }
     unawaited(_runMaintenance());
   }
