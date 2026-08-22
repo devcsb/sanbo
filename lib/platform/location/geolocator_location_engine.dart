@@ -36,6 +36,7 @@ class GeolocatorLocationEngine implements LocationEngine {
   int _emitCount = 0;
 
   static const _logName = 'sanbo.location';
+  static const fallbackStallTimeout = Duration(minutes: 5);
 
   @visibleForTesting
   static bool shouldRecoverEndedStream({
@@ -77,17 +78,25 @@ class GeolocatorLocationEngine implements LocationEngine {
     required DateTime now,
     required Duration timeout,
     required bool supportsLocationManagerFallback,
+    Duration fallbackTimeout = fallbackStallTimeout,
   }) {
     if (!running || recoveryInFlight || !supportsLocationManagerFallback) {
       return LocationStreamEndAction.ignore;
     }
-    if (lastEmitAt != null && now.difference(lastEmitAt) < timeout) {
+    final stallTimeout = usingLocationManagerFallback
+        ? fallbackTimeout
+        : timeout;
+    // No baseline means the stream has not been armed yet, so there is no
+    // evidence of a stall to report.
+    if (lastEmitAt == null) return LocationStreamEndAction.ignore;
+    if (now.difference(lastEmitAt) < stallTimeout) {
       return LocationStreamEndAction.ignore;
     }
     // A missing fix is a normal GPS gap, especially in tunnels and on iOS.
-    // Only the fused provider can be switched to the Android fallback here;
-    // the fallback itself remains alive until its stream reports onDone/error.
-    if (usingLocationManagerFallback) return LocationStreamEndAction.ignore;
+    // Only the fused provider can be switched to the Android fallback here.
+    // A fallback that stays silent for several minutes is treated as ended so
+    // the controller can expose recovery instead of remaining stuck forever.
+    if (usingLocationManagerFallback) return LocationStreamEndAction.report;
     return endedStreamAction(
       running: running,
       usingLocationManagerFallback: usingLocationManagerFallback,
@@ -101,6 +110,24 @@ class GeolocatorLocationEngine implements LocationEngine {
     required int currentGeneration,
     required int eventGeneration,
   }) => currentGeneration == eventGeneration;
+
+  @visibleForTesting
+  static bool shouldReportStreamError({
+    required bool running,
+    required bool usingLocationManagerFallback,
+    bool isApplePlatform = false,
+    bool terminalProviderError = false,
+  }) =>
+      running &&
+      (usingLocationManagerFallback ||
+          (isApplePlatform && terminalProviderError));
+
+  @visibleForTesting
+  static bool shouldAcceptOneShotResult({
+    required bool running,
+    required int currentGeneration,
+    required int requestGeneration,
+  }) => running && currentGeneration == requestGeneration;
 
   @override
   Stream<LocationSample> get samples => _controller.stream;
@@ -237,7 +264,10 @@ class GeolocatorLocationEngine implements LocationEngine {
     }
     await _sub?.cancel();
     _sub = null;
-    _lastEmitAt = null;
+    // Measure silence from stream arming as well as from the latest fix. This
+    // lets a provider that never emits its first fix enter the same recovery
+    // path after the long fallback timeout.
+    _lastEmitAt = DateTime.now();
 
     final LocationSettings locationSettings;
     if (Platform.isAndroid) {
@@ -302,6 +332,19 @@ class GeolocatorLocationEngine implements LocationEngine {
         );
         if (!ready.isCompleted) {
           ready.completeError(e, st);
+        }
+        final terminalProviderError =
+            e is LocationServiceDisabledException ||
+            e is PermissionDeniedException ||
+            e is PositionUpdateException;
+        if (shouldReportStreamError(
+          running: _running,
+          usingLocationManagerFallback: _usingLocationManagerFallback,
+          isApplePlatform: Platform.isIOS,
+          terminalProviderError: terminalProviderError,
+        )) {
+          _reportEndedStream(st);
+          return;
         }
         if (!_controller.isClosed) {
           _controller.addError(e, st);
@@ -394,6 +437,7 @@ class GeolocatorLocationEngine implements LocationEngine {
         now: DateTime.now(),
         timeout: _stallTimeout,
         supportsLocationManagerFallback: Platform.isAndroid,
+        fallbackTimeout: fallbackStallTimeout,
       );
       switch (action) {
         case LocationStreamEndAction.ignore:
@@ -448,8 +492,17 @@ class GeolocatorLocationEngine implements LocationEngine {
     int retries = 1,
     bool forceLocationManager = false,
   }) async {
+    // A one-shot request can outlive stop() and a subsequent start(). Keep its
+    // stream generation so a late platform result cannot seed the new session.
+    final requestGeneration = _streamGeneration;
     for (var attempt = 0; attempt < retries; attempt++) {
-      if (!_running) return;
+      if (!shouldAcceptOneShotResult(
+        running: _running,
+        currentGeneration: _streamGeneration,
+        requestGeneration: requestGeneration,
+      )) {
+        return;
+      }
       try {
         final pos = await Geolocator.getCurrentPosition(
           locationSettings: _oneShotSettings(
@@ -457,7 +510,13 @@ class GeolocatorLocationEngine implements LocationEngine {
             timeLimit: Duration(seconds: 8 + attempt * 4),
           ),
         );
-        if (!_running) return;
+        if (!shouldAcceptOneShotResult(
+          running: _running,
+          currentGeneration: _streamGeneration,
+          requestGeneration: requestGeneration,
+        )) {
+          return;
+        }
         _emitPosition(pos);
         return;
       } catch (e, st) {

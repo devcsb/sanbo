@@ -93,6 +93,35 @@ void main() {
     );
   });
 
+  test('fallback stream eventually reports a prolonged silent stall', () {
+    final now = DateTime(2026, 8, 22, 12, 0);
+
+    expect(
+      GeolocatorLocationEngine.stalledStreamAction(
+        running: true,
+        usingLocationManagerFallback: true,
+        recoveryInFlight: false,
+        lastEmitAt: now.subtract(const Duration(minutes: 4, seconds: 59)),
+        now: now,
+        timeout: const Duration(seconds: 28),
+        supportsLocationManagerFallback: true,
+      ),
+      LocationStreamEndAction.ignore,
+    );
+    expect(
+      GeolocatorLocationEngine.stalledStreamAction(
+        running: true,
+        usingLocationManagerFallback: true,
+        recoveryInFlight: false,
+        lastEmitAt: now.subtract(const Duration(minutes: 5)),
+        now: now,
+        timeout: const Duration(seconds: 28),
+        supportsLocationManagerFallback: true,
+      ),
+      LocationStreamEndAction.report,
+    );
+  });
+
   test('stalled watchdog stays disabled on platforms without a fallback', () {
     final now = DateTime(2026, 8, 22, 12, 0);
 
@@ -124,6 +153,90 @@ void main() {
         eventGeneration: 2,
       ),
       isTrue,
+    );
+  });
+
+  test(
+    'fallback provider errors are promoted to a terminal stream failure',
+    () {
+      expect(
+        GeolocatorLocationEngine.shouldReportStreamError(
+          running: true,
+          usingLocationManagerFallback: true,
+        ),
+        isTrue,
+      );
+      expect(
+        GeolocatorLocationEngine.shouldReportStreamError(
+          running: true,
+          usingLocationManagerFallback: false,
+        ),
+        isFalse,
+      );
+      expect(
+        GeolocatorLocationEngine.shouldReportStreamError(
+          running: false,
+          usingLocationManagerFallback: true,
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test('terminal iOS provider errors are promoted to a stream failure', () {
+    expect(
+      GeolocatorLocationEngine.shouldReportStreamError(
+        running: true,
+        usingLocationManagerFallback: false,
+        isApplePlatform: true,
+        terminalProviderError: true,
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldReportStreamError(
+        running: true,
+        usingLocationManagerFallback: false,
+        isApplePlatform: true,
+        terminalProviderError: false,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldReportStreamError(
+        running: true,
+        usingLocationManagerFallback: false,
+        isApplePlatform: false,
+        terminalProviderError: true,
+      ),
+      isFalse,
+    );
+  });
+
+  test('stale one-shot fixes are ignored after a new session is armed', () {
+    expect(
+      GeolocatorLocationEngine.shouldAcceptOneShotResult(
+        running: true,
+        currentGeneration: 2,
+        requestGeneration: 1,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldAcceptOneShotResult(
+        running: true,
+        currentGeneration: 2,
+        requestGeneration: 2,
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldAcceptOneShotResult(
+        running: false,
+        currentGeneration: 2,
+        requestGeneration: 2,
+      ),
+      isFalse,
     );
   });
 

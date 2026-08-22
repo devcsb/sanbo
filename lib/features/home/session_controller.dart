@@ -237,12 +237,16 @@ class SessionController extends Notifier<LiveSessionState> {
   Future<void> _restoreIfNeeded() async {
     if (_restoring) return;
     _restoring = true;
+    var restored = false;
     try {
-      await _restoreActive();
+      restored = await _restoreActive();
     } finally {
       _restoring = false;
       _restorationComplete = true;
-      await restorePendingNotificationTap();
+      // Keep a cold-start tap buffered when storage lookup failed. The retry
+      // action can then present it after the active session is reconstructed;
+      // a successful lookup with no matching session still consumes it below.
+      if (restored) await restorePendingNotificationTap();
     }
   }
 
@@ -318,10 +322,10 @@ class SessionController extends Notifier<LiveSessionState> {
         : 0;
   }
 
-  Future<void> _restoreActive() async {
+  Future<bool> _restoreActive() async {
     try {
       final active = await _repo.getActiveSession();
-      if (active == null) return;
+      if (active == null) return true;
       final existing = await _repo.getSamples(active.id);
       _sessionSamples
         ..clear()
@@ -345,6 +349,7 @@ class SessionController extends Notifier<LiveSessionState> {
             ? '이전에 끝내지 못한 산책이 있어요.'
             : '이전에 끝내지 못한 산책이 있어요. 위치 ${existing.length}개가 저장되어 있습니다.',
       );
+      return true;
     } catch (_) {
       // A storage failure must be visible: silently treating it as "no active
       // session" can make a user believe an in-progress walk disappeared.
@@ -353,6 +358,7 @@ class SessionController extends Notifier<LiveSessionState> {
         statusMessage: '복구할 기록을 확인하지 못했어요.',
         canRetryRecovery: true,
       );
+      return false;
     }
   }
 

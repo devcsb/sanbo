@@ -8,9 +8,11 @@ import 'package:sanbo/data/app_database.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/session_warning.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
+import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/synthetic_location_engine.dart';
+import 'package:sanbo/platform/notifications/session_notification_service.dart';
 
 import '../helpers/test_db.dart';
 
@@ -29,6 +31,21 @@ class _DelayedRestoreRepository extends WalkRepository {
       await releaseRestore.future;
     }
     return super.getSamples(sessionId);
+  }
+}
+
+class _FlakyActiveSessionRepository extends WalkRepository {
+  _FlakyActiveSessionRepository(super.db);
+
+  var failNextActiveLookup = true;
+
+  @override
+  Future<WalkSession?> getActiveSession() async {
+    if (failNextActiveLookup) {
+      failNextActiveLookup = false;
+      throw StateError('temporary database failure');
+    }
+    return super.getActiveSession();
   }
 }
 
@@ -134,6 +151,43 @@ void main() {
     await retry;
     expect(container.read(sessionControllerProvider).isBusy, isFalse);
     expect(container.read(sessionControllerProvider).canRetryRecovery, isTrue);
+  });
+
+  test('cold notification tap survives a retryable recovery failure', () async {
+    ensureSqfliteFfi();
+    final db = await openAppDatabase(
+      path:
+          '${Directory.systemTemp.path}/sanbo_tap_retry_${DateTime.now().microsecondsSinceEpoch}.db',
+    );
+    final repo = _FlakyActiveSessionRepository(db);
+    addTearDown(repo.close);
+    repo.failNextActiveLookup = false;
+    final session = await repo.startSession(mode: TrackingMode.balanced);
+    repo.failNextActiveLookup = true;
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    controller.handleNotificationTap(
+      SessionNotificationTap(
+        SessionWarningKind.highSpeed,
+        sessionId: session.id,
+      ),
+    );
+    await controller.restoreIfNeeded();
+    expect(controller.state.canRetryRecovery, isTrue);
+    expect(controller.state.activeWarning, isNull);
+
+    await controller.retryRecovery();
+
+    expect(controller.state.activeWarning?.kind, SessionWarningKind.highSpeed);
   });
 
   test(

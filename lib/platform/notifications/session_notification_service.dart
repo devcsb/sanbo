@@ -38,31 +38,56 @@ class PlatformSessionNotificationService implements SessionNotificationService {
 
   late final StreamController<SessionNotificationTap> _tapController =
       StreamController<SessionNotificationTap>.broadcast(
-        onListen: _flushPendingTap,
+        onListen: _onTapListen,
       );
   SessionNotificationTap? _pendingTap;
   var _initialized = false;
+  var _readyAcknowledged = false;
+  var _nativeUnavailable = false;
+  Future<void>? _readyAttempt;
 
   @override
   Stream<SessionNotificationTap> get taps => _tapController.stream;
 
   @override
   Future<void> initialize() async {
-    if (_initialized) return;
-    _initialized = true;
-    _channel.setMethodCallHandler(_handleMethodCall);
+    if (!_initialized) {
+      _initialized = true;
+      _channel.setMethodCallHandler(_handleMethodCall);
+    }
     // Native may receive a cold-start notification before Dart has attached
     // the session controller. Explicitly acknowledge readiness so Android and
     // iOS can flush their own pre-engine tap buffers only after this handler
-    // is installed.
+    // is installed. A transient failure remains retryable from the first tap
+    // listener or a later initialize call.
+    await _tryReady();
+  }
+
+  Future<void> _tryReady() {
+    if (!_initialized || _readyAcknowledged || _nativeUnavailable) {
+      return Future<void>.value();
+    }
+    final active = _readyAttempt;
+    if (active != null) return active;
+    final attempt = _sendReady();
+    _readyAttempt = attempt;
+    return attempt.whenComplete(() {
+      if (identical(_readyAttempt, attempt)) _readyAttempt = null;
+    });
+  }
+
+  Future<void> _sendReady() async {
     try {
       await _channel
           .invokeMethod<void>('ready')
           .timeout(const Duration(seconds: 2));
+      _readyAcknowledged = true;
     } on MissingPluginException {
+      _nativeUnavailable = true;
       // Desktop, web, and widget tests do not install a native handler.
     } on PlatformException {
-      // Notification readiness must never block location recording.
+      // Notification readiness must never block location recording. Keep this
+      // retryable because the native engine may not be ready yet.
     } catch (e, st) {
       _logChannelFailure('ready', e, st);
     }
@@ -183,6 +208,11 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     final tap = _pendingTap;
     _pendingTap = null;
     if (tap != null) _tapController.add(tap);
+  }
+
+  void _onTapListen() {
+    _flushPendingTap();
+    unawaited(_tryReady());
   }
 
   int _idFor(SessionWarningKind kind) => switch (kind) {
