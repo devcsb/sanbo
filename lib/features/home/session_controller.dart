@@ -164,6 +164,10 @@ class SessionController extends Notifier<LiveSessionState> {
 
   /// Last filter-accepted sample for O(1) live distance updates.
   LocationSample? _lastValidSample;
+
+  /// Latest live sample rejected as an impossible jump. Keeping it lets the
+  /// incremental filter confirm a new route fragment after a stale anchor.
+  LocationSample? _lastJumpRejectedSample;
   double _liveDistanceM = 0;
   double _liveSpeedMps = 0;
   double? _lastAccuracyM;
@@ -322,7 +326,15 @@ class SessionController extends Notifier<LiveSessionState> {
         lat2: current.latitude,
         lon2: current.longitude,
       );
-      if (distance >= _minLiveSegmentDistanceM) total += distance;
+      // A recovered trace can contain a valid new anchor after a filtered
+      // jump. Do not bridge that stale-anchor displacement into live totals.
+      final speed =
+          distance / (dt.inMicroseconds / Duration.microsecondsPerSecond);
+      if (distance >= _minLiveSegmentDistanceM &&
+          speed.isFinite &&
+          speed <= _liveFilter.config.maxJumpSpeedMps) {
+        total += distance;
+      }
     }
     return total;
   }
@@ -362,6 +374,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
         _lastAccuracyM = null;
@@ -642,6 +655,7 @@ class SessionController extends Notifier<LiveSessionState> {
       );
 
       if (resuming) {
+        _lastJumpRejectedSample = null;
         // Reconcile persisted and memory-only samples. A failed finalization
         // can leave valid fixes only in memory; keep those in the pending
         // queue so the resumed session checkpoints them again before another
@@ -668,6 +682,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
         _lastAccuracyM = null;
@@ -890,14 +905,21 @@ class SessionController extends Notifier<LiveSessionState> {
     _pendingPersist.add(storedSample);
 
     // Incremental filter vs last accepted sample (avoids O(n^2) on long walks).
-    final probe = prev == null ? [storedSample] : [prev, storedSample];
+    final probe = prev == null
+        ? [storedSample]
+        : [prev, ?_lastJumpRejectedSample, storedSample];
     final marked = _liveFilter.apply(probe).last;
+    final startsNewFragment =
+        prev != null &&
+        _lastJumpRejectedSample != null &&
+        ordered &&
+        !marked.isFilteredOut;
     double? segmentSpeed;
     SessionGuardObservation? observation;
     var acceptedByIncrementalFilter = false;
     if (ordered && !marked.isFilteredOut) {
       acceptedByIncrementalFilter = true;
-      if (prev != null) {
+      if (prev != null && !startsNewFragment) {
         final dtUs = marked.timestamp.difference(prev.timestamp).inMicroseconds;
         if (dtUs > 0) {
           final d = haversineMeters(
@@ -916,9 +938,17 @@ class SessionController extends Notifier<LiveSessionState> {
       }
       _lastValidSample = marked;
       _validSampleCount += 1;
+      if (startsNewFragment) {
+        _sessionGuard.interruptHighSpeedContinuity();
+      }
       observation = _sessionGuard.observe(marked, observedAt: _clock());
     } else {
       _sessionGuard.interruptHighSpeedContinuity();
+    }
+    if (outsideLiveBoundary || !ordered || !marked.isFilteredOut) {
+      _lastJumpRejectedSample = null;
+    } else {
+      _lastJumpRejectedSample = storedSample;
     }
 
     final providerSpeed = sample.speedMps;
@@ -1394,6 +1424,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
         _lastAccuracyM = null;
@@ -1434,6 +1465,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
         _lastAccuracyM = null;
@@ -1454,6 +1486,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
         _lastAccuracyM = null;
@@ -1483,6 +1516,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _sessionSamples.clear();
       _pendingPersist.clear();
       _lastValidSample = null;
+      _lastJumpRejectedSample = null;
       _liveDistanceM = 0;
       _liveSpeedMps = 0;
       _lastAccuracyM = null;
@@ -1536,6 +1570,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _sessionSamples.clear();
       _pendingPersist.clear();
       _lastValidSample = null;
+      _lastJumpRejectedSample = null;
       _liveDistanceM = 0;
       _liveSpeedMps = 0;
       _lastAccuracyM = null;
@@ -1555,8 +1590,6 @@ class SessionController extends Notifier<LiveSessionState> {
     List<LocationSample> a,
     List<LocationSample> b,
   ) {
-    if (a.isEmpty) return List.of(b);
-    if (b.isEmpty) return List.of(a);
     final keys = <String>{};
     final out = <LocationSample>[];
     for (final s in [...a, ...b]) {

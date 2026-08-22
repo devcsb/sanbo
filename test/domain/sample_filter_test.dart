@@ -151,4 +151,41 @@ void main() {
     expect(out[0].isFilteredOut, isFalse);
     expect(out[1].isFilteredOut, isTrue);
   });
+
+  test('reanchors after a second plausible fix follows a rejected jump', () {
+    final t0 = DateTime(2026, 7, 12, 10, 0, 0);
+    final out = SampleFilter().apply([
+      LocationSample(
+        timestamp: t0,
+        latitude: 37.5,
+        longitude: 127.0,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: t0.add(const Duration(seconds: 10)),
+        latitude: 37.5,
+        longitude: 127.01,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: t0.add(const Duration(seconds: 20)),
+        latitude: 37.5,
+        longitude: 127.011,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: t0.add(const Duration(seconds: 30)),
+        latitude: 37.5,
+        longitude: 127.012,
+        accuracyM: 5,
+      ),
+    ]);
+
+    expect(out.map((sample) => sample.isFilteredOut), [
+      isFalse,
+      isTrue,
+      isFalse,
+      isFalse,
+    ]);
+  });
 }

@@ -791,6 +791,58 @@ void main() {
     expect(controller.state.activeWarning?.kind, SessionWarningKind.highSpeed);
   });
 
+  test('stale cached anchor recovers a sustained vehicle trace', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    var now = DateTime(2026, 8, 21, 9);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    final start = controller.state.session!.startedAt;
+
+    // The first live fix is a cached location. The next fix is too far away
+    // to be a route segment, but the following fixes form a consistent car
+    // trace and should become a new fragment instead of being rejected forever.
+    final trace = <LocationSample>[
+      LocationSample(
+        timestamp: start,
+        latitude: 37.5,
+        longitude: 127.0,
+        accuracyM: 5,
+      ),
+      LocationSample(
+        timestamp: start.add(const Duration(seconds: 10)),
+        latitude: 37.5,
+        longitude: 127.01,
+        accuracyM: 5,
+      ),
+      for (var second = 20; second <= 100; second += 10)
+        LocationSample(
+          timestamp: start.add(Duration(seconds: second)),
+          latitude: 37.5,
+          longitude: 127.011 + ((second - 20) ~/ 10) * 0.001,
+          accuracyM: 5,
+        ),
+    ];
+    for (final sample in trace) {
+      now = sample.timestamp;
+      controller.debugIngestSamples([sample]);
+    }
+    await _pumpGuard();
+    expect(controller.state.activeWarning?.kind, SessionWarningKind.highSpeed);
+    expect(controller.state.liveDistanceM, lessThan(1000));
+  });
+
   test(
     'recovery rebuild uses filter-marked samples for guard continuity',
     () async {
