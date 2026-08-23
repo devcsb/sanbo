@@ -186,6 +186,14 @@ void main() {
     );
   });
 
+  test('iOS simulator smoke terminates stale app before reinstalling', () {
+    final script = File('scripts/run_ios_simulator_smoke.sh').readAsStringSync();
+    final terminate = script.indexOf('xcrun simctl terminate');
+    final install = script.indexOf('xcrun simctl install');
+    expect(terminate, greaterThanOrEqualTo(0));
+    expect(install, greaterThan(terminate));
+  });
+
   test('platform manifests retain background recording prerequisites', () {
     final androidManifest = File(
       'android/app/src/main/AndroidManifest.xml',

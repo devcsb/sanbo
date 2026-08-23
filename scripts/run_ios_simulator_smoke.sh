@@ -69,6 +69,7 @@ step "실제 앱 bundle 설치와 Core Location 권한 준비"
 flutter build ios --simulator --no-codesign --target lib/main.dart
 app="build/ios/iphonesimulator/Runner.app"
 [[ -d "$app" ]] || fail "simulator app이 생성되지 않았습니다: $app"
+xcrun simctl terminate "$SIMULATOR_ID" "$PACKAGE" 2>/dev/null || true
 xcrun simctl install "$SIMULATOR_ID" "$app"
 xcrun simctl privacy "$SIMULATOR_ID" grant location-always "$PACKAGE"
 
