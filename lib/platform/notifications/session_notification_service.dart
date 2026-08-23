@@ -44,6 +44,11 @@ class PlatformSessionNotificationService implements SessionNotificationService {
   var _initialized = false;
   var _readyAcknowledged = false;
   Future<void>? _readyAttempt;
+  Timer? _readinessRetryTimer;
+  var _readinessRetryCount = 0;
+
+  static const _readinessRetryDelay = Duration(milliseconds: 100);
+  static const _maxReadinessRetries = 20;
 
   @override
   Stream<SessionNotificationTap> get taps => _tapController.stream;
@@ -85,6 +90,9 @@ class PlatformSessionNotificationService implements SessionNotificationService {
           .invokeMethod<void>('ready')
           .timeout(const Duration(seconds: 2));
       _readyAcknowledged = true;
+      _readinessRetryCount = 0;
+      _readinessRetryTimer?.cancel();
+      _readinessRetryTimer = null;
     } on MissingPluginException {
       // The native engine can register this channel after Dart bootstrap,
       // especially on iOS implicit engines. Keep the handshake retryable;
@@ -227,7 +235,32 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     // notifications are unsupported.
     if (!_readyAcknowledged && _tapController.hasListener) {
       await _tryReady();
+      if (!_readyAcknowledged) _scheduleReadinessRetry();
     }
+  }
+
+  void _scheduleReadinessRetry() {
+    if (!_initialized ||
+        _readyAcknowledged ||
+        !_tapController.hasListener ||
+        _readinessRetryTimer != null ||
+        _readinessRetryCount >= _maxReadinessRetries) {
+      return;
+    }
+    _readinessRetryTimer = Timer(_readinessRetryDelay, () {
+      _readinessRetryTimer = null;
+      if (!_initialized ||
+          _readyAcknowledged ||
+          !_tapController.hasListener) {
+        return;
+      }
+      _readinessRetryCount++;
+      unawaited(
+        _tryReady().whenComplete(() {
+          if (!_readyAcknowledged) _scheduleReadinessRetry();
+        }),
+      );
+    });
   }
 
   int _idFor(SessionWarningKind kind) => switch (kind) {
