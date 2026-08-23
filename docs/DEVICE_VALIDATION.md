@@ -106,6 +106,7 @@ scripts/run_ios_simulator_smoke.sh
 - `bash scripts/run_native_platform_tests.sh`: Android native unit test와 iOS simulator XCTest 통과
 - `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_SCREEN_OFF=1 SANBO_ANDROID_CLEAR_DATA=1 bash scripts/run_android_emulator_smoke.sh`: Android emulator 실제 provider 경로 통과, 거리 25.14m, 유효 샘플 5개
 - `IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA bash scripts/run_ios_simulator_smoke.sh`: iOS simulator 실제 Core Location 경로 통과
+- Android emulator에서 high-speed 알림을 표시한 뒤 앱 프로세스를 강제 종료하고 시스템 알림을 탭하는 cold tap 통과. `기록 종료 확인 중` 복구 화면과 `계속 기록` 동작을 확인했고, 알림은 사라지고 활성 세션은 DB에 남았다. 이후 `산책 종료`로 세션을 완료했으며 위치 요청은 `OFF`가 됐다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
