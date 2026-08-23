@@ -32,6 +32,17 @@ Future<void> settle(WidgetTester tester) async {
   await tester.pump(const Duration(milliseconds: 1));
 }
 
+Future<void> waitForDetailReload(WidgetTester tester, String sessionId) async {
+  final container = ProviderScope.containerOf(
+    tester.element(find.byType(SessionDetailScreen)),
+    listen: false,
+  );
+  await tester.runAsync(() async {
+    await container.read(sessionDetailProvider(sessionId).future);
+  });
+  await tester.pump();
+}
+
 Widget detailApp(
   WalkRepository repository,
   String sessionId, {
@@ -445,6 +456,7 @@ void main() {
       await settle(tester);
       await settle(tester);
       await settle(tester);
+      await waitForDetailReload(tester, fixture.session.id);
 
       final updatedSession = await tester.runAsync(
         () => repo.getSession(fixture.session.id),
@@ -499,6 +511,7 @@ void main() {
       await tester.tap(find.text('제외 취소'));
       await settle(tester);
       await settle(tester);
+      await waitForDetailReload(tester, fixture.session.id);
       expect(
         await tester.runAsync(
           () => repo.getRouteExclusions(fixture.session.id),
