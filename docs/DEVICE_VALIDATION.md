@@ -146,6 +146,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 커밋에서 Android emulator `emulator-5554`의 고속 cold tap smoke를 다시 실행해 708.13m, 유효 샘플 10개와 종료 후 provider 요청 없음이 재현됐다. 이어 알림 권한 거부와 화면 잠금 조건의 provider smoke도 다시 통과했고 22.74m, 유효 샘플 5개가 저장됐다.
 - 같은 커밋에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 Core Location smoke를 다시 실행해 실제 provider E2E 1개가 통과했다.
 - 커밋 `54988e7`에서 iPhone 17 Pro simulator의 실제 Core Location 고속 세션을 완료한 뒤 차량 구간을 제외하고 복원하는 경로까지 통과했다. 제외 전후 세션 집계와 경로가 복원되는지 저장소에서 확인했다.
+- Android emulator에서 기록 중 위치 권한을 철회한 뒤 앱을 다시 열었다. `미완료 기록` 복구 카드가 나타났고, 위치 권한을 다시 허용해 `이어서 기록`을 선택한 뒤 세션을 완료했다. DB에는 `completed`, 거리 11.33m, 유효 샘플 3개가 저장됐다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
