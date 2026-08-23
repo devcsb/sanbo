@@ -47,6 +47,33 @@ void main() {
     );
   });
 
+  test(
+    'start failure only attempts the location-manager fallback on Android',
+    () {
+      expect(
+        GeolocatorLocationEngine.shouldAttemptLocationManagerFallback(
+          isAndroid: true,
+          running: true,
+        ),
+        isTrue,
+      );
+      expect(
+        GeolocatorLocationEngine.shouldAttemptLocationManagerFallback(
+          isAndroid: false,
+          running: true,
+        ),
+        isFalse,
+      );
+      expect(
+        GeolocatorLocationEngine.shouldAttemptLocationManagerFallback(
+          isAndroid: true,
+          running: false,
+        ),
+        isFalse,
+      );
+    },
+  );
+
   test('iOS background upgrade is best-effort after foreground grant', () {
     expect(
       GeolocatorLocationEngine.shouldRequestAlwaysLocation(

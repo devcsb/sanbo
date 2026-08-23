@@ -53,6 +53,12 @@ class GeolocatorLocationEngine implements LocationEngine {
   }
 
   @visibleForTesting
+  static bool shouldAttemptLocationManagerFallback({
+    required bool isAndroid,
+    required bool running,
+  }) => isAndroid && running;
+
+  @visibleForTesting
   static LocationStreamEndAction endedStreamAction({
     required bool running,
     required bool usingLocationManagerFallback,
@@ -325,6 +331,13 @@ class GeolocatorLocationEngine implements LocationEngine {
         error: e,
         stackTrace: st,
       );
+      if (!shouldAttemptLocationManagerFallback(
+        isAndroid: Platform.isAndroid,
+        running: _running,
+      )) {
+        await _stopTrackingOnly();
+        Error.throwWithStackTrace(e, st);
+      }
       try {
         await _startStream(forceLocationManager: true);
         _usingLocationManagerFallback = true;
