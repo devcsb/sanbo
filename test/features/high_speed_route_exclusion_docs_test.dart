@@ -59,7 +59,7 @@ void main() {
       'Future<void> showCompletion({required String title, required String body})',
       'duration limit, stationary limit, duration warning, stationary warning, high-speed warning',
       'observedAt',
-        'notificationTapped({kind: highSpeed, sessionId})',
+      'notificationTapped({kind: highSpeed, sessionId})',
     ]) {
       expect(guard, contains(contract));
     }
@@ -168,4 +168,27 @@ void main() {
       }
     },
   );
+
+  test('platform manifests retain background recording prerequisites', () {
+    final androidManifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    expect(androidManifest, contains('android.permission.FOREGROUND_SERVICE'));
+    expect(
+      androidManifest,
+      contains('android.permission.FOREGROUND_SERVICE_LOCATION'),
+    );
+    expect(
+      androidManifest,
+      contains('android:foregroundServiceType="location"'),
+    );
+
+    final iosInfo = File('ios/Runner/Info.plist').readAsStringSync();
+    expect(
+      iosInfo,
+      contains('<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>'),
+    );
+    expect(iosInfo, contains('<key>UIBackgroundModes</key>'));
+    expect(iosInfo, contains('<string>location</string>'));
+  });
 }
