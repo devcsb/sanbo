@@ -170,12 +170,20 @@ void main() {
   );
 
   test('Android high-speed cold tap smoke remains checked in', () {
-    final script = File(
-      'scripts/run_android_high_speed_cold_tap_smoke.sh',
-    );
+    final script = File('scripts/run_android_high_speed_cold_tap_smoke.sh');
     expect(script.existsSync(), isTrue);
     expect(script.readAsStringSync(), contains('notification shade'));
     expect(script.readAsStringSync(), contains('am crash'));
+  });
+
+  test('iOS simulator smoke exposes the real high-speed provider scenario', () {
+    final script = File('scripts/run_ios_simulator_smoke.sh');
+    expect(script.existsSync(), isTrue);
+    expect(script.readAsStringSync(), contains('SANBO_IOS_SCENARIO'));
+    expect(
+      script.readAsStringSync(),
+      contains('native_high_speed_e2e_test.dart'),
+    );
   });
 
   test('platform manifests retain background recording prerequisites', () {

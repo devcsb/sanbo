@@ -11,6 +11,8 @@ START_LON="${SANBO_IOS_START_LON:-127.000000}"
 END_LAT="${SANBO_IOS_END_LAT:-37.501000}"
 END_LON="${SANBO_IOS_END_LON:-127.000000}"
 SPEED="${SANBO_IOS_SPEED_MPS:-1}"
+SCENARIO="${SANBO_IOS_SCENARIO:-walk}"
+TEST_FILE="integration_test/native_location_e2e_test.dart"
 
 step() {
   printf '\n[ios-smoke] %s\n' "$1"
@@ -20,6 +22,19 @@ fail() {
   echo "[ios-smoke] FAIL: $1" >&2
   exit 1
 }
+
+case "$SCENARIO" in
+  walk)
+    ;;
+  high_speed)
+    END_LAT="${SANBO_IOS_END_LAT:-37.520000}"
+    SPEED="${SANBO_IOS_SPEED_MPS:-11}"
+    TEST_FILE="integration_test/native_high_speed_e2e_test.dart"
+    ;;
+  *)
+    fail "알 수 없는 iOS simulator smoke 시나리오입니다: $SCENARIO"
+    ;;
+esac
 
 [[ "$(uname -s)" == "Darwin" ]] || fail 'iOS simulator smoke는 macOS에서만 실행할 수 있습니다.'
 command -v xcrun >/dev/null 2>&1 || fail 'xcrun이 PATH에 없습니다.'
@@ -55,12 +70,12 @@ app="build/ios/iphonesimulator/Runner.app"
 xcrun simctl install "$SIMULATOR_ID" "$app"
 xcrun simctl privacy "$SIMULATOR_ID" grant location-always "$PACKAGE"
 
-step "Core Location waypoint 시나리오와 실제 provider E2E"
+step "Core Location waypoint 시나리오와 실제 provider E2E ($SCENARIO)"
 xcrun simctl location "$SIMULATOR_ID" clear
 xcrun simctl location "$SIMULATOR_ID" start \
   --speed="$SPEED" \
   --interval=1 \
   "$START_LAT,$START_LON" "$END_LAT,$END_LON"
-flutter test --no-pub integration_test/native_location_e2e_test.dart -d "$SIMULATOR_ID"
+flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID"
 
 printf '\n[ios-smoke] PASS simulator=%s\n' "$SIMULATOR_ID"

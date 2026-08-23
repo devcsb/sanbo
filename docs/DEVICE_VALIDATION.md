@@ -109,6 +109,19 @@ scripts/run_ios_simulator_smoke.sh
 실제 `GeolocatorLocationEngine`으로 거리 누적과 완료 저장을 검사한다. 결과는
 물리 iPhone의 백그라운드와 절전 정책 검증으로 승격하지 않는다.
 
+iOS simulator에서 실제 위치 provider의 고속 경고와 전면 시스템 알림 억제까지
+확인하려면 다음 시나리오를 사용한다.
+
+```bash
+IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
+  SANBO_IOS_SCENARIO=high_speed \
+  bash scripts/run_ios_simulator_smoke.sh
+```
+
+이 시나리오는 약 11m/s waypoint를 주입해 `SessionGuard`의 고속 경고와 300m
+이상 거리 저장을 확인한다. 앱 전면에서는 시스템 알림을 게시하지 않는 계약도
+검사하며, simulator 결과는 물리 iPhone 검증으로 승격하지 않는다.
+
 ## 최근 자동 검증 로그
 
 2026-08-23에 Flutter 3.47.1 환경에서 다음 결과를 확인했다.
@@ -123,6 +136,7 @@ scripts/run_ios_simulator_smoke.sh
 - 같은 완료 세션에서 제외 상태를 저장한 뒤 앱을 강제 종료하고 다시 열어 기록 화면과 상세 화면을 재진입했다. `10:05, 산책에서 제외됨, 제외 취소 가능` 상태와 DB의 제외 ID가 유지됐고, 재시작 후 `제외 취소`로 원래 통계를 복원했다.
 - 같은 커밋에서 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_SCREEN_OFF=1 SANBO_ANDROID_CLEAR_DATA=1` 조건을 다시 실행했다. Android emulator `emulator-5554`에서 알림 권한을 거부하고 화면을 잠근 뒤에도 실제 provider가 계속 동작했고, 거리 29.70m, 유효 샘플 5개로 세션 저장과 provider 해제를 확인했다.
 - 같은 커밋에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`에 실제 앱을 재설치하고 Core Location waypoint를 다시 주입했다. `integration_test/native_location_e2e_test.dart`가 실제 `GeolocatorLocationEngine` 경로에서 통과했다.
+- 같은 커밋에서 iPhone 17 Pro simulator에 약 11m/s waypoint를 주입하는 `SANBO_IOS_SCENARIO=high_speed` smoke를 실행해 실제 provider 고속 경고, 300m 초과 거리, 전면 시스템 알림 억제를 확인하고 세션 완료까지 통과했다.
 - 같은 커밋에서 Android emulator의 알림 거부와 화면 잠금 smoke를 한 번 더 실행했다. 실제 provider가 계속 동작했고, 거리 62.22m, 유효 샘플 5개로 세션 저장과 종료 후 provider 해제를 다시 확인했다.
 - 같은 검증 루프에서 고속 경고와 차량 구간 제외 통합 테스트 66개, Android 기기 통합 테스트 2개, Android native unit test와 iOS simulator XCTest를 모두 통과했다.
 - Android emulator에서 실제 APK에 경도 0.0005도씩 4초 간격으로 GPS를 주입해 약 11m/s 이동을 재현했다. 전면에서 `산책 기록을 계속할까요?`와 `기록 종료`, `계속 기록`을 확인하고 계속 기록을 선택했으며, 완료 세션은 792.88m, 139초, 유효 샘플 12개로 저장됐다.
