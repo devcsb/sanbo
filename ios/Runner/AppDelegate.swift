@@ -2,6 +2,13 @@ import Flutter
 import UIKit
 import UserNotifications
 
+func shouldAcceptNotificationReadinessAck(
+  currentGeneration: Int,
+  ackGeneration: Int
+) -> Bool {
+  currentGeneration == ackGeneration
+}
+
 struct NotificationTap {
   let kind: String
   let sessionId: String
@@ -34,6 +41,7 @@ final class NotificationTapBuffer {
   private let tapBuffer = NotificationTapBuffer()
   private var notificationChannel: FlutterMethodChannel?
   private var notificationChannelReady = false
+  private var notificationChannelGeneration = 0
 
   override func application(
     _ application: UIApplication,
@@ -55,9 +63,15 @@ final class NotificationTapBuffer {
     // The implicit engine can be recreated while the app remains alive.
     // Require a fresh Dart readiness acknowledgement for every messenger.
     notificationChannelReady = false
+    let channelGeneration = notificationChannelGeneration + 1
+    notificationChannelGeneration = channelGeneration
     notificationChannel = channel
     channel.setMethodCallHandler { [weak self] call, result in
-      self?.handleMethodCall(call, result: result)
+      self?.handleMethodCall(
+        call,
+        result: result,
+        channelGeneration: channelGeneration
+      )
     }
     UNUserNotificationCenter.current().delegate = self
   }
@@ -81,11 +95,20 @@ final class NotificationTapBuffer {
     completionHandler()
   }
 
-  private func handleMethodCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+  private func handleMethodCall(
+    _ call: FlutterMethodCall,
+    result: @escaping FlutterResult,
+    channelGeneration: Int
+  ) {
     switch call.method {
     case "ready":
-      notificationChannelReady = true
-      flushPendingTap()
+      if shouldAcceptNotificationReadinessAck(
+        currentGeneration: notificationChannelGeneration,
+        ackGeneration: channelGeneration
+      ) {
+        notificationChannelReady = true
+        flushPendingTap()
+      }
       result(nil)
     case "getTimezone":
       result(TimeZone.current.identifier)

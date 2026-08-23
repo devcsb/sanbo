@@ -26,4 +26,10 @@ class NotificationIntentContractTest {
         assertEquals(false, shouldDeliverNotificationTap(channelReady = true, hasChannel = false))
         assertEquals(true, shouldDeliverNotificationTap(channelReady = true, hasChannel = true))
     }
+
+    @Test
+    fun `stale readiness acknowledgements cannot prepare a newer channel`() {
+        assertEquals(true, shouldAcceptNotificationReadinessAck(currentGeneration = 2, ackGeneration = 2))
+        assertEquals(false, shouldAcceptNotificationReadinessAck(currentGeneration = 2, ackGeneration = 1))
+    }
 }

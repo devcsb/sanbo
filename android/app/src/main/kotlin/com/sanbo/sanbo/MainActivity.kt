@@ -32,11 +32,17 @@ internal fun shouldDeliverNotificationTap(
     hasChannel: Boolean,
 ): Boolean = channelReady && hasChannel
 
+internal fun shouldAcceptNotificationReadinessAck(
+    currentGeneration: Int,
+    ackGeneration: Int,
+): Boolean = currentGeneration == ackGeneration
+
 class MainActivity : FlutterActivity() {
     private val methodChannelName = "sanbo/session_notifications"
     private val notificationChannelId = "sanbo_session_alerts"
     private var notificationMethodChannel: MethodChannel? = null
     private var notificationChannelReady = false
+    private var notificationChannelGeneration = 0
     private var pendingKind: String? = null
     private var pendingSessionId: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
@@ -48,6 +54,7 @@ class MainActivity : FlutterActivity() {
         // A configuration change can create a new Dart messenger. Never reuse
         // the previous engine's readiness acknowledgement for this channel.
         notificationChannelReady = false
+        val channelGeneration = ++notificationChannelGeneration
         notificationMethodChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             methodChannelName,
@@ -55,8 +62,14 @@ class MainActivity : FlutterActivity() {
             channel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "ready" -> {
-                        notificationChannelReady = true
-                        flushPendingTap()
+                        if (shouldAcceptNotificationReadinessAck(
+                                currentGeneration = notificationChannelGeneration,
+                                ackGeneration = channelGeneration,
+                            )
+                        ) {
+                            notificationChannelReady = true
+                            flushPendingTap()
+                        }
                         result.success(null)
                     }
                     "getTimezone" -> result.success(java.util.TimeZone.getDefault().id)

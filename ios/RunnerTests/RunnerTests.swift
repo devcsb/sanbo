@@ -30,4 +30,9 @@ class RunnerTests: XCTestCase {
     XCTAssertNil(buffer.take())
   }
 
+  func testStaleReadinessAcknowledgementCannotPrepareANewerChannel() {
+    XCTAssertTrue(shouldAcceptNotificationReadinessAck(currentGeneration: 2, ackGeneration: 2))
+    XCTAssertFalse(shouldAcceptNotificationReadinessAck(currentGeneration: 2, ackGeneration: 1))
+  }
+
 }

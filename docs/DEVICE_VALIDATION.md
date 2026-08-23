@@ -150,6 +150,8 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 알림 channel이 늦게 등록되는 cold-start를 가정한 handshake 회귀 테스트를 추가하고, 전체 Flutter 테스트 338개, analyze, Android debug APK와 native Android unit test, iOS simulator XCTest를 다시 통과했다.
 - Android emulator `emulator-5554`에서 고속 cold tap smoke를 다시 실행했다. 프로세스 종료 뒤 notification shade 탭, 복구 화면, 계속 기록과 세션 완료가 통과했고, 완료 세션은 거리 708.13m, 유효 샘플 10개였으며 종료 후 provider 요청은 없었다.
 - iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`에서 실제 Core Location 고속 시나리오와 차량 구간 제외 및 복원 통합 테스트를 다시 실행해 통과했다.
+- Flutter engine이 재생성될 때 이전 channel의 늦은 `ready` 응답을 무시하도록 Android와 iOS에 channel generation 검사를 추가했다. Android native unit test와 iOS simulator XCTest에서 현재 세대 응답만 readiness를 열도록 확인했다.
+- Android emulator `emulator-5554`에서 generation 변경 후 고속 cold tap smoke를 다시 실행했다. notification shade 탭, 복구 화면, 계속 기록과 세션 완료가 통과했고, 완료 세션은 거리 752.09m, 유효 샘플 10개였으며 종료 후 provider 요청은 없었다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
