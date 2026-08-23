@@ -92,6 +92,17 @@ if [[ "$SCENARIO" == high_speed ]]; then
   # Native XCTest can leave a previous Runner process alive on the shared
   # simulator. Terminate it so process detection below cannot match stale UI.
   xcrun simctl terminate "$SIMULATOR_ID" "$PACKAGE" >/dev/null 2>&1 || true
+  for _ in {1..30}; do
+    if ! xcrun simctl spawn "$SIMULATOR_ID" launchctl list 2>/dev/null |
+      grep -Fq "UIKitApplication:${PACKAGE}["; then
+      break
+    fi
+    sleep 1
+  done
+  if xcrun simctl spawn "$SIMULATOR_ID" launchctl list 2>/dev/null |
+    grep -Fq "UIKitApplication:${PACKAGE}["; then
+    fail '이전 integration runner process가 simulator에서 종료되지 않았습니다.'
+  fi
   flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID" &
   TEST_PID=$!
   app_seen=false
