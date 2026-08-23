@@ -126,7 +126,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 
 2026-08-23에 Flutter 3.47.1 환경에서 다음 결과를 확인했다.
 
-- `bash scripts/run_quality_loop.sh --debug-apk`: 정적 분석, 전체 Flutter 테스트 334개, Android debug APK와 생성 파일 검사를 모두 통과
+- `bash scripts/run_quality_loop.sh --debug-apk`: 정적 분석, 전체 Flutter 테스트 337개, Android debug APK와 생성 파일 검사를 모두 통과
 - `bash scripts/run_native_platform_tests.sh`: Android native unit test와 iOS simulator XCTest 통과
 - `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_SCREEN_OFF=1 SANBO_ANDROID_CLEAR_DATA=1 bash scripts/run_android_emulator_smoke.sh`: Android emulator 실제 provider 경로 통과, 거리 25.14m, 유효 샘플 5개
 - `IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA bash scripts/run_ios_simulator_smoke.sh`: iOS simulator 실제 Core Location 경로 통과
@@ -145,6 +145,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - `scripts/run_android_high_speed_cold_tap_smoke.sh`를 Android emulator `emulator-5554`에서 처음부터 다시 실행했다. fused provider의 fix coalescing을 고려한 마지막 GPS fix 대기 뒤 알림을 게시했고, 프로세스 종료와 notification shade 탭, 복구와 종료 저장을 자동으로 통과했다. 완료 세션은 708.13m, 유효 샘플 10개였고 종료 뒤 현재 location provider 요청은 없었다.
 - 같은 커밋에서 Android emulator `emulator-5554`의 고속 cold tap smoke를 다시 실행해 708.13m, 유효 샘플 10개와 종료 후 provider 요청 없음이 재현됐다. 이어 알림 권한 거부와 화면 잠금 조건의 provider smoke도 다시 통과했고 22.74m, 유효 샘플 5개가 저장됐다.
 - 같은 커밋에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 Core Location smoke를 다시 실행해 실제 provider E2E 1개가 통과했다.
+- 커밋 `54988e7`에서 iPhone 17 Pro simulator의 실제 Core Location 고속 세션을 완료한 뒤 차량 구간을 제외하고 복원하는 경로까지 통과했다. 제외 전후 세션 집계와 경로가 복원되는지 저장소에서 확인했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
