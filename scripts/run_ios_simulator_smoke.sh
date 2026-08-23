@@ -15,6 +15,7 @@ SCENARIO="${SANBO_IOS_SCENARIO:-walk}"
 TEST_FILE="integration_test/native_location_e2e_test.dart"
 LOCATION_OPTIONS=(--interval=1)
 TEST_PID=""
+FEED_PID=""
 
 step() {
   printf '\n[ios-smoke] %s\n' "$1"
@@ -63,6 +64,10 @@ if [[ "$available_simulators" != *"$SIMULATOR_ID"* ]]; then
 fi
 
 location_cleanup() {
+  if [[ -n "$FEED_PID" ]] && kill -0 "$FEED_PID" 2>/dev/null; then
+    kill "$FEED_PID" 2>/dev/null || true
+    wait "$FEED_PID" 2>/dev/null || true
+  fi
   if [[ -n "$TEST_PID" ]] && kill -0 "$TEST_PID" 2>/dev/null; then
     kill "$TEST_PID" 2>/dev/null || true
     wait "$TEST_PID" 2>/dev/null || true
@@ -123,14 +128,38 @@ if [[ "$SCENARIO" == high_speed ]]; then
     sleep 1
   done
   [[ "$app_seen" == true ]] || fail 'integration runner 앱이 simulator에서 시작되지 않았습니다.'
-  xcrun simctl location "$SIMULATOR_ID" start \
-    --speed="$SPEED" \
-    "${LOCATION_OPTIONS[@]}" \
-    "$START_LAT,$START_LON" "$END_LAT,$END_LON"
+  if [[ "${CI:-}" == true ]]; then
+    # macOS 15/iOS 18.5 runners sometimes ignore `location start` after the
+    # Flutter app attaches. Repeated `set` calls are delivered to the active
+    # CLLocationManager and retain the same 11 m/s speed from timestamps.
+    step "CI Core Location fix feeder"
+    (
+      tick=0
+      while kill -0 "$TEST_PID" 2>/dev/null; do
+        latitude="$(awk -v start="$START_LAT" -v speed="$SPEED" -v tick="$tick" \
+          'BEGIN { printf "%.6f", start + (speed * tick / 111320.0) }')"
+        xcrun simctl location "$SIMULATOR_ID" set \
+          "$latitude,$START_LON" >/dev/null 2>&1 || true
+        tick=$((tick + 1))
+        sleep 1
+      done
+    ) &
+    FEED_PID=$!
+  else
+    xcrun simctl location "$SIMULATOR_ID" start \
+      --speed="$SPEED" \
+      "${LOCATION_OPTIONS[@]}" \
+      "$START_LAT,$START_LON" "$END_LAT,$END_LON"
+  fi
   set +e
   wait "$TEST_PID"
   test_status=$?
   set -e
+  if [[ -n "$FEED_PID" ]] && kill -0 "$FEED_PID" 2>/dev/null; then
+    kill "$FEED_PID" 2>/dev/null || true
+    wait "$FEED_PID" 2>/dev/null || true
+  fi
+  FEED_PID=""
   TEST_PID=""
   exit "$test_status"
 fi
