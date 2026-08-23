@@ -5,9 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:sanbo/app.dart';
 import 'package:sanbo/data/walk_repository.dart';
+import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/models/session_warning.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
+import 'package:sanbo/domain/pipeline/segment_merger.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/features/intro/intro_providers.dart';
 import 'package:sanbo/platform/location/geolocator_location_engine.dart';
@@ -116,6 +118,38 @@ void main() {
       expect(ended!.status, SessionStatus.completed);
       expect(ended.totalDistanceM, greaterThan(300));
       expect((await repo.listCompleted()), hasLength(1));
+
+      final windows = await repo.getWindows(ended.id);
+      final segments = SegmentMerger().merge(
+        windows,
+        sessionId: ended.id,
+        sessionStart: ended.startedAt,
+        sessionEnd: ended.endedAt,
+      );
+      final candidate = segments.firstWhere(
+        (segment) => segment.durationS > 0 && segment.distanceM > 0,
+      );
+      final beforeExclusion = (await repo.getSession(ended.id))!;
+      final exclusion = await repo.excludeRouteSegment(
+        sessionId: ended.id,
+        segment: candidate,
+        reason: RouteExclusionReason.vehicle,
+      );
+      final afterExclusion = (await repo.getSession(ended.id))!;
+      expect(
+        afterExclusion.totalDistanceM,
+        lessThan(beforeExclusion.totalDistanceM ?? double.infinity),
+      );
+
+      await repo.restoreRouteExclusion(
+        sessionId: ended.id,
+        exclusionId: exclusion.id,
+      );
+      final restored = (await repo.getSession(ended.id))!;
+      expect(
+        restored.totalDistanceM,
+        closeTo(beforeExclusion.totalDistanceM ?? 0, 1e-6),
+      );
     },
   );
 }
