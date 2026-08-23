@@ -83,6 +83,17 @@ scripts/run_android_emulator_smoke.sh
 `SANBO_ANDROID_CLEAR_DATA=1`을 명시한다. 에뮬레이터 결과는 아래 물리 기기 행의
 통과 판정으로 승격하지 않는다.
 
+고속 경고와 killed-app cold tap을 같은 순서로 반복하려면 다음 명령을 사용한다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
+  bash scripts/run_android_high_speed_cold_tap_smoke.sh
+```
+
+이 명령은 약 11m/s GPS 경로를 백그라운드에서 주입하고, `4103` 알림 게시,
+`am crash` 뒤 notification shade 탭, 복구 경고, 계속 기록, 완료 저장과 provider
+해제를 한 번에 확인한다. emulator 결과는 물리 기기 행의 통과 판정으로 승격하지 않는다.
+
 알림 권한 거부 경로는 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny`를 추가한다.
 기본값은 `grant`이며, 어느 모드에서도 위치 기록과 세션 저장 결과를 확인한다.
 화면을 끈 상태의 provider 지속성은 `SANBO_ANDROID_SCREEN_OFF=1`을 추가해
@@ -102,7 +113,7 @@ scripts/run_ios_simulator_smoke.sh
 
 2026-08-23에 Flutter 3.47.1 환경에서 다음 결과를 확인했다.
 
-- `bash scripts/run_quality_loop.sh --debug-apk`: 정적 분석, 전체 Flutter 테스트 333개, Android debug APK와 생성 파일 검사를 모두 통과
+- `bash scripts/run_quality_loop.sh --debug-apk`: 정적 분석, 전체 Flutter 테스트 334개, Android debug APK와 생성 파일 검사를 모두 통과
 - `bash scripts/run_native_platform_tests.sh`: Android native unit test와 iOS simulator XCTest 통과
 - `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_SCREEN_OFF=1 SANBO_ANDROID_CLEAR_DATA=1 bash scripts/run_android_emulator_smoke.sh`: Android emulator 실제 provider 경로 통과, 거리 25.14m, 유효 샘플 5개
 - `IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA bash scripts/run_ios_simulator_smoke.sh`: iOS simulator 실제 Core Location 경로 통과
@@ -117,6 +128,7 @@ scripts/run_ios_simulator_smoke.sh
 - Android emulator에서 실제 APK에 경도 0.0005도씩 4초 간격으로 GPS를 주입해 약 11m/s 이동을 재현했다. 전면에서 `산책 기록을 계속할까요?`와 `기록 종료`, `계속 기록`을 확인하고 계속 기록을 선택했으며, 완료 세션은 792.88m, 139초, 유효 샘플 12개로 저장됐다.
 - 같은 세션의 상세 화면에서 `11:51–11:53` 차량 이동 추정 구간 793m를 `차량 이동 구간 제외`로 제외했다. 지도와 합계가 0m, 유효 샘플 1개로 갱신되고 `user_exclusion_id`가 저장됐으며, `제외 취소` 뒤 792.88m, 유효 샘플 12개와 제외 행 0개로 복원됐다.
 - Android emulator에서 같은 고속 경로를 앱 프로세스가 백그라운드에 있는 상태로 재현한 뒤 `am crash com.sanbo.sanbo`로 프로세스를 종료했다. 시스템 알림의 `산책 기록을 계속할까요?` 행을 실제 notification shade에서 탭하자 새 프로세스가 cold start되고 `기록 종료 확인 중` 복구 화면과 `기록 종료`, `계속 기록` 버튼이 표시됐다. `계속 기록` 뒤 알림이 사라졌고, `산책 종료`로 617.24m, 유효 샘플 10개의 completed 세션을 저장했으며 `dumpsys location`의 앱 provider 요청은 `OFF`가 됐다.
+- `scripts/run_android_high_speed_cold_tap_smoke.sh`를 Android emulator `emulator-5554`에서 처음부터 다시 실행했다. fused provider의 fix coalescing을 고려한 마지막 GPS fix 대기 뒤 알림을 게시했고, 프로세스 종료와 notification shade 탭, 복구와 종료 저장을 자동으로 통과했다. 완료 세션은 708.13m, 유효 샘플 10개였고 종료 뒤 현재 location provider 요청은 없었다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.

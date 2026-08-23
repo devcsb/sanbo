@@ -169,6 +169,15 @@ void main() {
     },
   );
 
+  test('Android high-speed cold tap smoke remains checked in', () {
+    final script = File(
+      'scripts/run_android_high_speed_cold_tap_smoke.sh',
+    );
+    expect(script.existsSync(), isTrue);
+    expect(script.readAsStringSync(), contains('notification shade'));
+    expect(script.readAsStringSync(), contains('am crash'));
+  });
+
   test('platform manifests retain background recording prerequisites', () {
     final androidManifest = File(
       'android/app/src/main/AndroidManifest.xml',
