@@ -41,7 +41,7 @@ jobs:
   native-platform:
     name: Native platform tests
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - name: Check out source
         uses: actions/checkout@v5
@@ -64,3 +64,6 @@ jobs:
 
       - name: Run native tests
         run: bash scripts/run_native_platform_tests.sh
+
+      - name: Run iOS simulator high-speed provider smoke
+        run: SANBO_IOS_SCENARIO=high_speed bash scripts/run_ios_simulator_smoke.sh

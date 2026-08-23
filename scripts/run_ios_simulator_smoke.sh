@@ -27,7 +27,9 @@ case "$SCENARIO" in
   walk)
     ;;
   high_speed)
-    END_LAT="${SANBO_IOS_END_LAT:-37.520000}"
+    # Keep the route long enough to survive a cold CI Xcode build before the
+    # integration runner attaches to the already-running simulator.
+    END_LAT="${SANBO_IOS_END_LAT:-37.600000}"
     SPEED="${SANBO_IOS_SPEED_MPS:-11}"
     TEST_FILE="integration_test/native_high_speed_e2e_test.dart"
     ;;
