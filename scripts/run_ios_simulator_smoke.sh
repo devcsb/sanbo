@@ -89,6 +89,9 @@ if [[ "$SCENARIO" == high_speed ]]; then
   # CLLocationManager was attached. Start the integration runner first, then
   # inject the route as soon as its UIKit process is alive.
   step "integration runner 준비"
+  # Native XCTest can leave a previous Runner process alive on the shared
+  # simulator. Terminate it so process detection below cannot match stale UI.
+  xcrun simctl terminate "$SIMULATOR_ID" "$PACKAGE" >/dev/null 2>&1 || true
   flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID" &
   TEST_PID=$!
   app_seen=false
