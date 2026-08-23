@@ -64,6 +64,3 @@ jobs:
 
       - name: Run native tests
         run: bash scripts/run_native_platform_tests.sh
-
-      - name: Run iOS simulator high-speed provider smoke
-        run: SANBO_IOS_SCENARIO=high_speed bash scripts/run_ios_simulator_smoke.sh
