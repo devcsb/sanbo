@@ -13,6 +13,7 @@ END_LON="${SANBO_IOS_END_LON:-127.000000}"
 SPEED="${SANBO_IOS_SPEED_MPS:-1}"
 SCENARIO="${SANBO_IOS_SCENARIO:-walk}"
 TEST_FILE="integration_test/native_location_e2e_test.dart"
+LOCATION_OPTIONS=(--interval=1)
 
 step() {
   printf '\n[ios-smoke] %s\n' "$1"
@@ -31,6 +32,10 @@ case "$SCENARIO" in
     # integration runner attaches to the already-running simulator.
     END_LAT="${SANBO_IOS_END_LAT:-37.600000}"
     SPEED="${SANBO_IOS_SPEED_MPS:-11}"
+    # iOS 18.x can coalesce fixed-interval simulator updates while the
+    # integration runner is attaching. Distance-driven updates keep the real
+    # provider stream flowing on both CI and local simulator runtimes.
+    LOCATION_OPTIONS=(--distance=10)
     TEST_FILE="integration_test/native_high_speed_e2e_test.dart"
     ;;
   *)
@@ -76,7 +81,7 @@ step "Core Location waypoint 시나리오와 실제 provider E2E ($SCENARIO)"
 xcrun simctl location "$SIMULATOR_ID" clear
 xcrun simctl location "$SIMULATOR_ID" start \
   --speed="$SPEED" \
-  --interval=1 \
+  "${LOCATION_OPTIONS[@]}" \
   "$START_LAT,$START_LON" "$END_LAT,$END_LON"
 flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID"
 
