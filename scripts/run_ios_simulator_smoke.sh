@@ -14,6 +14,7 @@ SPEED="${SANBO_IOS_SPEED_MPS:-1}"
 SCENARIO="${SANBO_IOS_SCENARIO:-walk}"
 TEST_FILE="integration_test/native_location_e2e_test.dart"
 LOCATION_OPTIONS=(--interval=1)
+TEST_PID=""
 
 step() {
   printf '\n[ios-smoke] %s\n' "$1"
@@ -62,6 +63,10 @@ if [[ "$available_simulators" != *"$SIMULATOR_ID"* ]]; then
 fi
 
 location_cleanup() {
+  if [[ -n "$TEST_PID" ]] && kill -0 "$TEST_PID" 2>/dev/null; then
+    kill "$TEST_PID" 2>/dev/null || true
+    wait "$TEST_PID" 2>/dev/null || true
+  fi
   xcrun simctl location "$SIMULATOR_ID" clear >/dev/null 2>&1 || true
 }
 trap location_cleanup EXIT
@@ -79,6 +84,43 @@ xcrun simctl privacy "$SIMULATOR_ID" grant location-always "$PACKAGE"
 
 step "Core Location waypoint 시나리오와 실제 provider E2E ($SCENARIO)"
 xcrun simctl location "$SIMULATOR_ID" clear
+if [[ "$SCENARIO" == high_speed ]]; then
+  # iOS 18.x may not replay a route that started before the app's
+  # CLLocationManager was attached. Start the integration runner first, then
+  # inject the route as soon as its UIKit process is alive.
+  step "integration runner 준비"
+  flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID" &
+  TEST_PID=$!
+  app_seen=false
+  for _ in {1..90}; do
+    if ! kill -0 "$TEST_PID" 2>/dev/null; then
+      set +e
+      wait "$TEST_PID"
+      test_status=$?
+      set -e
+      TEST_PID=""
+      fail "integration runner가 location 주입 전에 종료됐습니다 (exit=$test_status)."
+    fi
+    if xcrun simctl spawn "$SIMULATOR_ID" launchctl list 2>/dev/null |
+      grep -Fq "UIKitApplication:${PACKAGE}["; then
+      app_seen=true
+      break
+    fi
+    sleep 1
+  done
+  [[ "$app_seen" == true ]] || fail 'integration runner 앱이 simulator에서 시작되지 않았습니다.'
+  xcrun simctl location "$SIMULATOR_ID" start \
+    --speed="$SPEED" \
+    "${LOCATION_OPTIONS[@]}" \
+    "$START_LAT,$START_LON" "$END_LAT,$END_LON"
+  set +e
+  wait "$TEST_PID"
+  test_status=$?
+  set -e
+  TEST_PID=""
+  exit "$test_status"
+fi
+
 xcrun simctl location "$SIMULATOR_ID" start \
   --speed="$SPEED" \
   "${LOCATION_OPTIONS[@]}" \
