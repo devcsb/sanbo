@@ -102,7 +102,7 @@ scripts/run_ios_simulator_smoke.sh
 
 2026-08-23에 Flutter 3.47.1 환경에서 다음 결과를 확인했다.
 
-- `bash scripts/run_quality_loop.sh --debug-apk`: 정적 분석, 전체 Flutter 테스트 332개, Android debug APK와 생성 파일 검사를 모두 통과
+- `bash scripts/run_quality_loop.sh --debug-apk`: 정적 분석, 전체 Flutter 테스트 333개, Android debug APK와 생성 파일 검사를 모두 통과
 - `bash scripts/run_native_platform_tests.sh`: Android native unit test와 iOS simulator XCTest 통과
 - `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_SCREEN_OFF=1 SANBO_ANDROID_CLEAR_DATA=1 bash scripts/run_android_emulator_smoke.sh`: Android emulator 실제 provider 경로 통과, 거리 25.14m, 유효 샘플 5개
 - `IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA bash scripts/run_ios_simulator_smoke.sh`: iOS simulator 실제 Core Location 경로 통과
@@ -112,6 +112,8 @@ scripts/run_ios_simulator_smoke.sh
 - 같은 완료 세션에서 제외 상태를 저장한 뒤 앱을 강제 종료하고 다시 열어 기록 화면과 상세 화면을 재진입했다. `10:05, 산책에서 제외됨, 제외 취소 가능` 상태와 DB의 제외 ID가 유지됐고, 재시작 후 `제외 취소`로 원래 통계를 복원했다.
 - 같은 커밋에서 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_SCREEN_OFF=1 SANBO_ANDROID_CLEAR_DATA=1` 조건을 다시 실행했다. Android emulator `emulator-5554`에서 알림 권한을 거부하고 화면을 잠근 뒤에도 실제 provider가 계속 동작했고, 거리 29.70m, 유효 샘플 5개로 세션 저장과 provider 해제를 확인했다.
 - 같은 커밋에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`에 실제 앱을 재설치하고 Core Location waypoint를 다시 주입했다. `integration_test/native_location_e2e_test.dart`가 실제 `GeolocatorLocationEngine` 경로에서 통과했다.
+- 같은 커밋에서 Android emulator의 알림 거부와 화면 잠금 smoke를 한 번 더 실행했다. 실제 provider가 계속 동작했고, 거리 62.22m, 유효 샘플 5개로 세션 저장과 종료 후 provider 해제를 다시 확인했다.
+- 같은 검증 루프에서 고속 경고와 차량 구간 제외 통합 테스트 66개, Android 기기 통합 테스트 2개, Android native unit test와 iOS simulator XCTest를 모두 통과했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
