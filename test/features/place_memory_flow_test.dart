@@ -26,13 +26,31 @@ class _FakePlaceLookup implements PlaceLookup {
   }
 }
 
-Future<void> _settle(WidgetTester tester) async {
-  await tester.pump();
-  await tester.runAsync(
-    () => Future<void>.delayed(const Duration(milliseconds: 40)),
-  );
-  await tester.pump();
-  await tester.pump(const Duration(milliseconds: 1));
+Future<void> _waitForDetail(
+  WidgetTester tester,
+  ProviderContainer container,
+  String sessionId, {
+  String? expectedPlaceName,
+}) async {
+  for (var attempt = 0; attempt < 200; attempt++) {
+    await tester.pump();
+    final state = container.read(sessionDetailProvider(sessionId));
+    final detail = state.valueOrNull;
+    final placeReady =
+        expectedPlaceName == null ||
+        (detail != null &&
+            detail.windows.every(
+              (window) => window.placeName == expectedPlaceName,
+            ));
+    if (detail != null && placeReady) return;
+    if (state.hasError) {
+      throw StateError('session detail provider failed: ${state.error}');
+    }
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 25)),
+    );
+  }
+  throw StateError('session detail provider did not settle');
 }
 
 void main() {
@@ -98,8 +116,7 @@ void main() {
         child: MaterialApp(home: SessionDetailScreen(sessionId: sessionId)),
       ),
     );
-    await _settle(tester);
-    await _settle(tester);
+    await _waitForDetail(tester, container, sessionId);
 
     await tester.scrollUntilVisible(
       find.text('한곳 체류'),
@@ -122,8 +139,12 @@ void main() {
     expect(find.text('서울특별시 중구 세종대로'), findsOneWidget);
 
     await tester.tap(find.text('장소 이름 저장'));
-    await _settle(tester);
-    await _settle(tester);
+    await _waitForDetail(
+      tester,
+      container,
+      sessionId,
+      expectedPlaceName: '세종대로 쉼터',
+    );
     await tester.scrollUntilVisible(
       find.text('세종대로 쉼터'),
       200,
