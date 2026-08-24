@@ -172,8 +172,11 @@ void main() {
   test('Android high-speed cold tap smoke remains checked in', () {
     final script = File('scripts/run_android_high_speed_cold_tap_smoke.sh');
     expect(script.existsSync(), isTrue);
-    expect(script.readAsStringSync(), contains('notification shade'));
-    expect(script.readAsStringSync(), contains('am crash'));
+    final source = script.readAsStringSync();
+    expect(source, contains('notification shade'));
+    expect(source, contains('am crash'));
+    expect(source, contains('SANBO_ANDROID_NOTIFICATION_PERMISSION'));
+    expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
   });
 
   test('iOS simulator smoke exposes the real high-speed provider scenario', () {

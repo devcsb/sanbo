@@ -99,6 +99,19 @@ SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
 화면을 끈 상태의 provider 지속성은 `SANBO_ANDROID_SCREEN_OFF=1`을 추가해
 에뮬레이터에서 반복할 수 있다.
 
+고속 경고가 알림 권한 거부 뒤에도 앱 내부에 남고 기록을 계속할 수 있는지 확인하려면
+다음 명령을 실행한다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
+  SANBO_ANDROID_NOTIFICATION_PERMISSION=deny \\
+  bash scripts/run_android_high_speed_cold_tap_smoke.sh
+```
+
+이 경로는 약 11m/s GPS를 백그라운드에서 주입한 뒤 시스템 high-speed 알림이
+게시되지 않는지 확인하고, 앱을 다시 전면에 올려 앱 내부 경고의 `계속 기록`과
+완료 저장을 검사한다.
+
 iOS simulator의 실제 Core Location 경로는 다음 명령으로 반복한다.
 
 ```bash
@@ -162,6 +175,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 날 무작위 seed `74291`로 전체 Flutter 테스트 338개를 다시 실행했고 analyze, Android debug APK, Android native unit test와 iOS simulator XCTest를 통과했다. Android emulator 통합 테스트 2개, 고속 cold tap 708.13m와 유효 샘플 10개, 알림 거부·화면 잠금 provider smoke 23.09m와 유효 샘플 5개를 재현했으며, iPhone 17 Pro simulator의 실제 Core Location 고속 시나리오도 통과했다.
 - 원격 CI run `32683623419`가 현재 HEAD `b932a247767370cca629ea94a4388509f3995cfd`에서 Flutter quality와 native platform tests 모두 성공했다.
 - 원격 CI run `32685707316`이 현재 HEAD `3cb99ce424477569e0aa4891edd67dcd2516509b`에서 Flutter quality와 native platform tests 모두 성공했다.
+- 2026-08-24에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny` 고속 cold tap smoke를 추가로 실행했다. 시스템 high-speed 알림은 게시되지 않았고 앱을 전면에 올린 뒤 앱 내부 `계속 기록`으로 복귀했으며, 완료 세션은 705.73m, 유효 샘플 10개였다. 종료 후 provider 요청도 해제됐다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
