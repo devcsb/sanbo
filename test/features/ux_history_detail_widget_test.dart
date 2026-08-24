@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
+import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/pipeline/segment_merger.dart';
@@ -520,6 +521,66 @@ void main() {
       );
     },
   );
+
+  testWidgets('a non-vehicle segment still offers manual exclusion', (
+    tester,
+  ) async {
+    late WalkRepository repo;
+    late CompletedRouteFixture fixture;
+    await tester.runAsync(() async {
+      repo = await openTestRepository();
+      fixture = await seedCompletedVehicleWalk(repo);
+      final windows = await repo.getWindows(fixture.session.id);
+      await repo.updateWindowUserLabel(
+        sessionId: fixture.session.id,
+        windowStart: windows.last.windowStart,
+        userLabel: ActivityLabel.walkSteady,
+        note: '실수로 포함된 이동',
+        confirmed: true,
+      );
+    });
+    addTearDown(() => tester.runAsync(repo.close));
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(detailApp(repo, fixture.session.id));
+    await settle(tester);
+    await settle(tester);
+    final windows = await tester.runAsync(
+      () => repo.getWindows(fixture.session.id),
+    );
+    final segments = SegmentMerger().merge(
+      windows!,
+      sessionId: fixture.session.id,
+      sessionStart: fixture.session.startedAt,
+      sessionEnd: fixture.session.endedAt,
+    );
+    final segment = segments.last;
+    final edit = find.byKey(
+      ValueKey('segment-edit-${segment.start.toIso8601String()}'),
+    );
+    final scrollable = find
+        .descendant(
+          of: find.byType(ListView).first,
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(edit, 300, scrollable: scrollable);
+    await tester.ensureVisible(edit);
+    await tester.pump();
+    await tester.tap(edit);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('산책에서 제외'), findsWidgets);
+    expect(find.text('잘못 포함된 이동을 산책 경로와 통계에서 제외합니다.'), findsWidgets);
+    await tester.tap(find.text('산책에서 제외').last);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(find.widgetWithText(FilledButton, '이 구간 제외'), findsOneWidget);
+  });
 
   testWidgets(
     'failed duplicate exclusion keeps the previous presentation and offers retry',

@@ -737,8 +737,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                   onTap: () => Navigator.pop(ctx, _SegmentAction.restore),
                 )
               else ...[
-                if (segment.label == ActivityLabel.vehicle)
-                  _excludeSegmentAction(ctx, segment),
+                _excludeSegmentAction(ctx, segment),
                 ListTile(
                   leading: const Icon(Icons.directions_walk_rounded),
                   title: const Text('활동 수정'),
