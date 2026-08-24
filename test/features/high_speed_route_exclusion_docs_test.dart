@@ -215,6 +215,18 @@ void main() {
     expect(install, greaterThan(terminate));
   });
 
+  test(
+    'iOS notification channel uses the implicit engine application messenger',
+    () {
+      final source = File('ios/Runner/AppDelegate.swift').readAsStringSync();
+      expect(source, contains('engineBridge.applicationRegistrar.messenger()'));
+      expect(
+        source,
+        isNot(contains('registrar(forPlugin: "SessionNotifications")')),
+      );
+    },
+  );
+
   test('platform manifests retain background recording prerequisites', () {
     final androidManifest = File(
       'android/app/src/main/AndroidManifest.xml',

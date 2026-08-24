@@ -60,12 +60,9 @@ final class NotificationTapBuffer {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
-    guard let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "SessionNotifications") else {
-      return
-    }
     let channel = FlutterMethodChannel(
       name: Self.methodChannelName,
-      binaryMessenger: registrar.messenger()
+      binaryMessenger: engineBridge.applicationRegistrar.messenger()
     )
     // The implicit engine can be recreated while the app remains alive.
     // Require a fresh Dart readiness acknowledgement for every messenger.
