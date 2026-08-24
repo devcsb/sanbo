@@ -28,6 +28,7 @@ class _FakeSessionNotifications implements SessionNotificationService {
   final events = <String>[];
   int cancelCalls = 0;
   int cancelAllCalls = 0;
+  int initializeCalls = 0;
   Completer<void>? cancelAllStarted;
   Completer<void>? cancelAllRelease;
   Completer<void>? cancelRelease;
@@ -57,7 +58,9 @@ class _FakeSessionNotifications implements SessionNotificationService {
   }
 
   @override
-  Future<void> initialize() async {}
+  Future<void> initialize() async {
+    initializeCalls++;
+  }
 
   @override
   Future<NotificationPermissionResult> requestPermission() async {
@@ -1042,6 +1045,17 @@ void main() {
           child: const SanboApp(),
         ),
       );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.detached);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      expect(notifications.initializeCalls, 1);
       router.go('/settings');
       await tester.pump();
       await tester.pump();
