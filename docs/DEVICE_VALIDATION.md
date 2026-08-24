@@ -203,6 +203,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 실행에서 completed 세션을 저장한 뒤 앱 프로세스를 강제 종료하고 다시 시작했다. 재시작 전후 completed 세션 수가 1개로 유지됐고 기록 화면이 다시 표시됐다.
 - 2026-08-24에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_TAP_MODE=warm SANBO_ANDROID_ROUTE_EXCLUSION=1` 고속 smoke를 실행했다. 실제 APK에서 차량 이동 구간을 열어 `차량 이동 구간 제외`를 실행한 뒤 DB의 exclusion 저장과 거리 감소를 확인했고, `제외 취소` 뒤 거리 750.88m, 유효 샘플 12개와 `route_exclusions` 0개로 복원됐으며 provider 요청도 해제됐다.
 - 같은 날 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_ROUTE_EXCLUSION=1` 조합을 다시 실행했다. 프로세스 종료 후 알림 탭으로 복구한 뒤 차량 구간 제외와 복원을 수행했고, 구간 길이에 따라 제외 후 잔여 거리가 0m가 아니어도 실제 baseline보다 감소하는지 검사하도록 smoke 기준을 보정했다. 최종 세션은 708.13m, 유효 샘플 9개였고 `route_exclusions` 0개와 provider 해제를 확인했다.
+- 같은 날 알림 거부와 화면 잠금 provider smoke의 `pipefail` 오탐 검사를 문자열 매칭으로 보정했다. Android emulator `emulator-5554`에서 같은 조건을 다시 실행해 실제 `HIGH_ACCURACY` provider 요청, 거리 68.51m, 유효 샘플 6개, 종료 후 provider 해제를 확인했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.

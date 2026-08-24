@@ -249,8 +249,8 @@ active_location=''
 active_provider=0
 for _ in 1 2 3 4 5 6; do
   active_location="$(location_providers)"
-  if echo "$active_location" | grep -q "$PACKAGE" &&
-    echo "$active_location" | grep -Eq 'service: ProviderRequest\[@'; then
+  if [[ "$active_location" == *"$PACKAGE"* &&
+    "$active_location" == *'ProviderRequest['* ]]; then
     active_provider=1
     break
   fi
@@ -280,7 +280,7 @@ PY
 stopped_provider=0
 for _ in 1 2 3 4 5 6; do
   stopped_location="$(location_providers)"
-  if ! echo "$stopped_location" | grep -q "$PACKAGE"; then
+  if [[ "$stopped_location" != *"$PACKAGE"* ]]; then
     stopped_provider=1
     break
   fi

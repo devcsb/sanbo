@@ -185,6 +185,16 @@ void main() {
     expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
   });
 
+  test('Android provider smoke avoids pipefail false positives', () {
+    final source = File(
+      'scripts/run_android_emulator_smoke.sh',
+    ).readAsStringSync();
+    expect(source, contains(r'[[ "$active_location" == *"$PACKAGE"*'));
+    expect(source, contains(r'[[ "$stopped_location" != *"$PACKAGE"* ]]'));
+    expect(source, isNot(contains(r'echo "$active_location" | grep -q')));
+    expect(source, isNot(contains(r'echo "$stopped_location" | grep -q')));
+  });
+
   test('iOS simulator smoke exposes the real high-speed provider scenario', () {
     final script = File('scripts/run_ios_simulator_smoke.sh');
     expect(script.existsSync(), isTrue);
@@ -196,7 +206,9 @@ void main() {
   });
 
   test('iOS simulator smoke terminates stale app before reinstalling', () {
-    final script = File('scripts/run_ios_simulator_smoke.sh').readAsStringSync();
+    final script = File(
+      'scripts/run_ios_simulator_smoke.sh',
+    ).readAsStringSync();
     final terminate = script.indexOf('xcrun simctl terminate');
     final install = script.indexOf('xcrun simctl install');
     expect(terminate, greaterThanOrEqualTo(0));
