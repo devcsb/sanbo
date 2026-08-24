@@ -211,6 +211,9 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - origin `main`과 CI run `32721540117`이 모두 커밋 `8cb8c2c4753465804d83d742caf12780e1638753`를 가리키며 Flutter quality와 native platform tests가 성공했다.
 - 2026-08-24에 iOS 알림 채널을 존재하지 않는 플러그인 registrar가 아니라 implicit engine의 application messenger에 연결하도록 수정했다. 회귀 테스트는 수정 전 RED, 수정 후 GREEN을 확인했고, 전체 Flutter 테스트 341개와 `scripts/run_quality_loop.sh --debug-apk`, Android native unit test와 iOS RunnerTests 5개, iPhone 17 Pro simulator의 실제 Core Location 고속 smoke를 다시 통과했다.
 - `d537ac4` 현재 HEAD에서 Android emulator `emulator-5554`의 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_ROUTE_EXCLUSION=1` smoke를 다시 실행해 cold tap 복구, 차량 구간 제외와 복원, 종료 후 provider 해제를 통과했다. 완료 세션은 거리 708.13m, 유효 샘플 10개였다. 같은 HEAD에서 알림 권한 거부와 화면 잠금 provider smoke는 거리 25.11m, 유효 샘플 5개로 통과했고, iPhone 17 Pro simulator의 실제 Core Location 고속 smoke도 1개 테스트로 통과했다.
+- `ac74048` 현재 HEAD에서 호환 SDK Flutter 3.47.1로 `scripts/run_quality_loop.sh --debug-apk`를 다시 실행해 PRD와 TRD 구조 검증, `flutter analyze`, 전체 Flutter 테스트 342개, Android debug APK와 whitespace 검사를 통과했다. 이어 `scripts/run_native_platform_tests.sh`에서 Android native unit test와 iOS RunnerTests 5개를 통과했다.
+- 같은 HEAD에서 Android emulator `emulator-5554`의 cold tap과 차량 구간 제외 및 복원 smoke를 다시 실행해 거리 708.1256m, 유효 샘플 10개를 확인했고, 알림 거부와 화면 잠금 provider smoke는 거리 21.3273m, 유효 샘플 5개로 통과했다. iPhone 17 Pro simulator의 실제 Core Location 고속 시나리오도 1개 테스트로 통과했다.
+- 원격 CI run `32728894929`가 `ac74048cedd726d45df7b6fffb92f53f28c42a3d`에서 Flutter quality와 native platform tests 모두 성공했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
