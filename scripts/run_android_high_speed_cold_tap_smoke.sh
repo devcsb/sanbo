@@ -9,6 +9,7 @@ ACTIVITY="${SANBO_ANDROID_ACTIVITY:-$PACKAGE/.MainActivity}"
 DEVICE_ID="${SANBO_ANDROID_DEVICE_ID:-}"
 NOTIFICATION_PERMISSION="${SANBO_ANDROID_NOTIFICATION_PERMISSION:-grant}"
 TAP_MODE="${SANBO_ANDROID_TAP_MODE:-cold}"
+ROUTE_EXCLUSION="${SANBO_ANDROID_ROUTE_EXCLUSION:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:--127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000500}"
@@ -154,6 +155,108 @@ wait_notification() {
   return 1
 }
 
+vehicle_edit_bounds() {
+  local target="${1:-vehicle}"
+  python3 - "$target" "$ui_xml" <<'PY'
+import re
+import sys
+import xml.etree.ElementTree as ET
+
+target, path = sys.argv[1:]
+root = ET.parse(path).getroot()
+
+def bounds(node):
+    match = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
+    return None if match is None else tuple(map(int, match.groups()))
+
+vehicle_rows = []
+for node in root.iter('node'):
+    description = node.attrib.get('content-desc', '')
+    value = bounds(node)
+    if value is None:
+        continue
+    if target == 'vehicle' and '차량 이동' in description:
+        vehicle_rows.append(value)
+    elif target == 'excluded' and '산책에서 제외됨' in description:
+        vehicle_rows.append(value)
+
+for node in root.iter('node'):
+    description = node.attrib.get('content-desc', '')
+    value = bounds(node)
+    if value is None or '구간 편집' not in description:
+        continue
+    _, top, _, bottom = value
+    if any(top < row_bottom and bottom > row_top for _, row_top, _, row_bottom in vehicle_rows):
+        left, top, right, bottom = value
+        print((left + right) // 2, (top + bottom) // 2)
+        raise SystemExit(0)
+raise SystemExit(1)
+PY
+}
+
+tap_vehicle_edit() {
+  local target="${1:-vehicle}"
+  local deadline=$((SECONDS + 30))
+  while (( SECONDS < deadline )); do
+    dump_ui || true
+    local coords=''
+    coords="$(vehicle_edit_bounds "$target")" || true
+    if [[ -n "$coords" ]]; then
+      read -r x y <<<"$coords"
+      adb shell input tap "$x" "$y"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+scroll_to_activity_flow() {
+  for _ in 1 2 3; do
+    dump_ui || true
+    if grep -Fq '구간 편집' "$ui_xml"; then
+      return 0
+    fi
+    adb shell input swipe 540 1900 540 600 700
+    sleep 1
+  done
+  dump_ui || true
+  grep -Fq '구간 편집' "$ui_xml"
+}
+
+run_route_exclusion() {
+  echo '[android-high-speed-cold-tap] route exclusion and restore'
+  tap_text $'기록\n탭 3개 중 2번째' 15 || fail '기록 탭을 찾지 못했습니다.'
+  tap_text '상세 보기' 15 || fail '최근 고속 세션 상세 화면을 찾지 못했습니다.'
+  scroll_to_activity_flow || fail '상세 화면의 활동 흐름을 찾지 못했습니다.'
+  tap_vehicle_edit || fail '차량 이동 구간 편집 버튼을 찾지 못했습니다.'
+  tap_text '산책에서 제외' 10 || fail '산책에서 제외 메뉴를 찾지 못했습니다.'
+  tap_text '차량 이동 구간 제외' 10 || fail '차량 이동 구간 제외 확인을 찾지 못했습니다.'
+  sleep 2
+  adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
+  read -r excluded_total exclusion_count <<<"$(
+    sqlite3 -separator ' ' "$db" \
+      'select total_distance_m, (select count(*) from route_exclusions) from sessions order by started_at desc limit 1;'
+  )"
+  [[ "$exclusion_count" -ge 1 ]] ||
+    fail '차량 이동 구간 제외 뒤 route exclusion이 저장되지 않았습니다.'
+  python3 - "$excluded_total" <<'PY'
+import sys
+
+if float(sys.argv[1]) >= 100:
+    raise SystemExit('차량 이동 구간 제외 뒤 산책 거리가 줄지 않았습니다.')
+PY
+  scroll_to_activity_flow || fail '제외 후 활동 흐름을 찾지 못했습니다.'
+  wait_text '산책에서 제외됨' 10 || fail '제외 상태가 화면에 표시되지 않았습니다.'
+  tap_vehicle_edit excluded || fail '제외된 차량 구간 편집 버튼을 찾지 못했습니다.'
+  tap_text '제외 취소' 10 || fail '제외 취소 메뉴를 찾지 못했습니다.'
+  sleep 2
+  scroll_to_activity_flow || fail '복원 후 활동 흐름을 찾지 못했습니다.'
+  if grep -Fq '산책에서 제외됨' "$ui_xml"; then
+    fail '제외 취소 뒤 제외 상태가 남아 있습니다.'
+  fi
+}
+
 echo '[android-high-speed-cold-tap] install and reset'
 flutter build apk --debug --target lib/main.dart >/dev/null
 apk='build/app/outputs/flutter-apk/app-debug.apk'
@@ -183,6 +286,10 @@ esac
 case "$TAP_MODE" in
   cold|warm) ;;
   *) fail "SANBO_ANDROID_TAP_MODE는 cold 또는 warm이어야 합니다: $TAP_MODE" ;;
+esac
+case "$ROUTE_EXCLUSION" in
+  0|1) ;;
+  *) fail "SANBO_ANDROID_ROUTE_EXCLUSION은 0 또는 1이어야 합니다: $ROUTE_EXCLUSION" ;;
 esac
 adb shell am force-stop "$PACKAGE"
 sleep 1
@@ -270,6 +377,9 @@ fi
 
 tap_text '산책 종료' 10 || fail '산책 종료 버튼을 찾지 못했습니다.'
 wait_text '산책 요약' 30 || fail '산책 요약 화면으로 전환되지 않았습니다.'
+if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
+  run_route_exclusion
+fi
 adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
 read -r status total_distance valid_samples <<<"$(
   sqlite3 -separator ' ' "$db" \
@@ -283,6 +393,18 @@ if float(sys.argv[1]) <= 100:
     raise SystemExit('저장된 고속 경로 거리가 100m를 넘지 않았습니다.')
 PY
 ((valid_samples >= 8)) || fail "유효 샘플 수가 8개 미만입니다: $valid_samples"
+
+if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
+  read -r exclusion_count <<<"$(sqlite3 "$db" 'select count(*) from route_exclusions;')"
+  [[ "$exclusion_count" == "0" ]] ||
+    fail "제외 취소 뒤 route exclusion이 남아 있습니다: $exclusion_count"
+  python3 - "$total_distance" <<'PY'
+import sys
+
+if float(sys.argv[1]) <= 100:
+    raise SystemExit('제외 취소 뒤 차량 구간이 복원되지 않았습니다.')
+PY
+fi
 
 provider_released=0
 for _ in $(seq 1 20); do
