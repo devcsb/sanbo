@@ -281,6 +281,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 2026-08-25 최신 `main`에서 `SANBO_ANDROID_TAP_MODE=warm SANBO_ANDROID_TAP_ACTION=continue SANBO_ANDROID_NOTIFICATION_PERMISSION=grant`를 다시 실행했다. 프로세스를 유지한 warm tap 뒤 `계속 기록`으로 복귀했고 972.6537m, 유효 샘플 14개와 종료 후 provider 해제를 확인했다.
 - 같은 최신 실행에서 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_TAP_ACTION=stop SANBO_ANDROID_NOTIFICATION_PERMISSION=deny`를 실행했다. 시스템 알림 없이 앱 내부 고속 경고에서 `기록 종료`를 선택했고 970.3767m, 유효 샘플 13개의 completed 세션과 종료 후 provider 해제를 확인했다.
 - 2026-08-25에 iOS scene manifest의 종료 상태 알림 탭 경로를 보강했다. `SceneDelegate`의 `connectionOptions.notificationResponse`를 AppDelegate의 readiness 버퍼로 전달하고, payload 검증 회귀 테스트를 추가했다. Android native unit test와 iOS RunnerTests 7개, iOS simulator의 실제 Core Location 고속 E2E와 fresh process notification channel probe를 다시 통과했다.
+- 같은 날 현재 HEAD에서 Android emulator `emulator-5554`의 cold tap, `기록 종료`, 차량 구간 제외, 강제 종료 뒤 제외 상태 유지와 복원을 다시 실행했다. 최종 세션은 970.3855m, 유효 샘플 13개였고 종료 후 provider 요청은 없었다. iPhone 17 Pro simulator에서는 실제 앱을 백그라운드로 보낸 뒤 약 11m/s waypoint를 주입해 시스템 알림 센터에 `산책 기록을 계속할까요?`와 고속 이동 본문이 게시되는 것을 확인했다. simulator 접근성 입력으로 알림 행을 탭해 앱 재실행까지 판정하는 경로는 안정적으로 동작하지 않아 iOS cold tap 물리 판정은 올리지 않았다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
