@@ -16,6 +16,8 @@ BASE_LON="${SANBO_ANDROID_BASE_LON:--127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000500}"
 POINT_COUNT="${SANBO_ANDROID_HIGH_SPEED_POINTS:-18}"
 POINT_INTERVAL_S="${SANBO_ANDROID_HIGH_SPEED_INTERVAL_S:-4}"
+PREBUILT_APK="${SANBO_ANDROID_APK:-}"
+SKIP_DB_ASSERTIONS="${SANBO_ANDROID_SKIP_DB_ASSERTIONS:-0}"
 
 fail() {
   echo "[android-high-speed-cold-tap] FAIL: $1" >&2
@@ -57,6 +59,17 @@ fi
 [[ -n "$DEVICE_ID" ]] || fail '사용 가능한 Android 대상이 없습니다.'
 printf '%s\n' "${available_devices[@]}" | grep -Fxq "$DEVICE_ID" ||
   fail "Android 대상이 연결되지 않았습니다: $DEVICE_ID"
+case "$SKIP_DB_ASSERTIONS" in
+  0|1) ;;
+  *) fail "SANBO_ANDROID_SKIP_DB_ASSERTIONS는 0 또는 1이어야 합니다: $SKIP_DB_ASSERTIONS" ;;
+esac
+if [[ "$SKIP_DB_ASSERTIONS" == "1" && -z "$PREBUILT_APK" ]]; then
+  fail 'SANBO_ANDROID_SKIP_DB_ASSERTIONS=1은 SANBO_ANDROID_APK와 함께 사용해야 합니다.'
+fi
+if [[ "$SKIP_DB_ASSERTIONS" == "1" &&
+  ("$ROUTE_EXCLUSION" == "1" || "$RESTART_PERSISTENCE" == "1") ]]; then
+  fail 'release APK의 DB 비디버그 경로에서는 route exclusion과 restart persistence를 검사할 수 없습니다.'
+fi
 
 adb() {
   "$ADB_BIN" -s "$DEVICE_ID" "$@"
@@ -300,8 +313,12 @@ PY
 }
 
 echo '[android-high-speed-cold-tap] install and reset'
-flutter build apk --debug --target lib/main.dart >/dev/null
-apk='build/app/outputs/flutter-apk/app-debug.apk'
+if [[ -n "$PREBUILT_APK" ]]; then
+  apk="$PREBUILT_APK"
+else
+  flutter build apk --debug --target lib/main.dart >/dev/null
+  apk='build/app/outputs/flutter-apk/app-debug.apk'
+fi
 [[ -f "$apk" ]] || fail "APK가 생성되지 않았습니다: $apk"
 adb shell input keyevent 224 || true
 adb shell input keyevent 3 || true
@@ -423,39 +440,44 @@ fi
 
 tap_text '산책 종료' 10 || fail '산책 종료 버튼을 찾지 못했습니다.'
 wait_text '산책 요약' 30 || fail '산책 요약 화면으로 전환되지 않았습니다.'
-if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
-  run_route_exclusion
-fi
-adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
-read -r status total_distance valid_samples <<<"$(
-  sqlite3 -separator ' ' "$db" \
-    'select status, total_distance_m, valid_sample_count from sessions order by started_at desc limit 1;'
-)"
-[[ "$status" == 'completed' ]] || fail "최근 세션 상태가 completed가 아닙니다: $status"
-python3 - "$total_distance" <<'PY'
+if [[ "$SKIP_DB_ASSERTIONS" == "1" ]]; then
+  total_distance='UI 확인'
+  valid_samples='UI 확인'
+else
+  if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
+    run_route_exclusion
+  fi
+  adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
+  read -r status total_distance valid_samples <<<"$(
+    sqlite3 -separator ' ' "$db" \
+      'select status, total_distance_m, valid_sample_count from sessions order by started_at desc limit 1;'
+  )"
+  [[ "$status" == 'completed' ]] || fail "최근 세션 상태가 completed가 아닙니다: $status"
+  python3 - "$total_distance" <<'PY'
 import sys
 
 if float(sys.argv[1]) <= 100:
     raise SystemExit('저장된 고속 경로 거리가 100m를 넘지 않았습니다.')
 PY
-((valid_samples >= 8)) || fail "유효 샘플 수가 8개 미만입니다: $valid_samples"
+  ((valid_samples >= 8)) || fail "유효 샘플 수가 8개 미만입니다: $valid_samples"
 
-if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
-  read -r exclusion_count remaining_excluded_windows <<<"$(
-    sqlite3 -separator ' ' "$db" \
-      'select (select count(*) from route_exclusions), (select count(*) from minute_windows where user_exclusion_id is not null);'
-  )"
-  [[ "$exclusion_count" == "0" ]] ||
-    fail "제외 취소 뒤 route exclusion이 남아 있습니다: $exclusion_count"
-  [[ "$remaining_excluded_windows" == "0" ]] ||
-    fail "제외 취소 뒤 제외된 분 기록이 남아 있습니다: $remaining_excluded_windows"
-  python3 - "$route_baseline_total" "$total_distance" <<'PY'
+  if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
+    read -r exclusion_count remaining_excluded_windows <<<"$(
+      sqlite3 -separator ' ' "$db" \
+        'select (select count(*) from route_exclusions), (select count(*) from minute_windows where user_exclusion_id is not null);'
+    )"
+    [[ "$exclusion_count" == "0" ]] ||
+      fail "제외 취소 뒤 route exclusion이 남아 있습니다: $exclusion_count"
+    [[ "$remaining_excluded_windows" == "0" ]] ||
+      fail "제외 취소 뒤 제외된 분 기록이 남아 있습니다: $remaining_excluded_windows"
+    python3 - "$route_baseline_total" "$total_distance" <<'PY'
 import sys
 
 baseline, restored = map(float, sys.argv[1:])
 if abs(restored - baseline) > max(1.0, baseline * 0.02):
     raise SystemExit('제외 취소 뒤 차량 구간이 원래 통계로 복원되지 않았습니다.')
 PY
+  fi
 fi
 
 provider_released=0

@@ -185,21 +185,24 @@ void main() {
     expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
   });
 
-  test('Android route exclusion smoke can verify persistence after restart', () {
-    final source = File(
-      'scripts/run_android_high_speed_cold_tap_smoke.sh',
-    ).readAsStringSync();
-    expect(source, contains('SANBO_ANDROID_RESTART_PERSISTENCE'));
-    expect(source, contains('excluded state after app restart'));
-    expect(source, contains('am force-stop'));
-    expect(source, contains('산책에서 제외됨'));
-    expect(source, contains('제외 취소'));
-    expect(source, contains('persisted_total'));
-    expect(source, contains('user_exclusion_id'));
-    expect(source, contains('재시작 뒤 제외된 분 기록이 유지되지 않았습니다'));
-    final docs = File('docs/DEVICE_VALIDATION.md').readAsStringSync();
-    expect(docs, contains('SANBO_ANDROID_RESTART_PERSISTENCE=1'));
-  });
+  test(
+    'Android route exclusion smoke can verify persistence after restart',
+    () {
+      final source = File(
+        'scripts/run_android_high_speed_cold_tap_smoke.sh',
+      ).readAsStringSync();
+      expect(source, contains('SANBO_ANDROID_RESTART_PERSISTENCE'));
+      expect(source, contains('excluded state after app restart'));
+      expect(source, contains('am force-stop'));
+      expect(source, contains('산책에서 제외됨'));
+      expect(source, contains('제외 취소'));
+      expect(source, contains('persisted_total'));
+      expect(source, contains('user_exclusion_id'));
+      expect(source, contains('재시작 뒤 제외된 분 기록이 유지되지 않았습니다'));
+      final docs = File('docs/DEVICE_VALIDATION.md').readAsStringSync();
+      expect(docs, contains('SANBO_ANDROID_RESTART_PERSISTENCE=1'));
+    },
+  );
 
   test('Android provider smoke avoids pipefail false positives', () {
     final source = File(
@@ -209,6 +212,20 @@ void main() {
     expect(source, contains(r'[[ "$stopped_location" != *"$PACKAGE"* ]]'));
     expect(source, isNot(contains(r'echo "$active_location" | grep -q')));
     expect(source, isNot(contains(r'echo "$stopped_location" | grep -q')));
+  });
+
+  test('Android provider smokes can install a prebuilt release APK', () {
+    final provider = File(
+      'scripts/run_android_emulator_smoke.sh',
+    ).readAsStringSync();
+    final highSpeed = File(
+      'scripts/run_android_high_speed_cold_tap_smoke.sh',
+    ).readAsStringSync();
+    for (final source in [provider, highSpeed]) {
+      expect(source, contains('SANBO_ANDROID_APK'));
+      expect(source, contains(r'[[ -f "$apk" ]]'));
+      expect(source, contains('SANBO_ANDROID_SKIP_DB_ASSERTIONS'));
+    }
   });
 
   test('iOS simulator smoke exposes the real high-speed provider scenario', () {
@@ -232,13 +249,13 @@ void main() {
   });
 
   test('iOS simulator smoke probes the native channel after provider E2E', () {
-    final script = File('scripts/run_ios_simulator_smoke.sh').readAsStringSync();
+    final script = File(
+      'scripts/run_ios_simulator_smoke.sh',
+    ).readAsStringSync();
     final provider = script.indexOf(
       r'flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID"',
     );
-    final channel = script.indexOf(
-      'native_notification_channel_e2e_test.dart',
-    );
+    final channel = script.indexOf('native_notification_channel_e2e_test.dart');
     final freshProcess = script.lastIndexOf(
       r'xcrun simctl terminate "$SIMULATOR_ID" "$PACKAGE"',
       channel,

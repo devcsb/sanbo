@@ -83,6 +83,21 @@ scripts/run_android_emulator_smoke.sh
 `SANBO_ANDROID_CLEAR_DATA=1`을 명시한다. 에뮬레이터 결과는 아래 물리 기기 행의
 통과 판정으로 승격하지 않는다.
 
+운영 release APK를 다시 빌드하지 않고 provider와 UI 종료 흐름만 확인하려면
+prebuilt APK 경로를 넘긴다. release APK는 Android 보안 정책상 `run-as`로 앱 DB를
+읽을 수 없으므로 `SANBO_ANDROID_SKIP_DB_ASSERTIONS=1`을 함께 지정한다. DB 집계,
+route exclusion과 재시작 persistence는 debuggable debug APK smoke에서 별도로
+검사한다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \
+SANBO_ANDROID_APK=build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+SANBO_ANDROID_SKIP_DB_ASSERTIONS=1 \
+SANBO_ANDROID_NOTIFICATION_PERMISSION=deny \
+SANBO_ANDROID_SCREEN_OFF=1 \
+  bash scripts/run_android_emulator_smoke.sh
+```
+
 고속 경고와 killed-app cold tap을 같은 순서로 반복하려면 다음 명령을 사용한다.
 
 ```bash
@@ -191,6 +206,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - Android emulator에서 같은 고속 경로를 앱 프로세스가 백그라운드에 있는 상태로 재현한 뒤 `am crash com.sanbo.sanbo`로 프로세스를 종료했다. 시스템 알림의 `산책 기록을 계속할까요?` 행을 실제 notification shade에서 탭하자 새 프로세스가 cold start되고 `기록 종료 확인 중` 복구 화면과 `기록 종료`, `계속 기록` 버튼이 표시됐다. `계속 기록` 뒤 알림이 사라졌고, `산책 종료`로 617.24m, 유효 샘플 10개의 completed 세션을 저장했으며 `dumpsys location`의 앱 provider 요청은 `OFF`가 됐다.
 - `scripts/run_android_high_speed_cold_tap_smoke.sh`를 Android emulator `emulator-5554`에서 처음부터 다시 실행했다. fused provider의 fix coalescing을 고려한 마지막 GPS fix 대기 뒤 알림을 게시했고, 프로세스 종료와 notification shade 탭, 복구와 종료 저장을 자동으로 통과했다. 완료 세션은 708.13m, 유효 샘플 10개였고 종료 뒤 현재 location provider 요청은 없었다.
 - 같은 커밋에서 Android emulator `emulator-5554`의 고속 cold tap smoke를 다시 실행해 708.13m, 유효 샘플 10개와 종료 후 provider 요청 없음이 재현됐다. 이어 알림 권한 거부와 화면 잠금 조건의 provider smoke도 다시 통과했고 22.74m, 유효 샘플 5개가 저장됐다.
+- 2026-08-25에 임시 로컬 서명으로 만든 arm64 release APK를 Android emulator `emulator-5554`에 설치해 운영 바이너리 경로를 확인했다. 알림 권한 거부와 화면 잠금 provider smoke는 UI 거리 0.06km, 세션 요약 전환과 종료 후 provider 해제를 통과했고, release high-speed cold tap은 백그라운드 GPS, `am crash`, notification shade 탭, 복구 화면, 계속 기록과 종료 후 provider 해제를 통과했다. release APK는 비디버그라 `run-as` DB 검사를 생략했으며, 이 임시 인증서는 production signing 검증에 사용하지 않았다.
 - 같은 커밋에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 Core Location smoke를 다시 실행해 실제 provider E2E 1개가 통과했다.
 - 2026-08-24에 Android emulator 통합 테스트 2개와 고속 cold tap을 다시 실행해 통과했다. cold tap 완료 세션은 708.13m, 유효 샘플 10개였고 종료 뒤 provider 요청이 없었다. 같은 날 iPhone 17 Pro simulator의 실제 Core Location 고속 시나리오와 차량 구간 제외 및 복원을 다시 실행해 1개 테스트가 통과했다.
 - iOS는 CocoaPods가 아닌 Flutter 생성 Swift Package를 사용한다. 현재 `permission_handler_apple`의 생성 package가 `NSLocationWhenInUseUsageDescription`과 `NSLocationAlwaysAndWhenInUseUsageDescription`을 읽어 위치와 Always 권한 코드를 활성화하는 구성을 확인했고, iOS native XCTest와 실제 provider smoke를 통과했다.

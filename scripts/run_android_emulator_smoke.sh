@@ -13,6 +13,8 @@ SCREEN_OFF="${SANBO_ANDROID_SCREEN_OFF:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:-127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000100}"
+PREBUILT_APK="${SANBO_ANDROID_APK:-}"
+SKIP_DB_ASSERTIONS="${SANBO_ANDROID_SKIP_DB_ASSERTIONS:-0}"
 
 step() {
   printf '\n[android-smoke] %s\n' "$1"
@@ -69,6 +71,13 @@ fi
 [[ -n "$DEVICE_ID" ]] || fail '사용 가능한 Android 대상이 없습니다.'
 if ! printf '%s\n' "${available_devices[@]}" | grep -Fxq "$DEVICE_ID"; then
   fail "Android 대상이 연결되지 않았습니다: $DEVICE_ID"
+fi
+case "$SKIP_DB_ASSERTIONS" in
+  0|1) ;;
+  *) fail "SANBO_ANDROID_SKIP_DB_ASSERTIONS는 0 또는 1이어야 합니다: $SKIP_DB_ASSERTIONS" ;;
+esac
+if [[ "$SKIP_DB_ASSERTIONS" == "1" && -z "$PREBUILT_APK" ]]; then
+  fail 'SANBO_ANDROID_SKIP_DB_ASSERTIONS=1은 SANBO_ANDROID_APK와 함께 사용해야 합니다.'
 fi
 
 adb() {
@@ -149,14 +158,21 @@ wait_desc() {
   return 1
 }
 
-step "debug APK 빌드"
-flutter build apk --debug --target lib/main.dart
-apk="build/app/outputs/flutter-apk/app-debug.apk"
+if [[ -n "$PREBUILT_APK" ]]; then
+  step "지정 APK 사용"
+  apk="$PREBUILT_APK"
+else
+  step "debug APK 빌드"
+  flutter build apk --debug --target lib/main.dart
+  apk="build/app/outputs/flutter-apk/app-debug.apk"
+fi
 [[ -f "$apk" ]] || fail "APK가 생성되지 않았습니다: $apk"
 asset_strings="$tmp_dir/kernel.strings"
-unzip -p "$apk" assets/flutter_assets/kernel_blob.bin 2>/dev/null |
-  strings >"$asset_strings"
-grep -q 'lib/main.dart' "$asset_strings" || fail 'APK target이 lib/main.dart가 아닙니다.'
+if [[ -z "$PREBUILT_APK" ]]; then
+  unzip -p "$apk" assets/flutter_assets/kernel_blob.bin 2>/dev/null |
+    strings >"$asset_strings"
+  grep -q 'lib/main.dart' "$asset_strings" || fail 'APK target이 lib/main.dart가 아닙니다.'
+fi
 
 step "APK 설치와 권한 준비"
 adb install -r "$apk" >/dev/null
@@ -262,20 +278,27 @@ step "세션 종료와 저장 확인"
 tap_desc '산책 종료' 10 || fail '산책 종료 버튼을 찾지 못했습니다.'
 wait_desc '산책 요약' 30 || fail '산책 요약 화면으로 전환되지 않았습니다.'
 
-db="$tmp_dir/sanbo.db"
-adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
-read -r status total_distance valid_samples <<<"$(
-  sqlite3 -separator ' ' "$db" \
-    'select status, total_distance_m, valid_sample_count from sessions order by started_at desc limit 1;'
-)"
-[[ "$status" == 'completed' ]] || fail "최근 세션 상태가 completed가 아닙니다: $status"
-python3 - "$total_distance" <<'PY'
+if [[ "$SKIP_DB_ASSERTIONS" == "1" ]]; then
+  # Production release APKs are not debuggable, so Android rejects run-as.
+  # UI completion and provider release remain observable in this mode.
+  total_distance="${distance_km}km (UI)"
+  valid_samples='UI 확인'
+else
+  db="$tmp_dir/sanbo.db"
+  adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
+  read -r status total_distance valid_samples <<<"$(
+    sqlite3 -separator ' ' "$db" \
+      'select status, total_distance_m, valid_sample_count from sessions order by started_at desc limit 1;'
+  )"
+  [[ "$status" == 'completed' ]] || fail "최근 세션 상태가 completed가 아닙니다: $status"
+  python3 - "$total_distance" <<'PY'
 import sys
 
 if float(sys.argv[1]) <= 15:
     raise SystemExit('저장된 거리가 15m를 넘지 않았습니다.')
 PY
-((valid_samples >= 4)) || fail "유효 샘플 수가 4개 미만입니다: $valid_samples"
+  ((valid_samples >= 4)) || fail "유효 샘플 수가 4개 미만입니다: $valid_samples"
+fi
 
 stopped_provider=0
 for _ in 1 2 3 4 5 6; do
