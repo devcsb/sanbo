@@ -134,6 +134,60 @@ class _ErroringLocationEngine implements LocationEngine {
   Future<void> dispose() async => _samples.close();
 }
 
+class _RestartableErroringLocationEngine implements LocationEngine {
+  StreamController<LocationSample> _samples = _newSamples();
+  TrackingMode _mode = TrackingMode.balanced;
+  bool running = false;
+  int startCalls = 0;
+
+  static StreamController<LocationSample> _newSamples() {
+    return StreamController<LocationSample>.broadcast();
+  }
+
+  Future<void> closeStream() async {
+    final current = _samples;
+    _samples = _newSamples();
+    await current.close();
+  }
+
+  @override
+  Stream<LocationSample> get samples => _samples.stream;
+
+  @override
+  TrackingMode get mode => _mode;
+
+  @override
+  Future<void> setMode(TrackingMode mode) async => _mode = mode;
+
+  @override
+  Future<void> setAppForeground(bool foreground) async {}
+
+  @override
+  Future<LocationPermissionState> checkPermission() async =>
+      LocationPermissionState.granted;
+
+  @override
+  Future<LocationPermissionState> requestPermission() async =>
+      LocationPermissionState.granted;
+
+  @override
+  Future<bool> openSystemSettings() async => true;
+
+  @override
+  Future<void> start() async {
+    running = true;
+    startCalls++;
+  }
+
+  @override
+  Future<void> stop() async {
+    running = false;
+  }
+
+  @override
+  Future<void> dispose() async => _samples.close();
+}
+
 class _DelayedInsertRepository extends WalkRepository {
   _DelayedInsertRepository(super.db);
 
@@ -316,6 +370,37 @@ void main() {
     expect(controller.state.needsRecovery, isTrue);
     expect(engine.stopCalls, 1);
   });
+
+  test(
+    'stream recovery can be resumed after the provider is re-armed',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = _RestartableErroringLocationEngine();
+      addTearDown(engine.dispose);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+
+      await controller.start();
+      await engine.closeStream();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.state.needsRecovery, isTrue);
+
+      await controller.resumeRecoveredSession();
+
+      expect(controller.state.isTracking, isTrue);
+      expect(controller.state.needsRecovery, isFalse);
+      expect(engine.startCalls, 2);
+      await controller.stop();
+    },
+  );
 
   test('stream ending during engine startup stays recoverable', () async {
     final repo = await openTestRepository();
