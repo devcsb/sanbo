@@ -204,6 +204,11 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 2026-08-24에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_TAP_MODE=warm SANBO_ANDROID_ROUTE_EXCLUSION=1` 고속 smoke를 실행했다. 실제 APK에서 차량 이동 구간을 열어 `차량 이동 구간 제외`를 실행한 뒤 DB의 exclusion 저장과 거리 감소를 확인했고, `제외 취소` 뒤 거리 750.88m, 유효 샘플 12개와 `route_exclusions` 0개로 복원됐으며 provider 요청도 해제됐다.
 - 같은 날 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_ROUTE_EXCLUSION=1` 조합을 다시 실행했다. 프로세스 종료 후 알림 탭으로 복구한 뒤 차량 구간 제외와 복원을 수행했고, 구간 길이에 따라 제외 후 잔여 거리가 0m가 아니어도 실제 baseline보다 감소하는지 검사하도록 smoke 기준을 보정했다. 최종 세션은 708.13m, 유효 샘플 9개였고 `route_exclusions` 0개와 provider 해제를 확인했다.
 - 같은 날 알림 거부와 화면 잠금 provider smoke의 `pipefail` 오탐 검사를 문자열 매칭으로 보정했다. Android emulator `emulator-5554`에서 같은 조건을 다시 실행해 실제 `HIGH_ACCURACY` provider 요청, 거리 68.51m, 유효 샘플 6개, 종료 후 provider 해제를 확인했다.
+- 2026-08-24 커밋 `8cb8c2c`에서 앱 lifecycle의 `inactive → hidden → paused → detached → resumed` 전환을 기존 SanboApp 회귀 경로에 연결해 알림 readiness 재초기화 호출을 검증했고, 해당 테스트를 3회 반복해 모두 통과했다.
+- 같은 커밋에서 `scripts/run_quality_loop.sh --debug-apk`를 실행해 PRD/TRD 구조 검증, `flutter analyze`, Flutter 테스트 340개, Android debug APK와 whitespace 검사를 모두 통과했다. `scripts/run_native_platform_tests.sh`도 Android native unit test와 iOS RunnerTests 5개를 통과했다.
+- 같은 커밋에서 Android emulator `emulator-5554`의 일반 provider smoke는 거리 32.73m와 유효 샘플 5개, 알림 거부 및 화면 잠금 smoke는 거리 65.56m와 유효 샘플 7개로 통과했다. 두 경로 모두 종료 뒤 location provider 요청이 해제됐다.
+- 같은 커밋에서 Android emulator 고속 cold tap과 차량 구간 제외 및 복원을 재실행해 거리 617.24m와 유효 샘플 10개를 저장하고 exclusion 복원과 provider 해제를 확인했다. iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 실제 Core Location 고속 시나리오도 1개 테스트로 통과했다.
+- origin `main`과 CI run `32721540117`이 모두 커밋 `8cb8c2c4753465804d83d742caf12780e1638753`를 가리키며 Flutter quality와 native platform tests가 성공했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
