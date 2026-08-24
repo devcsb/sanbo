@@ -227,7 +227,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 HEAD에서 Android emulator `emulator-5554`의 cold tap과 차량 구간 제외 및 복원 smoke를 다시 실행해 거리 708.1256m, 유효 샘플 10개를 확인했고, 알림 거부와 화면 잠금 provider smoke는 거리 21.3273m, 유효 샘플 5개로 통과했다. iPhone 17 Pro simulator의 실제 Core Location 고속 시나리오도 1개 테스트로 통과했다.
 - 원격 CI run `32728894929`가 `ac74048cedd726d45df7b6fffb92f53f28c42a3d`에서 Flutter quality와 native platform tests 모두 성공했다.
 - 2026-08-24에 iOS simulator smoke 순서를 실제 Core Location provider E2E 뒤 native `MethodChannel`의 `cancel` 응답 확인으로 고정했다. channel probe는 `MissingPluginException`을 숨기지 않고 직접 검증하며, provider 테스트가 남긴 Runner가 다음 위치 trace를 방해하지 않도록 마지막에 fresh process로 실행한다. 이 변경을 포함한 전체 Flutter 테스트 343개, Android native unit test와 iOS RunnerTests 5개, iOS high-speed provider E2E와 channel probe를 다시 통과했다.
-- 2026-08-25에 커밋 `d870b2b`의 Android high-speed cold tap과 `SANBO_ANDROID_ROUTE_EXCLUSION=1 SANBO_ANDROID_RESTART_PERSISTENCE=1` 조합을 다시 실행했다. 강제 종료와 알림 복구 뒤 차량 구간을 제외하고 앱을 재시작했으며, 재시작 후 화면 상태, 총거리 감소, `route_exclusions` 행과 `minute_windows.user_exclusion_id` 파생 행을 확인했다. `제외 취소` 뒤 제외 행과 파생 참조가 모두 0으로 돌아왔고, 최종 세션은 708.1256m, 유효 샘플 10개, provider 요청 없음으로 통과했다.
+- 2026-08-25에 커밋 `0f99b7b`의 Android high-speed cold tap과 `SANBO_ANDROID_ROUTE_EXCLUSION=1 SANBO_ANDROID_RESTART_PERSISTENCE=1` 조합을 다시 실행했다. 강제 종료와 알림 복구 뒤 차량 구간을 제외하고 앱을 재시작했으며, 재시작 후 화면 상태, 총거리 감소, `route_exclusions` 행과 `minute_windows.user_exclusion_id` 파생 행을 확인했다. `제외 취소` 뒤 제외 행과 파생 참조가 모두 0으로 돌아왔고, 최종 세션은 708.1256m, 유효 샘플 10개, provider 요청 없음으로 통과했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
