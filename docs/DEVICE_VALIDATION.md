@@ -187,6 +187,8 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 원격 CI run `32685707316`이 현재 HEAD `3cb99ce424477569e0aa4891edd67dcd2516509b`에서 Flutter quality와 native platform tests 모두 성공했다.
 - 2026-08-24에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny` 고속 cold tap smoke를 추가로 실행했다. 시스템 high-speed 알림은 게시되지 않았고 앱을 전면에 올린 뒤 앱 내부 `계속 기록`으로 복귀했으며, 완료 세션은 705.73m, 유효 샘플 10개였다. 종료 후 provider 요청도 해제됐다.
 - 2026-08-24에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_TAP_MODE=warm` 고속 smoke를 실행했다. 앱 프로세스를 유지한 상태에서 notification shade를 탭해 홈의 고속 경고로 복귀했고, `계속 기록`, 세션 완료와 provider 해제를 확인했다. 완료 세션은 707.94m, 유효 샘플 11개였다.
+- 2026-08-24에 Android emulator `emulator-5554`에서 알림 권한 거부와 화면 잠금 provider smoke를 다시 실행했다. 거리 24.62m, 유효 샘플 5개가 저장됐고 종료 후 provider 해제를 확인했다.
+- 같은 실행에서 completed 세션을 저장한 뒤 앱 프로세스를 강제 종료하고 다시 시작했다. 재시작 전후 completed 세션 수가 1개로 유지됐고 기록 화면이 다시 표시됐다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
