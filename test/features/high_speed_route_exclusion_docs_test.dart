@@ -215,6 +215,24 @@ void main() {
     expect(install, greaterThan(terminate));
   });
 
+  test('iOS simulator smoke probes the native channel after provider E2E', () {
+    final script = File('scripts/run_ios_simulator_smoke.sh').readAsStringSync();
+    final provider = script.indexOf(
+      r'flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID"',
+    );
+    final channel = script.indexOf(
+      'native_notification_channel_e2e_test.dart',
+    );
+    final freshProcess = script.lastIndexOf(
+      r'xcrun simctl terminate "$SIMULATOR_ID" "$PACKAGE"',
+      channel,
+    );
+
+    expect(provider, greaterThanOrEqualTo(0));
+    expect(channel, greaterThan(provider));
+    expect(freshProcess, greaterThan(provider));
+  });
+
   test(
     'iOS notification channel uses the implicit engine application messenger',
     () {

@@ -81,4 +81,13 @@ xcrun simctl location "$SIMULATOR_ID" start \
   "$START_LAT,$START_LON" "$END_LAT,$END_LON"
 flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID"
 
+# The provider integration test may leave Runner alive. Probe the notification
+# channel last from a fresh process so its lifecycle cannot affect location
+# waypoint injection in the preceding scenario.
+xcrun simctl terminate "$SIMULATOR_ID" "$PACKAGE" 2>/dev/null || true
+step "실제 iOS notification channel 응답 확인"
+flutter test --no-pub \
+  integration_test/native_notification_channel_e2e_test.dart \
+  -d "$SIMULATOR_ID"
+
 printf '\n[ios-smoke] PASS simulator=%s\n' "$SIMULATOR_ID"

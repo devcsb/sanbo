@@ -214,6 +214,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - `ac74048` 현재 HEAD에서 호환 SDK Flutter 3.47.1로 `scripts/run_quality_loop.sh --debug-apk`를 다시 실행해 PRD와 TRD 구조 검증, `flutter analyze`, 전체 Flutter 테스트 342개, Android debug APK와 whitespace 검사를 통과했다. 이어 `scripts/run_native_platform_tests.sh`에서 Android native unit test와 iOS RunnerTests 5개를 통과했다.
 - 같은 HEAD에서 Android emulator `emulator-5554`의 cold tap과 차량 구간 제외 및 복원 smoke를 다시 실행해 거리 708.1256m, 유효 샘플 10개를 확인했고, 알림 거부와 화면 잠금 provider smoke는 거리 21.3273m, 유효 샘플 5개로 통과했다. iPhone 17 Pro simulator의 실제 Core Location 고속 시나리오도 1개 테스트로 통과했다.
 - 원격 CI run `32728894929`가 `ac74048cedd726d45df7b6fffb92f53f28c42a3d`에서 Flutter quality와 native platform tests 모두 성공했다.
+- 2026-08-24에 iOS simulator smoke 순서를 실제 Core Location provider E2E 뒤 native `MethodChannel`의 `cancel` 응답 확인으로 고정했다. channel probe는 `MissingPluginException`을 숨기지 않고 직접 검증하며, provider 테스트가 남긴 Runner가 다음 위치 trace를 방해하지 않도록 마지막에 fresh process로 실행한다. 이 변경을 포함한 전체 Flutter 테스트 343개, Android native unit test와 iOS RunnerTests 5개, iOS high-speed provider E2E와 channel probe를 다시 통과했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
