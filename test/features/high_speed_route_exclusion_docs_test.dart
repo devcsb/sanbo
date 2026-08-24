@@ -175,6 +175,8 @@ void main() {
     final source = script.readAsStringSync();
     expect(source, contains('notification shade'));
     expect(source, contains('am crash'));
+    expect(source, contains('SANBO_ANDROID_TAP_MODE'));
+    expect(source, contains("cold|warm"));
     expect(source, contains('SANBO_ANDROID_NOTIFICATION_PERMISSION'));
     expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
   });

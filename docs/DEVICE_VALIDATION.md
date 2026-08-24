@@ -94,6 +94,16 @@ SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
 `am crash` 뒤 notification shade 탭, 복구 경고, 계속 기록, 완료 저장과 provider
 해제를 한 번에 확인한다. emulator 결과는 물리 기기 행의 통과 판정으로 승격하지 않는다.
 
+앱 프로세스를 유지한 상태에서 notification shade 탭을 반복하려면 다음처럼
+`SANBO_ANDROID_TAP_MODE=warm`을 추가한다. 기본값 `cold`는 프로세스를 강제 종료한
+뒤 복구하는 경로다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
+  SANBO_ANDROID_TAP_MODE=warm \\
+  bash scripts/run_android_high_speed_cold_tap_smoke.sh
+```
+
 알림 권한 거부 경로는 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny`를 추가한다.
 기본값은 `grant`이며, 어느 모드에서도 위치 기록과 세션 저장 결과를 확인한다.
 화면을 끈 상태의 provider 지속성은 `SANBO_ANDROID_SCREEN_OFF=1`을 추가해
@@ -176,6 +186,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 원격 CI run `32683623419`가 현재 HEAD `b932a247767370cca629ea94a4388509f3995cfd`에서 Flutter quality와 native platform tests 모두 성공했다.
 - 원격 CI run `32685707316`이 현재 HEAD `3cb99ce424477569e0aa4891edd67dcd2516509b`에서 Flutter quality와 native platform tests 모두 성공했다.
 - 2026-08-24에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny` 고속 cold tap smoke를 추가로 실행했다. 시스템 high-speed 알림은 게시되지 않았고 앱을 전면에 올린 뒤 앱 내부 `계속 기록`으로 복귀했으며, 완료 세션은 705.73m, 유효 샘플 10개였다. 종료 후 provider 요청도 해제됐다.
+- 2026-08-24에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_TAP_MODE=warm` 고속 smoke를 실행했다. 앱 프로세스를 유지한 상태에서 notification shade를 탭해 홈의 고속 경고로 복귀했고, `계속 기록`, 세션 완료와 provider 해제를 확인했다. 완료 세션은 707.94m, 유효 샘플 11개였다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.

@@ -8,6 +8,7 @@ PACKAGE="${SANBO_ANDROID_PACKAGE:-com.sanbo.sanbo}"
 ACTIVITY="${SANBO_ANDROID_ACTIVITY:-$PACKAGE/.MainActivity}"
 DEVICE_ID="${SANBO_ANDROID_DEVICE_ID:-}"
 NOTIFICATION_PERMISSION="${SANBO_ANDROID_NOTIFICATION_PERMISSION:-grant}"
+TAP_MODE="${SANBO_ANDROID_TAP_MODE:-cold}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:--127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000500}"
@@ -179,6 +180,10 @@ case "$NOTIFICATION_PERMISSION" in
     fail "SANBO_ANDROID_NOTIFICATION_PERMISSION은 grant 또는 deny여야 합니다: $NOTIFICATION_PERMISSION"
     ;;
 esac
+case "$TAP_MODE" in
+  cold|warm) ;;
+  *) fail "SANBO_ANDROID_TAP_MODE는 cold 또는 warm이어야 합니다: $TAP_MODE" ;;
+esac
 adb shell am force-stop "$PACKAGE"
 sleep 1
 adb shell am start -W -n "$ACTIVITY" >/dev/null
@@ -218,13 +223,19 @@ sleep 15
 if [[ "$NOTIFICATION_PERMISSION" == "grant" ]]; then
   wait_notification || fail '백그라운드 high-speed 알림이 게시되지 않았습니다.'
 
-  echo '[android-high-speed-cold-tap] crash process and tap notification shade'
-  adb shell am crash "$PACKAGE" || true
-  sleep 2
-  [[ -z "$(adb shell pidof "$PACKAGE" | tr -d '\r')" ]] || fail '프로세스가 종료되지 않았습니다.'
+  if [[ "$TAP_MODE" == "cold" ]]; then
+    echo '[android-high-speed-cold-tap] crash process and tap notification shade'
+    adb shell am crash "$PACKAGE" || true
+    sleep 2
+    [[ -z "$(adb shell pidof "$PACKAGE" | tr -d '\r')" ]] || fail '프로세스가 종료되지 않았습니다.'
+  else
+    echo '[android-high-speed-cold-tap] warm process and tap notification shade'
+    [[ -n "$(adb shell pidof "$PACKAGE" | tr -d '\r')" ]] ||
+      fail 'warm tap 전에 앱 프로세스가 실행 중이 아닙니다.'
+  fi
   adb shell dumpsys notification --noredact |
     grep -Fq 'android.title=String (산책 기록을 계속할까요?)' ||
-    fail '프로세스 종료 뒤 알림이 유지되지 않았습니다.'
+    fail 'high-speed 알림이 유지되지 않았습니다.'
   adb shell input keyevent 224
   for attempt in 1 2 3; do
     adb shell input swipe 500 20 500 1200 600
@@ -233,7 +244,11 @@ if [[ "$NOTIFICATION_PERMISSION" == "grant" ]]; then
     grep -Fq '산책 기록을 계속할까요?' "$ui_xml" && break
   done
   tap_text '산책 기록을 계속할까요?' 10 || fail 'notification shade에서 high-speed 알림을 탭하지 못했습니다.'
-  wait_text '기록 종료 확인 중' 30 || fail 'cold tap 복구 경고가 표시되지 않았습니다.'
+  if [[ "$TAP_MODE" == "cold" ]]; then
+    wait_text '기록 종료 확인 중' 30 || fail 'cold tap 복구 경고가 표시되지 않았습니다.'
+  else
+    wait_text '산책 기록을 계속할까요?' 30 || fail 'warm tap 뒤 high-speed 경고가 표시되지 않았습니다.'
+  fi
   tap_text '계속 기록' 10 || fail '계속 기록 버튼을 찾지 못했습니다.'
   wait_text '기록 중' 20 || fail '계속 기록 뒤 tracking 상태가 아닙니다.'
   if adb shell dumpsys notification --noredact |
