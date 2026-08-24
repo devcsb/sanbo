@@ -9,6 +9,7 @@ ACTIVITY="${SANBO_ANDROID_ACTIVITY:-$PACKAGE/.MainActivity}"
 DEVICE_ID="${SANBO_ANDROID_DEVICE_ID:-}"
 NOTIFICATION_PERMISSION="${SANBO_ANDROID_NOTIFICATION_PERMISSION:-grant}"
 TAP_MODE="${SANBO_ANDROID_TAP_MODE:-cold}"
+TAP_ACTION="${SANBO_ANDROID_TAP_ACTION:-continue}"
 ROUTE_EXCLUSION="${SANBO_ANDROID_ROUTE_EXCLUSION:-0}"
 RESTART_PERSISTENCE="${SANBO_ANDROID_RESTART_PERSISTENCE:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
@@ -104,26 +105,32 @@ def node_bounds(node):
     match = re.fullmatch(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', node.attrib.get('bounds', ''))
     return None if match is None else tuple(map(int, match.groups()))
 
-def visit(node, ancestors):
+def is_enabled(node):
+    return node.attrib.get('enabled') != 'false'
+
+def visit(node, ancestors, exact_only):
     text = node.attrib.get('text', '')
     description = node.attrib.get('content-desc', '')
-    if needle in text or needle in description:
+    exact_match = needle == text or needle == description
+    partial_match = needle in text or needle in description
+    if (exact_match if exact_only else partial_match):
         for ancestor in reversed(ancestors + [node]):
-            if ancestor.attrib.get('clickable') == 'true':
+            if ancestor.attrib.get('clickable') == 'true' and is_enabled(ancestor):
                 value = node_bounds(ancestor)
                 if value is not None:
                     x1, y1, x2, y2 = value
                     print((x1 + x2) // 2, (y1 + y2) // 2)
                     raise SystemExit(0)
         value = node_bounds(node)
-        if value is not None:
+        if value is not None and is_enabled(node):
             x1, y1, x2, y2 = value
             print((x1 + x2) // 2, (y1 + y2) // 2)
             raise SystemExit(0)
     for child in node:
-        visit(child, ancestors + [node])
+        visit(child, ancestors + [node], exact_only)
 
-visit(root, [])
+visit(root, [], True)
+visit(root, [], False)
 raise SystemExit(1)
 PY
 }
@@ -349,6 +356,10 @@ case "$TAP_MODE" in
   cold|warm) ;;
   *) fail "SANBO_ANDROID_TAP_MODE는 cold 또는 warm이어야 합니다: $TAP_MODE" ;;
 esac
+case "$TAP_ACTION" in
+  continue|stop) ;;
+  *) fail "SANBO_ANDROID_TAP_ACTION은 continue 또는 stop이어야 합니다: $TAP_ACTION" ;;
+esac
 case "$ROUTE_EXCLUSION" in
   0|1) ;;
   *) fail "SANBO_ANDROID_ROUTE_EXCLUSION은 0 또는 1이어야 합니다: $ROUTE_EXCLUSION" ;;
@@ -393,6 +404,7 @@ final_index=$((POINT_COUNT + 1))
 final_longitude="$(awk -v base="$BASE_LON" -v step="$STEP_LON" -v point_number="$final_index" 'BEGIN {printf "%.6f", base + step * point_number}')"
 adb emu geo fix "$final_longitude" "$BASE_LAT" >/dev/null
 sleep 15
+stopped_from_warning=0
 if [[ "$NOTIFICATION_PERMISSION" == "grant" ]]; then
   wait_notification || fail '백그라운드 high-speed 알림이 게시되지 않았습니다.'
 
@@ -422,11 +434,18 @@ if [[ "$NOTIFICATION_PERMISSION" == "grant" ]]; then
   else
     wait_text '산책 기록을 계속할까요?' 30 || fail 'warm tap 뒤 high-speed 경고가 표시되지 않았습니다.'
   fi
-  tap_text '계속 기록' 10 || fail '계속 기록 버튼을 찾지 못했습니다.'
-  wait_text '기록 중' 20 || fail '계속 기록 뒤 tracking 상태가 아닙니다.'
-  if adb shell dumpsys notification --noredact |
-    grep -Fq 'android.title=String (산책 기록을 계속할까요?)'; then
-    fail '계속 기록 뒤 high-speed 알림이 취소되지 않았습니다.'
+  if [[ "$TAP_ACTION" == "stop" ]]; then
+    echo '[android-high-speed-cold-tap] stop from high-speed warning'
+    tap_text '기록 종료' 10 || fail '고속 경고에서 기록 종료 버튼을 찾지 못했습니다.'
+    wait_text '산책 요약' 30 || fail '고속 경고의 기록 종료 뒤 요약 화면으로 전환되지 않았습니다.'
+    stopped_from_warning=1
+  else
+    tap_text '계속 기록' 10 || fail '계속 기록 버튼을 찾지 못했습니다.'
+    wait_text '기록 중' 20 || fail '계속 기록 뒤 tracking 상태가 아닙니다.'
+    if adb shell dumpsys notification --noredact |
+      grep -Fq 'android.title=String (산책 기록을 계속할까요?)'; then
+      fail '계속 기록 뒤 high-speed 알림이 취소되지 않았습니다.'
+    fi
   fi
 else
   if adb shell dumpsys notification --noredact |
@@ -437,12 +456,21 @@ else
   adb shell am start -W -n "$ACTIVITY" >/dev/null
   wait_text '산책 기록을 계속할까요?' 20 ||
     fail '알림 권한 거부 뒤 앱 내부 high-speed 경고가 표시되지 않았습니다.'
-  tap_text '계속 기록' 10 || fail '알림 권한 거부 뒤 계속 기록 버튼을 찾지 못했습니다.'
-  wait_text '기록 중' 20 || fail '알림 권한 거부 뒤 계속 기록 상태가 아닙니다.'
+  if [[ "$TAP_ACTION" == "stop" ]]; then
+    echo '[android-high-speed-cold-tap] stop from foreground warning without notification'
+    tap_text '기록 종료' 10 || fail '알림 거부 고속 경고에서 기록 종료 버튼을 찾지 못했습니다.'
+    wait_text '산책 요약' 30 || fail '알림 거부 고속 경고의 기록 종료 뒤 요약 화면으로 전환되지 않았습니다.'
+    stopped_from_warning=1
+  else
+    tap_text '계속 기록' 10 || fail '알림 권한 거부 뒤 계속 기록 버튼을 찾지 못했습니다.'
+    wait_text '기록 중' 20 || fail '알림 권한 거부 뒤 계속 기록 상태가 아닙니다.'
+  fi
 fi
 
-tap_text '산책 종료' 10 || fail '산책 종료 버튼을 찾지 못했습니다.'
-wait_text '산책 요약' 30 || fail '산책 요약 화면으로 전환되지 않았습니다.'
+if [[ "$stopped_from_warning" == "0" ]]; then
+  tap_text '산책 종료' 10 || fail '산책 종료 버튼을 찾지 못했습니다.'
+  wait_text '산책 요약' 30 || fail '산책 요약 화면으로 전환되지 않았습니다.'
+fi
 if [[ "$SKIP_DB_ASSERTIONS" == "1" ]]; then
   total_distance='UI 확인'
   valid_samples='UI 확인'

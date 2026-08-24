@@ -185,6 +185,20 @@ void main() {
     expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
   });
 
+  test('Android high-speed cold tap smoke can exercise the stop action', () {
+    final source = File(
+      'scripts/run_android_high_speed_cold_tap_smoke.sh',
+    ).readAsStringSync();
+    expect(source, contains('SANBO_ANDROID_TAP_ACTION'));
+    expect(source, contains('continue|stop'));
+    expect(source, contains('stopped_from_warning'));
+    expect(source, contains('기록 종료'));
+    expect(source, contains("attrib.get('enabled') != 'false'"));
+    expect(source, contains('needle == text or needle == description'));
+    final docs = File('docs/DEVICE_VALIDATION.md').readAsStringSync();
+    expect(docs, contains('SANBO_ANDROID_TAP_ACTION=stop'));
+  });
+
   test(
     'Android route exclusion smoke can verify persistence after restart',
     () {

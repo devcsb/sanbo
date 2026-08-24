@@ -119,6 +119,18 @@ SANBO_ANDROID_TAP_MODE=warm \\
   bash scripts/run_android_high_speed_cold_tap_smoke.sh
 ```
 
+알림에서 바로 `기록 종료`를 선택하는 실제 경로까지 확인하려면
+`SANBO_ANDROID_TAP_ACTION=stop`을 추가한다. 기본값 `continue`는 경고를 닫고
+계속 기록한 뒤 별도로 산책을 종료한다. `stop`은 notification shade 탭 뒤
+복구 경고의 `기록 종료`를 눌러 요약 화면과 provider 해제를 검사한다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
+  SANBO_ANDROID_TAP_MODE=cold \\
+  SANBO_ANDROID_TAP_ACTION=stop \\
+  bash scripts/run_android_high_speed_cold_tap_smoke.sh
+```
+
 완료된 고속 세션에서 차량 이동 구간을 실제 APK UI로 제외하고 복원하는 경로까지
 자동 확인하려면 `SANBO_ANDROID_ROUTE_EXCLUSION=1`을 추가한다. 제외 직후 DB의
 `route_exclusions` 행과 거리 감소를 확인하고, `제외 취소` 뒤 원래 통계와 경로가
@@ -263,6 +275,9 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - Xcode simulator가 병렬 테스트 clone을 `SBMainWorkspace Busy`로 거부하는 환경 변동을 재현했다. native XCTest wrapper에 병렬 실행을 끈 설정을 고정한 뒤 Android native unit test와 iOS RunnerTests 5개가 다시 통과했다.
 - 2026-08-25에 최신 `main`에서 Android emulator `emulator-5554`의 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_ROUTE_EXCLUSION=1 SANBO_ANDROID_RESTART_PERSISTENCE=1` smoke를 다시 실행했다. cold tap 복구, 차량 이동 구간 제외, 강제 종료 뒤 제외 상태 유지, `제외 취소` 복원과 provider 해제를 확인했으며 최종 세션은 거리 1016.7435m, 유효 샘플 14개였다.
 - 같은 실행 루프에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 `SANBO_IOS_SCENARIO=high_speed` 실제 Core Location 경고 E2E와 fresh process native notification channel probe를 통과했다. Xcode 캐시 포화로 한 번 중단된 뒤 Sanbo 전용 DerivedData와 `/tmp` 캐시를 정리하고 재실행했으며, simulator 결과는 물리 iPhone 판정으로 승격하지 않는다.
+- 2026-08-25에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_TAP_ACTION=stop`을 추가한 cold tap smoke를 실행했다. 첫 실행에서 UI 탐색기가 비활성 버튼과 부분 일치 상태 문구를 잘못 눌러 실패했고, 정확한 content-desc 우선 매칭과 `enabled=true` 확인을 보강한 뒤 다시 실행해 notification shade 탭, `기록 종료`, completed 세션 970.3855m와 유효 샘플 13개, 종료 후 provider 해제를 통과했다.
+- 같은 보강 뒤 `SANBO_ANDROID_TAP_MODE=warm SANBO_ANDROID_TAP_ACTION=stop SANBO_ANDROID_ROUTE_EXCLUSION=1 SANBO_ANDROID_RESTART_PERSISTENCE=1`을 실행했다. warm tap 뒤 즉시 종료, 차량 구간 제외와 복원, 강제 종료 뒤 제외 상태 유지까지 통과했고 최종 세션은 1015.5173m, 유효 샘플 14개, provider 요청 없음이었다.
+- 같은 날 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_TAP_ACTION=stop`도 실행했다. 시스템 알림 없이 앱 내부 고속 경고에서 `기록 종료`를 선택해 970.3855m, 유효 샘플 13개의 completed 세션을 저장하고 provider 해제를 확인했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
