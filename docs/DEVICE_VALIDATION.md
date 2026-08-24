@@ -145,6 +145,8 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - `scripts/run_android_high_speed_cold_tap_smoke.sh`를 Android emulator `emulator-5554`에서 처음부터 다시 실행했다. fused provider의 fix coalescing을 고려한 마지막 GPS fix 대기 뒤 알림을 게시했고, 프로세스 종료와 notification shade 탭, 복구와 종료 저장을 자동으로 통과했다. 완료 세션은 708.13m, 유효 샘플 10개였고 종료 뒤 현재 location provider 요청은 없었다.
 - 같은 커밋에서 Android emulator `emulator-5554`의 고속 cold tap smoke를 다시 실행해 708.13m, 유효 샘플 10개와 종료 후 provider 요청 없음이 재현됐다. 이어 알림 권한 거부와 화면 잠금 조건의 provider smoke도 다시 통과했고 22.74m, 유효 샘플 5개가 저장됐다.
 - 같은 커밋에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 Core Location smoke를 다시 실행해 실제 provider E2E 1개가 통과했다.
+- 2026-08-24에 Android emulator 통합 테스트 2개와 고속 cold tap을 다시 실행해 통과했다. cold tap 완료 세션은 708.13m, 유효 샘플 10개였고 종료 뒤 provider 요청이 없었다. 같은 날 iPhone 17 Pro simulator의 실제 Core Location 고속 시나리오와 차량 구간 제외 및 복원을 다시 실행해 1개 테스트가 통과했다.
+- iOS는 CocoaPods가 아닌 Flutter 생성 Swift Package를 사용한다. 현재 `permission_handler_apple`의 생성 package가 `NSLocationWhenInUseUsageDescription`과 `NSLocationAlwaysAndWhenInUseUsageDescription`을 읽어 위치와 Always 권한 코드를 활성화하는 구성을 확인했고, iOS native XCTest와 실제 provider smoke를 통과했다.
 - 커밋 `54988e7`에서 iPhone 17 Pro simulator의 실제 Core Location 고속 세션을 완료한 뒤 차량 구간을 제외하고 복원하는 경로까지 통과했다. 제외 전후 세션 집계와 경로가 복원되는지 저장소에서 확인했다.
 - Android emulator에서 기록 중 위치 권한을 철회한 뒤 앱을 다시 열었다. `미완료 기록` 복구 카드가 나타났고, 위치 권한을 다시 허용해 `이어서 기록`을 선택한 뒤 세션을 완료했다. DB에는 `completed`, 거리 11.33m, 유효 샘플 3개가 저장됐다.
 - 알림 channel이 늦게 등록되는 cold-start를 가정한 handshake 회귀 테스트를 추가하고, 전체 Flutter 테스트 338개, analyze, Android debug APK와 native Android unit test, iOS simulator XCTest를 다시 통과했다.
