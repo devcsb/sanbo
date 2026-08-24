@@ -161,6 +161,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 날 Android emulator `emulator-5554`에서 알림 권한 거부와 화면 잠금 조건의 실제 provider smoke를 다시 실행해 거리 61.27m, 유효 샘플 5개를 저장하고 종료 후 provider 해제를 확인했다. iPhone 17 Pro simulator에서는 `SANBO_IOS_SCENARIO=high_speed`를 다시 실행해 실제 Core Location 고속 경고와 세션 완료까지 통과했다.
 - 같은 날 무작위 seed `74291`로 전체 Flutter 테스트 338개를 다시 실행했고 analyze, Android debug APK, Android native unit test와 iOS simulator XCTest를 통과했다. Android emulator 통합 테스트 2개, 고속 cold tap 708.13m와 유효 샘플 10개, 알림 거부·화면 잠금 provider smoke 23.09m와 유효 샘플 5개를 재현했으며, iPhone 17 Pro simulator의 실제 Core Location 고속 시나리오도 통과했다.
 - 원격 CI run `32683623419`가 현재 HEAD `b932a247767370cca629ea94a4388509f3995cfd`에서 Flutter quality와 native platform tests 모두 성공했다.
+- 원격 CI run `32685707316`이 현재 HEAD `3cb99ce424477569e0aa4891edd67dcd2516509b`에서 Flutter quality와 native platform tests 모두 성공했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
