@@ -278,6 +278,8 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 2026-08-25에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_TAP_ACTION=stop`을 추가한 cold tap smoke를 실행했다. 첫 실행에서 UI 탐색기가 비활성 버튼과 부분 일치 상태 문구를 잘못 눌러 실패했고, 정확한 content-desc 우선 매칭과 `enabled=true` 확인을 보강한 뒤 다시 실행해 notification shade 탭, `기록 종료`, completed 세션 970.3855m와 유효 샘플 13개, 종료 후 provider 해제를 통과했다.
 - 같은 보강 뒤 `SANBO_ANDROID_TAP_MODE=warm SANBO_ANDROID_TAP_ACTION=stop SANBO_ANDROID_ROUTE_EXCLUSION=1 SANBO_ANDROID_RESTART_PERSISTENCE=1`을 실행했다. warm tap 뒤 즉시 종료, 차량 구간 제외와 복원, 강제 종료 뒤 제외 상태 유지까지 통과했고 최종 세션은 1015.5173m, 유효 샘플 14개, provider 요청 없음이었다.
 - 같은 날 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_TAP_ACTION=stop`도 실행했다. 시스템 알림 없이 앱 내부 고속 경고에서 `기록 종료`를 선택해 970.3855m, 유효 샘플 13개의 completed 세션을 저장하고 provider 해제를 확인했다.
+- 2026-08-25 최신 `main`에서 `SANBO_ANDROID_TAP_MODE=warm SANBO_ANDROID_TAP_ACTION=continue SANBO_ANDROID_NOTIFICATION_PERMISSION=grant`를 다시 실행했다. 프로세스를 유지한 warm tap 뒤 `계속 기록`으로 복귀했고 972.6537m, 유효 샘플 14개와 종료 후 provider 해제를 확인했다.
+- 같은 최신 실행에서 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_TAP_ACTION=stop SANBO_ANDROID_NOTIFICATION_PERMISSION=deny`를 실행했다. 시스템 알림 없이 앱 내부 고속 경고에서 `기록 종료`를 선택했고 970.3767m, 유효 샘플 13개의 completed 세션과 종료 후 provider 해제를 확인했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
