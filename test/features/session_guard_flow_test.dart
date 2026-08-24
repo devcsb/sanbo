@@ -28,6 +28,7 @@ class _FakeSessionNotifications implements SessionNotificationService {
   final events = <String>[];
   int cancelCalls = 0;
   int cancelAllCalls = 0;
+  Completer<void>? cancelAllStarted;
   Completer<void>? cancelAllRelease;
   Completer<void>? cancelRelease;
   Completer<void>? showRelease;
@@ -49,6 +50,8 @@ class _FakeSessionNotifications implements SessionNotificationService {
   @override
   Future<void> cancelAllWarnings() async {
     cancelAllCalls++;
+    final started = cancelAllStarted;
+    if (started != null && !started.isCompleted) started.complete();
     final release = cancelAllRelease;
     if (release != null) await release.future;
   }
@@ -142,14 +145,12 @@ void main() {
         step: const Duration(seconds: 10),
       ),
     );
+    notifications.cancelAllStarted = Completer<void>();
     notifications.cancelAllRelease = Completer<void>();
 
     var completed = false;
     final stopping = controller.stop().whenComplete(() => completed = true);
-    for (var attempt = 0; attempt < 100; attempt++) {
-      if (notifications.cancelAllCalls > 0) break;
-      await Future<void>.delayed(const Duration(milliseconds: 1));
-    }
+    await notifications.cancelAllStarted!.future;
     expect(notifications.cancelAllCalls, greaterThan(0));
     await Future<void>.delayed(const Duration(milliseconds: 200));
     expect(completed, isFalse);
