@@ -262,6 +262,68 @@ void main() {
   );
 
   test(
+    'multiple exclusions can remove every route segment and restore the full walk',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      expect(fixture.segments, hasLength(2));
+      final beforeSamples = _sampleSnapshot(
+        await repo.getSamples(fixture.session.id),
+      );
+      final before = await repo.getSession(fixture.session.id);
+
+      final first = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: fixture.segments.first,
+      );
+      final second = await repo.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: fixture.segments.last,
+      );
+
+      final excludedSession = await repo.getSession(fixture.session.id);
+      expect(excludedSession!.totalDistanceM, closeTo(0, 0.001));
+      expect(excludedSession.validSampleCount, 1);
+      expect(await repo.getRouteExclusions(fixture.session.id), hasLength(2));
+      expect(
+        (await repo.getWindows(
+          fixture.session.id,
+        )).every((window) => window.userExclusionId != null),
+        isTrue,
+      );
+      expect(
+        _sampleSnapshot(await repo.getSamples(fixture.session.id)),
+        beforeSamples,
+      );
+
+      await repo.restoreRouteExclusion(
+        sessionId: fixture.session.id,
+        exclusionId: first.id,
+      );
+      await repo.restoreRouteExclusion(
+        sessionId: fixture.session.id,
+        exclusionId: second.id,
+      );
+
+      final restored = await repo.getSession(fixture.session.id);
+      expect(await repo.getRouteExclusions(fixture.session.id), isEmpty);
+      expect(restored!.totalDistanceM, closeTo(before!.totalDistanceM!, 0.001));
+      expect(restored.validSampleCount, before.validSampleCount);
+      expect(
+        (await repo.getWindows(
+          fixture.session.id,
+        )).every((window) => window.userExclusionId == null),
+        isTrue,
+      );
+      expect(
+        _sampleSnapshot(await repo.getSamples(fixture.session.id)),
+        beforeSamples,
+      );
+    },
+  );
+
+  test(
     'route exclusion rejects active, unknown, empty, and overlapping selections',
     () async {
       final repo = await openTestRepository();

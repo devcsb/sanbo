@@ -14,7 +14,10 @@ RESTART_PERSISTENCE="${SANBO_ANDROID_RESTART_PERSISTENCE:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:--127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000500}"
-POINT_COUNT="${SANBO_ANDROID_HIGH_SPEED_POINTS:-18}"
+# Fused providers can coalesce the first mock fix with a cached location. Keep
+# enough waypoints after that possible continuity reset to guarantee at least
+# the 60-second high-speed guard window even when a few fixes are dropped.
+POINT_COUNT="${SANBO_ANDROID_HIGH_SPEED_POINTS:-24}"
 POINT_INTERVAL_S="${SANBO_ANDROID_HIGH_SPEED_INTERVAL_S:-4}"
 PREBUILT_APK="${SANBO_ANDROID_APK:-}"
 SKIP_DB_ASSERTIONS="${SANBO_ANDROID_SKIP_DB_ASSERTIONS:-0}"
