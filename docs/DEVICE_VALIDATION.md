@@ -161,6 +161,16 @@ SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
 게시되지 않는지 확인하고, 앱을 다시 전면에 올려 앱 내부 경고의 `계속 기록`과
 완료 저장을 검사한다.
 
+기록 중 위치 권한을 철회한 뒤 앱을 다시 시작하고 권한을 복구하는 경로는 다음처럼
+자동 확인할 수 있다. 기존 active session을 새로 만들지 않고 `미완료 기록` 카드에서
+`이어서 기록`을 선택하는지 검사한다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \
+  SANBO_ANDROID_REVOKE_LOCATION_AFTER_START=1 \
+  bash scripts/run_android_emulator_smoke.sh
+```
+
 iOS simulator의 실제 Core Location 경로는 다음 명령으로 반복한다.
 
 ```bash
@@ -249,6 +259,8 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 실행에서 Android emulator의 알림 거부와 화면 잠금 provider smoke를 통과했다. 실제 위치 수집과 세션 저장을 확인했고 최종 세션은 19.0037m, 유효 샘플 4개였으며 종료 후 provider 요청은 없었다.
 - 같은 실행에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 실제 Core Location walk와 `SANBO_IOS_SCENARIO=high_speed`를 각각 통과했다. native notification channel `cancel` probe도 통과했다.
 - 현재 호스트에는 Android emulator `emulator-5554`만 연결되어 있고 iOS `devicectl`은 연결된 기기를 반환하지 않았다. 따라서 아래 물리 기기 매트릭스는 계속 `미판정`으로 둔다.
+- 같은 검증 루프에서 `SANBO_ANDROID_CLEAR_DATA=1 SANBO_ANDROID_REVOKE_LOCATION_AFTER_START=1` Android emulator smoke를 실행했다. 기록 중 위치 권한을 철회하고 프로세스를 재시작한 뒤 권한을 복구해 `미완료 기록`의 `이어서 기록`으로 돌아왔으며, 최종 세션은 34.5412m, 유효 샘플 5개, 종료 후 provider 요청 없음으로 통과했다.
+- Xcode simulator가 병렬 테스트 clone을 `SBMainWorkspace Busy`로 거부하는 환경 변동을 재현했다. native XCTest wrapper에 병렬 실행을 끈 설정을 고정한 뒤 Android native unit test와 iOS RunnerTests 5개가 다시 통과했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.

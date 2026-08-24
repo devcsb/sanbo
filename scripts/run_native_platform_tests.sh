@@ -77,6 +77,7 @@ xcodebuild test \
   -derivedDataPath /tmp/sanbo-ios-native-tests \
   FLUTTER_TARGET=lib/main.dart \
   CODE_SIGNING_ALLOWED=NO \
+  -parallel-testing-enabled NO \
   -quiet
 
 printf '\n[native] PASS\n'

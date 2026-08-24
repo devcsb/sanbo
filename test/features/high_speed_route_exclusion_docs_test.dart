@@ -214,6 +214,17 @@ void main() {
     expect(source, isNot(contains(r'echo "$stopped_location" | grep -q')));
   });
 
+  test('Android provider smoke can verify location permission recovery', () {
+    final source = File(
+      'scripts/run_android_emulator_smoke.sh',
+    ).readAsStringSync();
+    expect(source, contains('SANBO_ANDROID_REVOKE_LOCATION_AFTER_START'));
+    expect(source, contains('기록 중 위치 권한 철회와 cold recovery'));
+    expect(source, contains('미완료 기록'));
+    expect(source, contains('이어서 기록'));
+    expect(source, contains('위치 권한 철회 뒤 미완료 기록 복구 카드'));
+  });
+
   test('Android provider smokes can install a prebuilt release APK', () {
     final provider = File(
       'scripts/run_android_emulator_smoke.sh',
@@ -236,6 +247,13 @@ void main() {
       script.readAsStringSync(),
       contains('native_high_speed_e2e_test.dart'),
     );
+  });
+
+  test('native XCTest wrapper avoids simulator clone contention', () {
+    final source = File(
+      'scripts/run_native_platform_tests.sh',
+    ).readAsStringSync();
+    expect(source, contains('-parallel-testing-enabled NO'));
   });
 
   test('iOS simulator smoke terminates stale app before reinstalling', () {

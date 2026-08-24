@@ -10,6 +10,7 @@ DEVICE_ID="${SANBO_ANDROID_DEVICE_ID:-}"
 CLEAR_DATA="${SANBO_ANDROID_CLEAR_DATA:-0}"
 NOTIFICATION_PERMISSION="${SANBO_ANDROID_NOTIFICATION_PERMISSION:-grant}"
 SCREEN_OFF="${SANBO_ANDROID_SCREEN_OFF:-0}"
+REVOKE_LOCATION_AFTER_START="${SANBO_ANDROID_REVOKE_LOCATION_AFTER_START:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:-127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000100}"
@@ -201,6 +202,10 @@ case "$SCREEN_OFF" in
   0|1) ;;
   *) fail "SANBO_ANDROID_SCREEN_OFF는 0 또는 1이어야 합니다: $SCREEN_OFF" ;;
 esac
+case "$REVOKE_LOCATION_AFTER_START" in
+  0|1) ;;
+  *) fail "SANBO_ANDROID_REVOKE_LOCATION_AFTER_START는 0 또는 1이어야 합니다: $REVOKE_LOCATION_AFTER_START" ;;
+esac
 adb shell am force-stop "$PACKAGE"
 adb shell am start -W -n "$ACTIVITY" >/dev/null
 
@@ -217,6 +222,25 @@ if [[ "$NOTIFICATION_PERMISSION" == "deny" ]]; then
     tap_desc '알림 허용 안 함' 5 || true
 fi
 wait_desc '기록 중' 30 || fail '기록 상태로 전환되지 않았습니다.'
+if [[ "$REVOKE_LOCATION_AFTER_START" == "1" ]]; then
+  step "기록 중 위치 권한 철회와 cold recovery"
+  for permission in \
+    android.permission.ACCESS_FINE_LOCATION \
+    android.permission.ACCESS_COARSE_LOCATION; do
+    adb shell pm revoke "$PACKAGE" "$permission" >/dev/null 2>&1 || true
+  done
+  adb shell am force-stop "$PACKAGE"
+  sleep 1
+  for permission in \
+    android.permission.ACCESS_FINE_LOCATION \
+    android.permission.ACCESS_COARSE_LOCATION; do
+    adb shell pm grant "$PACKAGE" "$permission" >/dev/null 2>&1 || true
+  done
+  adb shell am start -W -n "$ACTIVITY" >/dev/null
+  wait_desc '미완료 기록' 30 || fail '위치 권한 철회 뒤 미완료 기록 복구 카드가 표시되지 않았습니다.'
+  tap_desc '이어서 기록' 15 || fail '위치 권한 철회 뒤 이어서 기록을 찾지 못했습니다.'
+  wait_desc '기록 중' 30 || fail '위치 권한을 다시 허용한 뒤 기록을 재개하지 못했습니다.'
+fi
 if [[ "$SCREEN_OFF" == "1" ]]; then
   adb shell input keyevent 26
   sleep 2
