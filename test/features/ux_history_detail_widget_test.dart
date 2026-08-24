@@ -576,10 +576,27 @@ void main() {
 
     expect(find.text('산책에서 제외'), findsOneWidget);
     expect(find.text('잘못 포함된 이동을 산책 경로와 통계에서 제외합니다.'), findsOneWidget);
+    final beforeDistance = (await tester.runAsync(
+      () => repo.getSession(fixture.session.id),
+    ))!.totalDistanceM!;
     await tester.tap(find.text('산책에서 제외').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.widgetWithText(FilledButton, '이 구간 제외'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, '이 구간 제외'));
+    await settle(tester);
+    await settle(tester);
+    await waitForDetailReload(tester, fixture.session.id);
+
+    final updated = await tester.runAsync(
+      () => repo.getSession(fixture.session.id),
+    );
+    expect(updated, isNotNull);
+    expect(updated!.totalDistanceM, lessThan(beforeDistance));
+    expect(
+      await tester.runAsync(() => repo.getRouteExclusions(fixture.session.id)),
+      hasLength(1),
+    );
   });
 
   testWidgets(
