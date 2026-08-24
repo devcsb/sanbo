@@ -194,6 +194,9 @@ void main() {
     expect(source, contains('am force-stop'));
     expect(source, contains('산책에서 제외됨'));
     expect(source, contains('제외 취소'));
+    expect(source, contains('persisted_total'));
+    expect(source, contains('user_exclusion_id'));
+    expect(source, contains('재시작 뒤 제외된 분 기록이 유지되지 않았습니다'));
     final docs = File('docs/DEVICE_VALIDATION.md').readAsStringSync();
     expect(docs, contains('SANBO_ANDROID_RESTART_PERSISTENCE=1'));
   });

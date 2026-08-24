@@ -279,11 +279,21 @@ PY
     wait_text '산책에서 제외됨' 10 ||
       fail '재시작 뒤 제외 상태가 표시되지 않았습니다.'
     adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
-    read -r persisted_exclusion_count <<<"$(
-      sqlite3 "$db" 'select count(*) from route_exclusions;'
+    read -r persisted_total persisted_exclusion_count persisted_excluded_windows <<<"$(
+      sqlite3 -separator ' ' "$db" \
+        'select total_distance_m, (select count(*) from route_exclusions), (select count(*) from minute_windows where user_exclusion_id is not null) from sessions order by started_at desc limit 1;'
     )"
     [[ "$persisted_exclusion_count" -gt "$route_baseline_exclusions" ]] ||
       fail '재시작 뒤 route exclusion이 유지되지 않았습니다.'
+    python3 - "$route_baseline_total" "$persisted_total" <<'PY'
+import sys
+
+baseline, persisted = map(float, sys.argv[1:])
+if not persisted < baseline - 1e-6:
+    raise SystemExit('재시작 뒤 제외된 총거리가 유지되지 않았습니다.')
+PY
+    ((persisted_excluded_windows > 0)) ||
+      fail '재시작 뒤 제외된 분 기록이 유지되지 않았습니다.'
   fi
 
   restore_current_exclusion
@@ -431,9 +441,14 @@ PY
 ((valid_samples >= 8)) || fail "유효 샘플 수가 8개 미만입니다: $valid_samples"
 
 if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
-  read -r exclusion_count <<<"$(sqlite3 "$db" 'select count(*) from route_exclusions;')"
+  read -r exclusion_count remaining_excluded_windows <<<"$(
+    sqlite3 -separator ' ' "$db" \
+      'select (select count(*) from route_exclusions), (select count(*) from minute_windows where user_exclusion_id is not null);'
+  )"
   [[ "$exclusion_count" == "0" ]] ||
     fail "제외 취소 뒤 route exclusion이 남아 있습니다: $exclusion_count"
+  [[ "$remaining_excluded_windows" == "0" ]] ||
+    fail "제외 취소 뒤 제외된 분 기록이 남아 있습니다: $remaining_excluded_windows"
   python3 - "$route_baseline_total" "$total_distance" <<'PY'
 import sys
 
