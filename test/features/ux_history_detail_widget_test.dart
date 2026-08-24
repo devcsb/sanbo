@@ -574,8 +574,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));
 
-    expect(find.text('산책에서 제외'), findsWidgets);
-    expect(find.text('잘못 포함된 이동을 산책 경로와 통계에서 제외합니다.'), findsWidgets);
+    expect(find.text('산책에서 제외'), findsOneWidget);
+    expect(find.text('잘못 포함된 이동을 산책 경로와 통계에서 제외합니다.'), findsOneWidget);
     await tester.tap(find.text('산책에서 제외').last);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 300));

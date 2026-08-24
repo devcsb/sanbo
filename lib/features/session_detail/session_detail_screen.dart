@@ -753,8 +753,6 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.pop(ctx, _SegmentAction.place),
                   ),
-                if (segment.label != ActivityLabel.vehicle)
-                  _excludeSegmentAction(ctx, segment),
               ],
               const SizedBox(height: 8),
             ],
