@@ -25,6 +25,9 @@ class _SanboAppState extends ConsumerState<SanboApp> {
     super.initState();
     _lifecycleListener = AppLifecycleListener(
       onResume: () {
+        unawaited(
+          ref.read(sessionNotificationServiceProvider).initialize(),
+        );
         ref.read(sessionControllerProvider.notifier).setAppForeground(true);
       },
       onInactive: () =>

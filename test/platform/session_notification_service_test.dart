@@ -48,7 +48,7 @@ void main() {
     expect(notificationCalls[1].arguments, containsPair('id', 4103));
   });
 
-  test('initialize sends the native readiness handshake once', () async {
+  test('initialize refreshes the native readiness handshake', () async {
     final calls = <MethodCall>[];
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
@@ -60,7 +60,30 @@ void main() {
     await service.initialize();
     await service.initialize();
 
-    expect(calls.map((call) => call.method), ['ready']);
+    expect(calls.map((call) => call.method), ['ready', 'ready']);
+  });
+
+  test('a failed readiness refresh remains retryable', () async {
+    var readyAttempts = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          if (call.method == 'ready') {
+            readyAttempts++;
+            if (readyAttempts == 2) {
+              throw PlatformException(code: 'engine_recreated');
+            }
+          }
+          return null;
+        });
+    final service = PlatformSessionNotificationService();
+
+    await service.initialize();
+    await service.initialize();
+    final subscription = service.taps.listen((_) {});
+    addTearDown(subscription.cancel);
+    await pumpEventQueue();
+
+    expect(readyAttempts, greaterThanOrEqualTo(3));
   });
 
   test(

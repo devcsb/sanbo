@@ -64,11 +64,18 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     // iOS can flush their own pre-engine tap buffers only after this handler
     // is installed. A transient failure remains retryable from the first tap
     // listener or a later initialize call.
-    await _tryReady();
+    // Refresh the acknowledgement on every initialization. Native engines
+    // can be recreated while the Dart service survives, which resets the
+    // native readiness state and otherwise strands cold-start taps in its
+    // pending buffer.
+    await _tryReady(force: true);
+    if (!_readyAcknowledged && _tapController.hasListener) {
+      _scheduleReadinessRetry();
+    }
   }
 
-  Future<void> _tryReady() {
-    if (!_initialized || _readyAcknowledged) {
+  Future<void> _tryReady({bool force = false}) {
+    if (!_initialized || (!force && _readyAcknowledged)) {
       return Future<void>.value();
     }
     final active = _readyAttempt;
@@ -85,6 +92,9 @@ class PlatformSessionNotificationService implements SessionNotificationService {
   }
 
   Future<void> _sendReady() async {
+    // A refresh can fail after an earlier engine acknowledged readiness. Clear
+    // that old state so listener-driven retries are not suppressed.
+    _readyAcknowledged = false;
     try {
       await _channel
           .invokeMethod<void>('ready')
