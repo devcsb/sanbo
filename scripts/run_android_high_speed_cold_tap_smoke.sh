@@ -226,6 +226,11 @@ scroll_to_activity_flow() {
 
 run_route_exclusion() {
   echo '[android-high-speed-cold-tap] route exclusion and restore'
+  adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
+  read -r route_baseline_total route_baseline_exclusions <<<"$(
+    sqlite3 -separator ' ' "$db" \
+      'select total_distance_m, (select count(*) from route_exclusions) from sessions order by started_at desc limit 1;'
+  )"
   tap_text $'기록\n탭 3개 중 2번째' 15 || fail '기록 탭을 찾지 못했습니다.'
   tap_text '상세 보기' 15 || fail '최근 고속 세션 상세 화면을 찾지 못했습니다.'
   scroll_to_activity_flow || fail '상세 화면의 활동 흐름을 찾지 못했습니다.'
@@ -238,12 +243,13 @@ run_route_exclusion() {
     sqlite3 -separator ' ' "$db" \
       'select total_distance_m, (select count(*) from route_exclusions) from sessions order by started_at desc limit 1;'
   )"
-  [[ "$exclusion_count" -ge 1 ]] ||
+  [[ "$exclusion_count" -gt "$route_baseline_exclusions" ]] ||
     fail '차량 이동 구간 제외 뒤 route exclusion이 저장되지 않았습니다.'
-  python3 - "$excluded_total" <<'PY'
+  python3 - "$route_baseline_total" "$excluded_total" <<'PY'
 import sys
 
-if float(sys.argv[1]) >= 100:
+baseline, excluded = map(float, sys.argv[1:])
+if not excluded < baseline - 1e-6:
     raise SystemExit('차량 이동 구간 제외 뒤 산책 거리가 줄지 않았습니다.')
 PY
   scroll_to_activity_flow || fail '제외 후 활동 흐름을 찾지 못했습니다.'
@@ -398,11 +404,12 @@ if [[ "$ROUTE_EXCLUSION" == "1" ]]; then
   read -r exclusion_count <<<"$(sqlite3 "$db" 'select count(*) from route_exclusions;')"
   [[ "$exclusion_count" == "0" ]] ||
     fail "제외 취소 뒤 route exclusion이 남아 있습니다: $exclusion_count"
-  python3 - "$total_distance" <<'PY'
+  python3 - "$route_baseline_total" "$total_distance" <<'PY'
 import sys
 
-if float(sys.argv[1]) <= 100:
-    raise SystemExit('제외 취소 뒤 차량 구간이 복원되지 않았습니다.')
+baseline, restored = map(float, sys.argv[1:])
+if abs(restored - baseline) > max(1.0, baseline * 0.02):
+    raise SystemExit('제외 취소 뒤 차량 구간이 원래 통계로 복원되지 않았습니다.')
 PY
 fi
 

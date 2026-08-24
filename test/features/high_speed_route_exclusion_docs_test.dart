@@ -178,6 +178,8 @@ void main() {
     expect(source, contains('SANBO_ANDROID_TAP_MODE'));
     expect(source, contains('SANBO_ANDROID_ROUTE_EXCLUSION'));
     expect(source, contains('차량 이동 구간 제외'));
+    expect(source, contains('route_baseline_total'));
+    expect(source, contains('원래 통계로 복원'));
     expect(source, contains("cold|warm"));
     expect(source, contains('SANBO_ANDROID_NOTIFICATION_PERMISSION'));
     expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
