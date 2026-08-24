@@ -10,6 +10,7 @@ DEVICE_ID="${SANBO_ANDROID_DEVICE_ID:-}"
 NOTIFICATION_PERMISSION="${SANBO_ANDROID_NOTIFICATION_PERMISSION:-grant}"
 TAP_MODE="${SANBO_ANDROID_TAP_MODE:-cold}"
 ROUTE_EXCLUSION="${SANBO_ANDROID_ROUTE_EXCLUSION:-0}"
+RESTART_PERSISTENCE="${SANBO_ANDROID_RESTART_PERSISTENCE:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:--127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000500}"
@@ -224,6 +225,16 @@ scroll_to_activity_flow() {
   grep -Fq '구간 편집' "$ui_xml"
 }
 
+restore_current_exclusion() {
+  tap_vehicle_edit excluded || fail '제외된 차량 구간 편집 버튼을 찾지 못했습니다.'
+  tap_text '제외 취소' 10 || fail '제외 취소 메뉴를 찾지 못했습니다.'
+  sleep 2
+  scroll_to_activity_flow || fail '복원 후 활동 흐름을 찾지 못했습니다.'
+  if grep -Fq '산책에서 제외됨' "$ui_xml"; then
+    fail '제외 취소 뒤 제외 상태가 남아 있습니다.'
+  fi
+}
+
 run_route_exclusion() {
   echo '[android-high-speed-cold-tap] route exclusion and restore'
   adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
@@ -254,13 +265,28 @@ if not excluded < baseline - 1e-6:
 PY
   scroll_to_activity_flow || fail '제외 후 활동 흐름을 찾지 못했습니다.'
   wait_text '산책에서 제외됨' 10 || fail '제외 상태가 화면에 표시되지 않았습니다.'
-  tap_vehicle_edit excluded || fail '제외된 차량 구간 편집 버튼을 찾지 못했습니다.'
-  tap_text '제외 취소' 10 || fail '제외 취소 메뉴를 찾지 못했습니다.'
-  sleep 2
-  scroll_to_activity_flow || fail '복원 후 활동 흐름을 찾지 못했습니다.'
-  if grep -Fq '산책에서 제외됨' "$ui_xml"; then
-    fail '제외 취소 뒤 제외 상태가 남아 있습니다.'
+
+  if [[ "$RESTART_PERSISTENCE" == "1" ]]; then
+    echo '[android-high-speed-cold-tap] excluded state after app restart'
+    adb shell am force-stop "$PACKAGE"
+    sleep 1
+    adb shell am start -W -n "$ACTIVITY" >/dev/null
+    tap_text $'기록\n탭 3개 중 2번째' 15 ||
+      fail '재시작 뒤 기록 탭을 찾지 못했습니다.'
+    tap_text '상세 보기' 15 ||
+      fail '재시작 뒤 최근 고속 세션 상세 화면을 찾지 못했습니다.'
+    scroll_to_activity_flow || fail '재시작 뒤 활동 흐름을 찾지 못했습니다.'
+    wait_text '산책에서 제외됨' 10 ||
+      fail '재시작 뒤 제외 상태가 표시되지 않았습니다.'
+    adb exec-out run-as "$PACKAGE" cat app_flutter/sanbo.db >"$db"
+    read -r persisted_exclusion_count <<<"$(
+      sqlite3 "$db" 'select count(*) from route_exclusions;'
+    )"
+    [[ "$persisted_exclusion_count" -gt "$route_baseline_exclusions" ]] ||
+      fail '재시작 뒤 route exclusion이 유지되지 않았습니다.'
   fi
+
+  restore_current_exclusion
 }
 
 echo '[android-high-speed-cold-tap] install and reset'
@@ -296,6 +322,10 @@ esac
 case "$ROUTE_EXCLUSION" in
   0|1) ;;
   *) fail "SANBO_ANDROID_ROUTE_EXCLUSION은 0 또는 1이어야 합니다: $ROUTE_EXCLUSION" ;;
+esac
+case "$RESTART_PERSISTENCE" in
+  0|1) ;;
+  *) fail "SANBO_ANDROID_RESTART_PERSISTENCE는 0 또는 1이어야 합니다: $RESTART_PERSISTENCE" ;;
 esac
 adb shell am force-stop "$PACKAGE"
 sleep 1

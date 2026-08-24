@@ -185,6 +185,19 @@ void main() {
     expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
   });
 
+  test('Android route exclusion smoke can verify persistence after restart', () {
+    final source = File(
+      'scripts/run_android_high_speed_cold_tap_smoke.sh',
+    ).readAsStringSync();
+    expect(source, contains('SANBO_ANDROID_RESTART_PERSISTENCE'));
+    expect(source, contains('excluded state after app restart'));
+    expect(source, contains('am force-stop'));
+    expect(source, contains('산책에서 제외됨'));
+    expect(source, contains('제외 취소'));
+    final docs = File('docs/DEVICE_VALIDATION.md').readAsStringSync();
+    expect(docs, contains('SANBO_ANDROID_RESTART_PERSISTENCE=1'));
+  });
+
   test('Android provider smoke avoids pipefail false positives', () {
     final source = File(
       'scripts/run_android_emulator_smoke.sh',

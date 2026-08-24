@@ -116,6 +116,18 @@ SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
   bash scripts/run_android_high_speed_cold_tap_smoke.sh
 ```
 
+제외된 구간이 앱 강제 종료 뒤에도 유지되는지까지 확인하려면 다음처럼
+`SANBO_ANDROID_RESTART_PERSISTENCE=1`을 추가한다. 재시작 후 기록 상세 화면에서
+`산책에서 제외됨` 상태와 DB의 제외 행을 확인한 다음 `제외 취소`로 복원한다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \\
+  SANBO_ANDROID_TAP_MODE=cold \\
+  SANBO_ANDROID_ROUTE_EXCLUSION=1 \\
+  SANBO_ANDROID_RESTART_PERSISTENCE=1 \\
+  bash scripts/run_android_high_speed_cold_tap_smoke.sh
+```
+
 알림 권한 거부 경로는 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny`를 추가한다.
 기본값은 `grant`이며, 어느 모드에서도 위치 기록과 세션 저장 결과를 확인한다.
 화면을 끈 상태의 provider 지속성은 `SANBO_ANDROID_SCREEN_OFF=1`을 추가해
