@@ -9,6 +9,13 @@ func shouldAcceptNotificationReadinessAck(
   currentGeneration == ackGeneration
 }
 
+func shouldDeliverNotificationTap(
+  channelReady: Bool,
+  hasChannel: Bool
+) -> Bool {
+  channelReady && hasChannel
+}
+
 struct NotificationTap {
   let kind: String
   let sessionId: String
@@ -200,7 +207,10 @@ final class NotificationTapBuffer {
 
   private func deliverOrBuffer(kind: String?, sessionId: String?) {
     guard kind == "highSpeed", let sessionId, !sessionId.isEmpty else { return }
-    if notificationChannelReady, let channel = notificationChannel {
+    if shouldDeliverNotificationTap(
+      channelReady: notificationChannelReady,
+      hasChannel: notificationChannel != nil
+    ), let channel = notificationChannel {
       channel.invokeMethod(
         "notificationTapped",
         arguments: ["kind": kind!, "sessionId": sessionId]

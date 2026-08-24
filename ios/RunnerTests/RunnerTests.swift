@@ -35,4 +35,10 @@ class RunnerTests: XCTestCase {
     XCTAssertFalse(shouldAcceptNotificationReadinessAck(currentGeneration: 2, ackGeneration: 1))
   }
 
+  func testTapDeliveryRequiresReadyChannel() {
+    XCTAssertFalse(shouldDeliverNotificationTap(channelReady: false, hasChannel: true))
+    XCTAssertFalse(shouldDeliverNotificationTap(channelReady: true, hasChannel: false))
+    XCTAssertTrue(shouldDeliverNotificationTap(channelReady: true, hasChannel: true))
+  }
+
 }
