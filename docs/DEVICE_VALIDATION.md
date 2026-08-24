@@ -261,6 +261,8 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 현재 호스트에는 Android emulator `emulator-5554`만 연결되어 있고 iOS `devicectl`은 연결된 기기를 반환하지 않았다. 따라서 아래 물리 기기 매트릭스는 계속 `미판정`으로 둔다.
 - 같은 검증 루프에서 `SANBO_ANDROID_CLEAR_DATA=1 SANBO_ANDROID_REVOKE_LOCATION_AFTER_START=1` Android emulator smoke를 실행했다. 기록 중 위치 권한을 철회하고 프로세스를 재시작한 뒤 권한을 복구해 `미완료 기록`의 `이어서 기록`으로 돌아왔으며, 최종 세션은 34.5412m, 유효 샘플 5개, 종료 후 provider 요청 없음으로 통과했다.
 - Xcode simulator가 병렬 테스트 clone을 `SBMainWorkspace Busy`로 거부하는 환경 변동을 재현했다. native XCTest wrapper에 병렬 실행을 끈 설정을 고정한 뒤 Android native unit test와 iOS RunnerTests 5개가 다시 통과했다.
+- 2026-08-25에 최신 `main`에서 Android emulator `emulator-5554`의 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_ROUTE_EXCLUSION=1 SANBO_ANDROID_RESTART_PERSISTENCE=1` smoke를 다시 실행했다. cold tap 복구, 차량 이동 구간 제외, 강제 종료 뒤 제외 상태 유지, `제외 취소` 복원과 provider 해제를 확인했으며 최종 세션은 거리 1016.7435m, 유효 샘플 14개였다.
+- 같은 실행 루프에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 `SANBO_IOS_SCENARIO=high_speed` 실제 Core Location 경고 E2E와 fresh process native notification channel probe를 통과했다. Xcode 캐시 포화로 한 번 중단된 뒤 Sanbo 전용 DerivedData와 `/tmp` 캐시를 정리하고 재실행했으며, simulator 결과는 물리 iPhone 판정으로 승격하지 않는다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
