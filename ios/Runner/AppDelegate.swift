@@ -21,6 +21,18 @@ struct NotificationTap {
   let sessionId: String
 }
 
+func notificationTap(from userInfo: [AnyHashable: Any]) -> NotificationTap? {
+  guard
+    let kind = userInfo["kind"] as? String,
+    kind == "highSpeed",
+    let sessionId = userInfo["sessionId"] as? String,
+    !sessionId.isEmpty
+  else {
+    return nil
+  }
+  return NotificationTap(kind: kind, sessionId: sessionId)
+}
+
 final class NotificationTapBuffer {
   private var pendingTap: NotificationTap?
 
@@ -93,10 +105,15 @@ final class NotificationTapBuffer {
     didReceive response: UNNotificationResponse,
     withCompletionHandler completionHandler: @escaping @Sendable () -> Void
   ) {
-    let kind = response.notification.request.content.userInfo["kind"] as? String
-    let sessionId = response.notification.request.content.userInfo["sessionId"] as? String
-    deliverOrBuffer(kind: kind, sessionId: sessionId)
+    handleNotificationResponse(response)
     completionHandler()
+  }
+
+  func handleNotificationResponse(_ response: UNNotificationResponse) {
+    guard let tap = notificationTap(from: response.notification.request.content.userInfo) else {
+      return
+    }
+    deliverOrBuffer(kind: tap.kind, sessionId: tap.sessionId)
   }
 
   private func handleMethodCall(

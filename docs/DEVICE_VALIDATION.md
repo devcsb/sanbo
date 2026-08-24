@@ -280,6 +280,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 날 `SANBO_ANDROID_NOTIFICATION_PERMISSION=deny SANBO_ANDROID_TAP_ACTION=stop`도 실행했다. 시스템 알림 없이 앱 내부 고속 경고에서 `기록 종료`를 선택해 970.3855m, 유효 샘플 13개의 completed 세션을 저장하고 provider 해제를 확인했다.
 - 2026-08-25 최신 `main`에서 `SANBO_ANDROID_TAP_MODE=warm SANBO_ANDROID_TAP_ACTION=continue SANBO_ANDROID_NOTIFICATION_PERMISSION=grant`를 다시 실행했다. 프로세스를 유지한 warm tap 뒤 `계속 기록`으로 복귀했고 972.6537m, 유효 샘플 14개와 종료 후 provider 해제를 확인했다.
 - 같은 최신 실행에서 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_TAP_ACTION=stop SANBO_ANDROID_NOTIFICATION_PERMISSION=deny`를 실행했다. 시스템 알림 없이 앱 내부 고속 경고에서 `기록 종료`를 선택했고 970.3767m, 유효 샘플 13개의 completed 세션과 종료 후 provider 해제를 확인했다.
+- 2026-08-25에 iOS scene manifest의 종료 상태 알림 탭 경로를 보강했다. `SceneDelegate`의 `connectionOptions.notificationResponse`를 AppDelegate의 readiness 버퍼로 전달하고, payload 검증 회귀 테스트를 추가했다. Android native unit test와 iOS RunnerTests 7개, iOS simulator의 실제 Core Location 고속 E2E와 fresh process notification channel probe를 다시 통과했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.

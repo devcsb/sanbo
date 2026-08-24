@@ -41,4 +41,20 @@ class RunnerTests: XCTestCase {
     XCTAssertTrue(shouldDeliverNotificationTap(channelReady: true, hasChannel: true))
   }
 
+  func testSceneLaunchNotificationPayloadIsAccepted() {
+    let tap = notificationTap(from: [
+      "kind": "highSpeed",
+      "sessionId": "session-from-scene",
+    ])
+
+    XCTAssertEqual(tap?.kind, "highSpeed")
+    XCTAssertEqual(tap?.sessionId, "session-from-scene")
+  }
+
+  func testSceneLaunchNotificationPayloadRejectsUnsupportedValues() {
+    XCTAssertNil(notificationTap(from: ["kind": "stationary", "sessionId": "session-1"]))
+    XCTAssertNil(notificationTap(from: ["kind": "highSpeed"]))
+    XCTAssertNil(notificationTap(from: ["kind": "highSpeed", "sessionId": ""]))
+  }
+
 }
