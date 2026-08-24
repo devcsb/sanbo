@@ -155,6 +155,8 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 2026-08-24에 Flutter 3.47.1 전체 테스트를 무작위 순서 seed `30303`으로 다시 실행해 338개가 통과했다. 같은 HEAD에서 `scripts/run_native_platform_tests.sh`를 다시 실행해 Android native unit test와 iOS simulator XCTest를 통과했다.
 - 2026-08-24에 Android emulator `emulator-5554`에서 알림 권한 거부와 화면 잠금 조건의 provider smoke를 다시 실행해 거리 23.54m, 유효 샘플 5개 저장과 종료 후 provider 해제를 확인했다. 같은 날 iPhone 17 Pro simulator의 고속 Core Location E2E와 차량 구간 제외 및 복원을 다시 실행해 통과했다.
 - `flutter test --no-pub -d emulator-5554 integration_test/app_e2e_test.dart`를 장치 선택을 명시해 실행했다. Android emulator에서 UI 세션 저장, 고속 경고, 차량 구간 제외와 복원 통합 테스트 2개가 모두 통과했다.
+- 2026-08-24에 `scripts/run_quality_loop.sh --debug-apk`를 다시 실행해 구조 검증, `flutter analyze`, 전체 Flutter 테스트 338개, Android debug APK를 통과했다. 이어 `scripts/run_native_platform_tests.sh`에서 Android native unit test와 iOS simulator XCTest를 통과했다.
+- 같은 날 Android emulator `emulator-5554`에서 알림 권한 거부와 화면 잠금 조건의 실제 provider smoke를 다시 실행해 거리 61.27m, 유효 샘플 5개를 저장하고 종료 후 provider 해제를 확인했다. iPhone 17 Pro simulator에서는 `SANBO_IOS_SCENARIO=high_speed`를 다시 실행해 실제 Core Location 고속 경고와 세션 완료까지 통과했다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
