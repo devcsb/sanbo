@@ -183,6 +183,23 @@ SANBO_ANDROID_DEVICE_ID=emulator-5554 \
   bash scripts/run_android_emulator_smoke.sh
 ```
 
+기록 중 위치 서비스를 끄는 Android provider 장애를 같은 프로세스에서 재현하려면
+`SANBO_ANDROID_TOGGLE_LOCATION_AFTER_START=1`을 추가한다. 위치 서비스 차단 뒤
+복구 카드, 앱 provider 요청 해제, 위치 서비스 재활성화와 `이어서 기록`, 세션 저장을
+차례로 검사한다. 에뮬레이터 시스템 경고가 나타나면 smoke가 닫기 동작도 처리한다.
+
+```bash
+SANBO_ANDROID_DEVICE_ID=emulator-5554 \
+  SANBO_ANDROID_APK=build/app/outputs/flutter-apk/app-debug.apk \
+  SANBO_ANDROID_CLEAR_DATA=1 \
+  SANBO_ANDROID_NOTIFICATION_PERMISSION=deny \
+  SANBO_ANDROID_TOGGLE_LOCATION_AFTER_START=1 \
+  bash scripts/run_android_emulator_smoke.sh
+```
+
+이 경로는 Android 에뮬레이터의 provider 장애 회귀를 검증하지만, 제조사별 위치 설정
+화면과 백그라운드 정책을 포함한 물리 기기 검증을 대신하지 않는다.
+
 iOS simulator의 실제 Core Location 경로는 다음 명령으로 반복한다.
 
 ```bash
@@ -301,6 +318,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 같은 최신 `main`에서 도메인, 문서 계약, 알림 readiness 회귀 83개와 Android UI integration 2개를 다시 실행해 모두 통과했다. Android emulator `emulator-5554`의 `SANBO_ANDROID_TAP_MODE=cold SANBO_ANDROID_TAP_ACTION=stop SANBO_ANDROID_ROUTE_EXCLUSION=1 SANBO_ANDROID_RESTART_PERSISTENCE=1` smoke는 cold tap, `기록 종료`, 차량 구간 제외, 재시작 보존과 복원을 재현했고 최종 세션은 970.3855m, 유효 샘플 13개, 종료 후 provider 요청 없음이었다. 같은 HEAD에서 iOS simulator 화면 전원을 20초 뒤 끈 실제 Core Location 고속 E2E와 fresh process notification channel probe를 통과했다. `xcrun devicectl list devices`에는 물리 iOS 장비가 없어 이 결과를 물리 기기 판정으로 승격하지 않는다.
 - 2026-08-25 커밋 `93c1a82`에서 Android Fused 위치 스트림이 첫 fix 이후 `LocationServiceDisabledException`, `PermissionDeniedException`, `PositionUpdateException`만 전달하고 닫히지 않는 경우를 즉시 LocationManager fallback으로 넘기도록 보강했다. 첫 fix 전 오류는 기존 startup fallback 경로를 유지하고, fallback 미지원 플랫폼은 복구를 시도하지 않도록 정책 회귀를 추가했다. 호환 SDK Flutter 3.47.1에서 전체 Flutter 테스트 352개, `flutter analyze`, PRD/TRD 구조 검증과 whitespace 검사를 통과했다.
 - 같은 커밋의 로컬 Android emulator 고속 cold tap, `기록 종료`, 차량 구간 제외와 복원, 앱 재시작 보존 smoke는 970.3855m와 유효 샘플 13개로 통과했고 Android UI integration 2개도 통과했다. iOS simulator 화면 전원 끄기 고속 Core Location E2E와 fresh process notification channel probe, Android native unit test와 iOS RunnerTests도 통과했다. 원격 CI run `32800965938`은 커밋 `93c1a828189149a54ef2339999ff47350b430bee`에서 Flutter quality와 native platform tests 모두 성공했다.
+- 2026-08-25에 Android emulator `emulator-5554`에서 `SANBO_ANDROID_TOGGLE_LOCATION_AFTER_START=1` provider smoke를 추가로 실행했다. 기록 중 위치 서비스를 끈 뒤 시스템 경고를 닫고 `미완료 기록` 복구 카드와 앱 provider 요청 해제를 확인했으며, 위치 서비스를 다시 켠 뒤 `이어서 기록`으로 복귀해 66.6927m, 유효 샘플 7개의 completed 세션과 종료 후 provider 해제를 통과했다. 첫 실행에서 알림 권한 대화상자가 복구 직후 다시 표시되는 환경 동작을 확인해 smoke가 거부 동작을 재사용하도록 보강했다. 이 결과는 에뮬레이터 증거이며 물리 기기 판정으로 승격하지 않는다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.

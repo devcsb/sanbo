@@ -11,6 +11,7 @@ CLEAR_DATA="${SANBO_ANDROID_CLEAR_DATA:-0}"
 NOTIFICATION_PERMISSION="${SANBO_ANDROID_NOTIFICATION_PERMISSION:-grant}"
 SCREEN_OFF="${SANBO_ANDROID_SCREEN_OFF:-0}"
 REVOKE_LOCATION_AFTER_START="${SANBO_ANDROID_REVOKE_LOCATION_AFTER_START:-0}"
+TOGGLE_LOCATION_AFTER_START="${SANBO_ANDROID_TOGGLE_LOCATION_AFTER_START:-0}"
 BASE_LAT="${SANBO_ANDROID_BASE_LAT:-37.500000}"
 BASE_LON="${SANBO_ANDROID_BASE_LON:-127.000000}"
 STEP_LON="${SANBO_ANDROID_STEP_LON:-0.000100}"
@@ -159,6 +160,19 @@ wait_desc() {
   return 1
 }
 
+dismiss_notification_prompt() {
+  [[ "$NOTIFICATION_PERMISSION" == "deny" ]] || return 0
+  tap_desc 'Don’t allow' 5 ||
+    tap_desc "Don't allow" 5 ||
+    tap_desc '허용 안 함' 5 ||
+    tap_desc '알림 허용 안 함' 5 || true
+}
+
+location_providers() {
+  adb shell dumpsys location |
+    sed -n '/Location Providers:/,/Historical Aggregate Location Provider Data:/p'
+}
+
 if [[ -n "$PREBUILT_APK" ]]; then
   step "지정 APK 사용"
   apk="$PREBUILT_APK"
@@ -206,6 +220,10 @@ case "$REVOKE_LOCATION_AFTER_START" in
   0|1) ;;
   *) fail "SANBO_ANDROID_REVOKE_LOCATION_AFTER_START는 0 또는 1이어야 합니다: $REVOKE_LOCATION_AFTER_START" ;;
 esac
+case "$TOGGLE_LOCATION_AFTER_START" in
+  0|1) ;;
+  *) fail "SANBO_ANDROID_TOGGLE_LOCATION_AFTER_START는 0 또는 1이어야 합니다: $TOGGLE_LOCATION_AFTER_START" ;;
+esac
 adb shell am force-stop "$PACKAGE"
 adb shell am start -W -n "$ACTIVITY" >/dev/null
 
@@ -216,12 +234,26 @@ if [[ "$NOTIFICATION_PERMISSION" == "deny" ]]; then
   # A clean emulator still shows Android's first-run notification dialog even
   # when the permission was revoked through adb. Dismiss it to exercise the
   # same post-denial recording path as a real user choice.
-  tap_desc 'Don’t allow' 5 ||
-    tap_desc "Don't allow" 5 ||
-    tap_desc '허용 안 함' 5 ||
-    tap_desc '알림 허용 안 함' 5 || true
+  dismiss_notification_prompt
 fi
 wait_desc '기록 중' 30 || fail '기록 상태로 전환되지 않았습니다.'
+if [[ "$TOGGLE_LOCATION_AFTER_START" == "1" ]]; then
+  step "기록 중 위치 서비스 차단과 provider 복구"
+  adb shell cmd location set-location-enabled false >/dev/null
+  sleep 4
+  # Android may show a system warning over the app after location is disabled.
+  tap_desc 'Close' 3 || tap_desc '닫기' 3 || true
+  wait_desc '미완료 기록' 30 || fail '위치 서비스 차단 뒤 미완료 기록 복구 카드가 표시되지 않았습니다.'
+  disabled_location="$(location_providers)"
+  if [[ "$disabled_location" == *"$PACKAGE"* &&
+    "$disabled_location" == *'ProviderRequest['* ]]; then
+    fail '위치 서비스 차단 뒤 앱 provider 요청이 남아 있습니다.'
+  fi
+  adb shell cmd location set-location-enabled true >/dev/null
+  tap_desc '이어서 기록' 20 || fail '위치 서비스 복구 뒤 이어서 기록을 찾지 못했습니다.'
+  dismiss_notification_prompt
+  wait_desc '기록 중' 30 || fail '위치 서비스 복구 뒤 기록을 재개하지 못했습니다.'
+fi
 if [[ "$REVOKE_LOCATION_AFTER_START" == "1" ]]; then
   step "기록 중 위치 권한 철회와 cold recovery"
   for permission in \
@@ -279,11 +311,6 @@ import sys
 if float(sys.argv[1]) <= 0.01:
     raise SystemExit('거리 누적값이 0.01km를 넘지 않았습니다.')
 PY
-
-location_providers() {
-  adb shell dumpsys location |
-    sed -n '/Location Providers:/,/Historical Aggregate Location Provider Data:/p'
-}
 
 active_location=''
 active_provider=0
