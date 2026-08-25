@@ -271,6 +271,10 @@ if [[ "$REVOKE_LOCATION_AFTER_START" == "1" ]]; then
   adb shell am start -W -n "$ACTIVITY" >/dev/null
   wait_desc '미완료 기록' 30 || fail '위치 권한 철회 뒤 미완료 기록 복구 카드가 표시되지 않았습니다.'
   tap_desc '이어서 기록' 15 || fail '위치 권한 철회 뒤 이어서 기록을 찾지 못했습니다.'
+  # Restarting after a permission change can make Android replay the
+  # notification permission dialog even when the initial start already
+  # dismissed it. Close that system surface before checking the resumed UI.
+  dismiss_notification_prompt
   wait_desc '기록 중' 30 || fail '위치 권한을 다시 허용한 뒤 기록을 재개하지 못했습니다.'
 fi
 if [[ "$SCREEN_OFF" == "1" ]]; then

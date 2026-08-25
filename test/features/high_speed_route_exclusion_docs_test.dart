@@ -232,24 +232,33 @@ void main() {
     final source = File(
       'scripts/run_android_emulator_smoke.sh',
     ).readAsStringSync();
+    final recovery = _section(
+      source,
+      r'if [[ "$REVOKE_LOCATION_AFTER_START" == "1" ]]; then',
+      r'if [[ "$SCREEN_OFF" == "1" ]]; then',
+    );
     expect(source, contains('SANBO_ANDROID_REVOKE_LOCATION_AFTER_START'));
     expect(source, contains('기록 중 위치 권한 철회와 cold recovery'));
     expect(source, contains('미완료 기록'));
     expect(source, contains('이어서 기록'));
     expect(source, contains('위치 권한 철회 뒤 미완료 기록 복구 카드'));
+    expect(recovery, contains('dismiss_notification_prompt'));
   });
 
-  test('Android provider smoke can verify mid-session location service recovery', () {
-    final source = File(
-      'scripts/run_android_emulator_smoke.sh',
-    ).readAsStringSync();
-    expect(source, contains('SANBO_ANDROID_TOGGLE_LOCATION_AFTER_START'));
-    expect(source, contains('cmd location set-location-enabled false'));
-    expect(source, contains('기록 중 위치 서비스 차단과 provider 복구'));
-    expect(source, contains('위치 서비스 차단 뒤 미완료 기록 복구 카드'));
-    expect(source, contains('위치 서비스 복구 뒤 이어서 기록'));
-    expect(source, contains('ProviderRequest['));
-  });
+  test(
+    'Android provider smoke can verify mid-session location service recovery',
+    () {
+      final source = File(
+        'scripts/run_android_emulator_smoke.sh',
+      ).readAsStringSync();
+      expect(source, contains('SANBO_ANDROID_TOGGLE_LOCATION_AFTER_START'));
+      expect(source, contains('cmd location set-location-enabled false'));
+      expect(source, contains('기록 중 위치 서비스 차단과 provider 복구'));
+      expect(source, contains('위치 서비스 차단 뒤 미완료 기록 복구 카드'));
+      expect(source, contains('위치 서비스 복구 뒤 이어서 기록'));
+      expect(source, contains('ProviderRequest['));
+    },
+  );
 
   test('Android provider smokes can install a prebuilt release APK', () {
     final provider = File(
