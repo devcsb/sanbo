@@ -162,10 +162,17 @@ wait_desc() {
 
 dismiss_notification_prompt() {
   [[ "$NOTIFICATION_PERMISSION" == "deny" ]] || return 0
-  tap_desc 'Don’t allow' 5 ||
-    tap_desc "Don't allow" 5 ||
-    tap_desc '허용 안 함' 5 ||
-    tap_desc '알림 허용 안 함' 5 || true
+  for _ in 1 2 3; do
+    tap_desc 'Don’t allow' 5 ||
+      tap_desc "Don't allow" 5 ||
+      tap_desc '허용 안 함' 5 ||
+      tap_desc '알림 허용 안 함' 5 || true
+    dump_ui
+    if ! grep -q 'permission_message' "$ui_xml"; then
+      return 0
+    fi
+    sleep 1
+  done
 }
 
 location_providers() {

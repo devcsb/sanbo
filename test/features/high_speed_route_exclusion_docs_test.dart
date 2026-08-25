@@ -238,6 +238,7 @@ void main() {
       r'if [[ "$SCREEN_OFF" == "1" ]]; then',
     );
     expect(source, contains('SANBO_ANDROID_REVOKE_LOCATION_AFTER_START'));
+    expect(source, contains(r'''grep -q 'permission_message' "$ui_xml"'''));
     expect(source, contains('기록 중 위치 권한 철회와 cold recovery'));
     expect(source, contains('미완료 기록'));
     expect(source, contains('이어서 기록'));
