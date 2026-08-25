@@ -327,6 +327,7 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 - 임시 로컬 keystore로 만든 비디버그 release APK를 Android emulator `emulator-5554`에 새로 설치해 고속 cold tap smoke를 실행했다. 백그라운드 GPS 주입, 프로세스 종료, notification shade 탭, 복구 화면과 `기록 종료`, 종료 후 provider 해제를 통과했다. release APK는 `run-as` DB 검사를 생략하고 UI와 provider 상태만 확인했으며, 임시 인증서는 production signing 검증에 사용하지 않았다. 이 결과는 emulator 증거이며 물리 기기 판정으로 승격하지 않는다.
 - 같은 최신 `main`에서 Android emulator `emulator-5554`의 알림 거부·화면 잠금·기록 중 위치 서비스 전환 provider smoke를 다시 실행했다. 위치 서비스를 끈 뒤 복구 카드와 provider 해제를 확인하고 다시 켠 뒤 `이어서 기록`으로 완료했으며, 세션은 65.9770m와 유효 샘플 7개로 저장됐다. `geolocator_location_engine_policy_test.dart`의 provider fallback, stall recovery와 세대 경계 회귀 17개도 통과했다. 이 결과는 emulator 증거이며 물리 기기 판정으로 승격하지 않는다.
 - 2026-08-25 최신 `main`의 재귀 검증에서 지원 SDK Flutter 3.47.1로 전체 Flutter 테스트 356개와 `flutter analyze`, Android native unit test와 iOS RunnerTests를 통과했다. Android emulator `emulator-5554`의 알림 거부 warm tap과 앱 내부 `기록 종료`는 927.4416m, 유효 샘플 13개로 통과했고, 알림 거부·화면 잠금 provider smoke는 22.1412m, 유효 샘플 4개로 통과했다. 두 smoke 모두 종료 뒤 provider 요청이 없었다. 이 결과는 emulator와 simulator 증거이며 물리 기기 판정으로 승격하지 않는다.
+- 같은 최신 `main`에서 iPhone 17 Pro simulator `96749A10-F3A8-4C98-87EE-79A8EE439BDA`의 `SANBO_IOS_SCENARIO=high_speed SANBO_IOS_SCREEN_OFF=1 SANBO_IOS_SCREEN_OFF_DELAY_S=20`을 실행했다. 화면 전원 끄기 뒤 실제 Core Location 고속 경고 E2E와 fresh process notification channel probe가 각각 1개 테스트로 통과했다. simulator 화면 전원 끄기는 물리 iPhone의 잠금, 절전 정책 또는 알림 전달을 증명하지 않으므로 물리 기기 판정으로 승격하지 않는다.
 
 이 로그는 자동화와 simulator 증거를 남기기 위한 것이며, 아래 물리 기기 행의
 `미판정` 상태를 `통과`로 바꾸지 않는다.
