@@ -74,12 +74,21 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     }
   }
 
-  Future<void> _tryReady({bool force = false}) {
-    if (!_initialized || (!force && _readyAcknowledged)) {
-      return Future<void>.value();
-    }
+  Future<void> _tryReady({bool force = false}) async {
+    if (!_initialized) return;
     final active = _readyAttempt;
-    if (active != null) return active;
+    if (active != null) {
+      await active;
+      // A native engine can be recreated while the previous ready call is
+      // still in flight. The old Future may complete successfully for the
+      // old messenger, so a forced refresh must enqueue a second call after
+      // that in-flight operation rather than reusing its result.
+      if (force && _initialized) {
+        await _tryReady(force: true);
+      }
+      return;
+    }
+    if (!force && _readyAcknowledged) return;
     final attempt = _sendReady();
     late final Future<void> trackedAttempt;
     trackedAttempt = attempt.whenComplete(() {
@@ -88,7 +97,7 @@ class PlatformSessionNotificationService implements SessionNotificationService {
       }
     });
     _readyAttempt = trackedAttempt;
-    return trackedAttempt;
+    await trackedAttempt;
   }
 
   Future<void> _sendReady() async {
@@ -259,9 +268,7 @@ class PlatformSessionNotificationService implements SessionNotificationService {
     }
     _readinessRetryTimer = Timer(_readinessRetryDelay, () {
       _readinessRetryTimer = null;
-      if (!_initialized ||
-          _readyAcknowledged ||
-          !_tapController.hasListener) {
+      if (!_initialized || _readyAcknowledged || !_tapController.hasListener) {
         return;
       }
       _readinessRetryCount++;

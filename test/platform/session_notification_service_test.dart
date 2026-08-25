@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/session_warning.dart';
@@ -62,6 +64,38 @@ void main() {
 
     expect(calls.map((call) => call.method), ['ready', 'ready']);
   });
+
+  test(
+    'concurrent initialization sends a fresh handshake after an in-flight call',
+    () async {
+      final firstCallStarted = Completer<void>();
+      final releaseFirstCall = Completer<void>();
+      var readyCalls = 0;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'ready') {
+              readyCalls++;
+              if (readyCalls == 1) {
+                firstCallStarted.complete();
+                await releaseFirstCall.future;
+              }
+            }
+            return null;
+          });
+      final service = PlatformSessionNotificationService();
+
+      final first = service.initialize();
+      await firstCallStarted.future;
+      final second = service.initialize();
+      await Future<void>.delayed(Duration.zero);
+
+      expect(readyCalls, 1);
+      releaseFirstCall.complete();
+      await Future.wait([first, second]);
+
+      expect(readyCalls, 2);
+    },
+  );
 
   test('a failed readiness refresh remains retryable', () async {
     var readyAttempts = 0;
