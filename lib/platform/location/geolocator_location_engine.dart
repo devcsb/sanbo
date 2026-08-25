@@ -137,6 +137,31 @@ class GeolocatorLocationEngine implements LocationEngine {
           (isApplePlatform && terminalProviderError));
 
   @visibleForTesting
+  static bool shouldRecoverTerminalProviderError({
+    required bool running,
+    required bool usingLocationManagerFallback,
+    required bool recoveryInFlight,
+    required bool isApplePlatform,
+    required bool terminalProviderError,
+    required bool streamReady,
+    required bool supportsLocationManagerFallback,
+  }) {
+    if (!streamReady ||
+        !terminalProviderError ||
+        isApplePlatform ||
+        !supportsLocationManagerFallback) {
+      return false;
+    }
+    return endedStreamAction(
+          running: running,
+          usingLocationManagerFallback: usingLocationManagerFallback,
+          recoveryInFlight: recoveryInFlight,
+          supportsLocationManagerFallback: supportsLocationManagerFallback,
+        ) ==
+        LocationStreamEndAction.recover;
+  }
+
+  @visibleForTesting
   static bool isTerminalProviderError(Object error) {
     return error is LocationServiceDisabledException ||
         error is PermissionDeniedException ||
@@ -413,6 +438,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     );
     // Attach immediately so the first native fix is not dropped.
     final ready = Completer<void>();
+    var streamReady = false;
     _sub = stream.listen(
       (pos) {
         if (!shouldHandleStreamEvent(
@@ -421,6 +447,7 @@ class GeolocatorLocationEngine implements LocationEngine {
         )) {
           return;
         }
+        streamReady = true;
         if (!ready.isCompleted) ready.complete();
         _emitPosition(pos);
       },
@@ -440,11 +467,24 @@ class GeolocatorLocationEngine implements LocationEngine {
         if (!ready.isCompleted) {
           ready.completeError(e, st);
         }
+        final terminalProviderError = isTerminalProviderError(e);
+        if (shouldRecoverTerminalProviderError(
+          running: _running,
+          usingLocationManagerFallback: _usingLocationManagerFallback,
+          recoveryInFlight: _streamRecoveryInFlight,
+          isApplePlatform: Platform.isIOS,
+          terminalProviderError: terminalProviderError,
+          streamReady: streamReady,
+          supportsLocationManagerFallback: Platform.isAndroid,
+        )) {
+          _handleStreamDone();
+          return;
+        }
         if (shouldReportStreamError(
           running: _running,
           usingLocationManagerFallback: _usingLocationManagerFallback,
           isApplePlatform: Platform.isIOS,
-          terminalProviderError: isTerminalProviderError(e),
+          terminalProviderError: terminalProviderError,
         )) {
           _reportEndedStream(st);
           return;

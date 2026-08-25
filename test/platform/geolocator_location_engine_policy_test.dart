@@ -319,6 +319,57 @@ void main() {
     );
   });
 
+  test('terminal Android fused errors recover after the stream is ready', () {
+    expect(
+      GeolocatorLocationEngine.shouldRecoverTerminalProviderError(
+        running: true,
+        usingLocationManagerFallback: false,
+        recoveryInFlight: false,
+        isApplePlatform: false,
+        terminalProviderError: true,
+        streamReady: true,
+        supportsLocationManagerFallback: true,
+      ),
+      isTrue,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldRecoverTerminalProviderError(
+        running: true,
+        usingLocationManagerFallback: false,
+        recoveryInFlight: false,
+        isApplePlatform: false,
+        terminalProviderError: true,
+        streamReady: false,
+        supportsLocationManagerFallback: true,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldRecoverTerminalProviderError(
+        running: true,
+        usingLocationManagerFallback: false,
+        recoveryInFlight: false,
+        isApplePlatform: true,
+        terminalProviderError: true,
+        streamReady: true,
+        supportsLocationManagerFallback: true,
+      ),
+      isFalse,
+    );
+    expect(
+      GeolocatorLocationEngine.shouldRecoverTerminalProviderError(
+        running: true,
+        usingLocationManagerFallback: false,
+        recoveryInFlight: false,
+        isApplePlatform: false,
+        terminalProviderError: true,
+        streamReady: true,
+        supportsLocationManagerFallback: false,
+      ),
+      isFalse,
+    );
+  });
+
   test('provider error classification excludes transient timeouts', () {
     expect(
       GeolocatorLocationEngine.isTerminalProviderError(
