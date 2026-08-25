@@ -58,6 +58,20 @@ void main() {
       expect(floored.minute, 3);
       expect(floored.toUtc(), DateTime.utc(2026, 8, 21, 15, 3));
     });
+
+    test('unknown timezone falls back to the device local timeline', () {
+      final local = DateTime(2026, 8, 21, 15, 3, 45);
+
+      final converted = asLocal(local, timezone: 'Mars/NotARealZone');
+      expect(converted.isUtc, isFalse);
+      expect(converted.toUtc(), local.toUtc());
+
+      final parsed = parseStoredInstant(
+        '2026-08-21T15:03:45',
+        timezone: 'Mars/NotARealZone',
+      );
+      expect(parsed, local.toUtc());
+    });
   });
 
   group('pathDistanceMeters', () {
