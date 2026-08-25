@@ -182,6 +182,7 @@ void main() {
     expect(source, contains('원래 통계로 복원'));
     expect(source, contains("cold|warm"));
     expect(source, contains('SANBO_ANDROID_NOTIFICATION_PERMISSION'));
+    expect(source, contains("grep -Fq 'permission_message' \"\$ui_xml\""));
     expect(source, contains('알림 권한 거부 뒤 앱 내부 high-speed 경고'));
   });
 

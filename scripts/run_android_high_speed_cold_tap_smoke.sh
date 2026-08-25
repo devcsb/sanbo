@@ -167,6 +167,21 @@ wait_text() {
   return 1
 }
 
+dismiss_notification_prompt() {
+  [[ "$NOTIFICATION_PERMISSION" == "deny" ]] || return 0
+  for _ in 1 2 3; do
+    tap_text 'Don’t allow' 5 ||
+      tap_text "Don't allow" 5 ||
+      tap_text '허용 안 함' 5 ||
+      tap_text '알림 허용 안 함' 5 || true
+    dump_ui || true
+    if ! grep -Fq 'permission_message' "$ui_xml"; then
+      return 0
+    fi
+    sleep 1
+  done
+}
+
 wait_notification() {
   local deadline=$((SECONDS + 30))
   while (( SECONDS < deadline )); do
@@ -377,10 +392,7 @@ tap_text '산책 시작' 30 || fail '산책 시작 버튼을 찾지 못했습니
 if [[ "$NOTIFICATION_PERMISSION" == "grant" ]]; then
   tap_text '허용' 3 || tap_text 'Allow' 3 || true
 else
-  tap_text 'Don’t allow' 5 ||
-    tap_text "Don't allow" 5 ||
-    tap_text '허용 안 함' 5 ||
-    tap_text '알림 허용 안 함' 5 || true
+  dismiss_notification_prompt
 fi
 wait_text '기록 중' 30 || fail '기록 상태로 전환되지 않았습니다.'
 
