@@ -33,6 +33,8 @@ class _FakeSessionNotifications implements SessionNotificationService {
   Completer<void>? cancelAllRelease;
   Completer<void>? cancelRelease;
   Completer<void>? showRelease;
+  Completer<void>? permissionRequestStarted;
+  Completer<void>? permissionRequestRelease;
   int tapDeliveries = 0;
   SessionNotificationTap? _pendingColdTap;
   late final _tapController =
@@ -64,6 +66,10 @@ class _FakeSessionNotifications implements SessionNotificationService {
 
   @override
   Future<NotificationPermissionResult> requestPermission() async {
+    final started = permissionRequestStarted;
+    if (started != null && !started.isCompleted) started.complete();
+    final release = permissionRequestRelease;
+    if (release != null) await release.future;
     return NotificationPermissionResult.granted;
   }
 
@@ -162,6 +168,57 @@ void main() {
     await stopping;
     expect(completed, isTrue);
   });
+
+  test(
+    'a pending notification permission request cannot block recording start or stop',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      var clockNow = DateTime(2026, 8, 25, 9);
+      final notifications = _FakeSessionNotifications()
+        ..permissionRequestStarted = Completer<void>()
+        ..permissionRequestRelease = Completer<void>();
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionNotificationServiceProvider.overrideWithValue(notifications),
+          sessionClockProvider.overrideWithValue(() => clockNow),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      final starting = controller.start();
+      await notifications.permissionRequestStarted!.future;
+
+      try {
+        await starting.timeout(const Duration(seconds: 1));
+        expect(controller.state.isTracking, isTrue);
+
+        final session = controller.state.session!;
+        clockNow = session.startedAt.add(const Duration(seconds: 20));
+        controller.debugIngestSamples(
+          buildWalkTrace(
+            start: session.startedAt,
+            duration: const Duration(seconds: 20),
+            step: const Duration(seconds: 4),
+          ),
+        );
+        expect(controller.state.validSampleCount, greaterThanOrEqualTo(5));
+        final ended = await controller.stop();
+        expect(ended?.status, SessionStatus.completed);
+      } finally {
+        if (!notifications.permissionRequestRelease!.isCompleted) {
+          notifications.permissionRequestRelease!.complete();
+        }
+        await starting;
+      }
+    },
+  );
 
   test('replacement warning waits for a prior cancellation', () async {
     final repo = await openTestRepository();
