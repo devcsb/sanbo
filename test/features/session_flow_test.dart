@@ -457,6 +457,52 @@ void main() {
     },
   );
 
+  test(
+    'stopped recovery can finalize after a terminal stream failure',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = _ErroringLocationEngine();
+      var now = DateTime.utc(2026, 8, 21, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+
+      await controller.start();
+      final session = controller.state.session!;
+      for (var index = 0; index < 5; index++) {
+        final sample = LocationSample(
+          timestamp: session.startedAt.add(Duration(seconds: index * 8)),
+          latitude: 37.5 + index * 0.0001,
+          longitude: 127,
+          accuracyM: 5,
+          speedMps: 1.2,
+        );
+        now = sample.timestamp;
+        engine.emit(sample);
+        await Future<void>.delayed(Duration.zero);
+      }
+      engine.emitError(StateError('location_stream_ended'));
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+
+      expect(controller.state.needsRecovery, isTrue);
+      final ended = await controller.stop();
+
+      expect(ended, isNotNull);
+      expect(ended!.validSampleCount, greaterThanOrEqualTo(5));
+      expect(ended.totalDistanceM, greaterThan(20));
+      expect(engine.stopCalls, 1);
+      expect(await repo.getActiveSession(), isNull);
+    },
+  );
+
   test('ordinary location stream errors remain non-terminal', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
