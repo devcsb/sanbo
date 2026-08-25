@@ -12,6 +12,8 @@ END_LAT="${SANBO_IOS_END_LAT:-37.501000}"
 END_LON="${SANBO_IOS_END_LON:-127.000000}"
 SPEED="${SANBO_IOS_SPEED_MPS:-1}"
 SCENARIO="${SANBO_IOS_SCENARIO:-walk}"
+SCREEN_OFF="${SANBO_IOS_SCREEN_OFF:-0}"
+SCREEN_OFF_DELAY_S="${SANBO_IOS_SCREEN_OFF_DELAY_S:-45}"
 TEST_FILE="integration_test/native_location_e2e_test.dart"
 
 step() {
@@ -36,7 +38,18 @@ case "$SCENARIO" in
   *)
     fail "알 수 없는 iOS simulator smoke 시나리오입니다: $SCENARIO"
     ;;
+  esac
+
+case "$SCREEN_OFF" in
+  0|1)
+    ;;
+  *)
+    fail "SANBO_IOS_SCREEN_OFF는 0 또는 1이어야 합니다: $SCREEN_OFF"
+    ;;
 esac
+if ! [[ "$SCREEN_OFF_DELAY_S" =~ ^[0-9]+$ ]]; then
+  fail "SANBO_IOS_SCREEN_OFF_DELAY_S는 0 이상의 초여야 합니다: $SCREEN_OFF_DELAY_S"
+fi
 
 [[ "$(uname -s)" == "Darwin" ]] || fail 'iOS simulator smoke는 macOS에서만 실행할 수 있습니다.'
 command -v xcrun >/dev/null 2>&1 || fail 'xcrun이 PATH에 없습니다.'
@@ -56,7 +69,21 @@ if [[ "$available_simulators" != *"$SIMULATOR_ID"* ]]; then
   fail "사용할 수 없는 iPhone simulator입니다: $SIMULATOR_ID"
 fi
 
+screen_off_pid=''
+
+restore_screen() {
+  if [[ -n "$screen_off_pid" ]]; then
+    kill "$screen_off_pid" 2>/dev/null || true
+    wait "$screen_off_pid" 2>/dev/null || true
+    screen_off_pid=''
+  fi
+  if [[ "$SCREEN_OFF" == "1" ]]; then
+    xcrun simctl io "$SIMULATOR_ID" screenConfig power on >/dev/null 2>&1 || true
+  fi
+}
+
 location_cleanup() {
+  restore_screen
   xcrun simctl location "$SIMULATOR_ID" clear >/dev/null 2>&1 || true
 }
 trap location_cleanup EXIT
@@ -79,7 +106,17 @@ xcrun simctl location "$SIMULATOR_ID" start \
   --speed="$SPEED" \
   --interval=1 \
   "$START_LAT,$START_LON" "$END_LAT,$END_LON"
+if [[ "$SCREEN_OFF" == "1" ]]; then
+  step "iOS simulator 화면 전원 끄기 예약 (${SCREEN_OFF_DELAY_S}초 후)"
+  (
+    sleep "$SCREEN_OFF_DELAY_S"
+    xcrun simctl io "$SIMULATOR_ID" screenConfig power off
+    printf '[ios-smoke] 화면 전원을 껐습니다\n'
+  ) &
+  screen_off_pid=$!
+fi
 flutter test --no-pub "$TEST_FILE" -d "$SIMULATOR_ID"
+restore_screen
 
 # The provider integration test may leave Runner alive. Probe the notification
 # channel last from a fresh process so its lifecycle cannot affect location

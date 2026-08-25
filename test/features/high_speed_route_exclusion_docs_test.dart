@@ -257,6 +257,9 @@ void main() {
     final script = File('scripts/run_ios_simulator_smoke.sh');
     expect(script.existsSync(), isTrue);
     expect(script.readAsStringSync(), contains('SANBO_IOS_SCENARIO'));
+    expect(script.readAsStringSync(), contains('SANBO_IOS_SCREEN_OFF'));
+    expect(script.readAsStringSync(), contains('screenConfig power off'));
+    expect(script.readAsStringSync(), contains('screenConfig power on'));
     expect(
       script.readAsStringSync(),
       contains('native_high_speed_e2e_test.dart'),

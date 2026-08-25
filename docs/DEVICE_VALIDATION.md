@@ -206,6 +206,18 @@ IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
 이상 거리 저장을 확인한다. 앱 전면에서는 시스템 알림을 게시하지 않는 계약도
 검사하며, simulator 결과는 물리 iPhone 검증으로 승격하지 않는다.
 
+simulator 화면 전원 끄기 조건을 반복하려면 `SANBO_IOS_SCREEN_OFF=1`을 추가한다.
+기본 45초 뒤 화면을 끄며, Xcode 빌드와 앱 실행이 끝난 뒤 위치 provider가 계속
+동작하는지 확인한다. `SANBO_IOS_SCREEN_OFF_DELAY_S`로 지연 시간을 조정할 수
+있지만 이 조건은 iOS 잠금 화면이나 물리 iPhone 절전 정책을 대체하지 않는다.
+
+```bash
+IOS_SIMULATOR_ID=96749A10-F3A8-4C98-87EE-79A8EE439BDA \
+  SANBO_IOS_SCENARIO=high_speed \
+  SANBO_IOS_SCREEN_OFF=1 \
+  bash scripts/run_ios_simulator_smoke.sh
+```
+
 ## 최근 자동 검증 로그
 
 2026-08-23에 Flutter 3.47.1 환경에서 다음 결과를 확인했다.
