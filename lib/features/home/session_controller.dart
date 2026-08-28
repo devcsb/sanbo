@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../application/session/session_persistence_coordinator.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/session_warning.dart';
@@ -168,8 +169,19 @@ class SessionController extends Notifier<LiveSessionState> {
   StreamSubscription<LocationSample>? _sampleSub;
   final List<LocationSample> _sessionSamples = [];
 
-  /// Samples not yet flushed to SQLite.
-  final List<LocationSample> _pendingPersist = [];
+  /// Persistence state is kept behind a small coordinator so the facade can
+  /// continue owning safety and lifecycle decisions without duplicating batch
+  /// retry rules.
+  late final SessionPersistenceCoordinator _persistence =
+      SessionPersistenceCoordinator(
+        insertSamples: (sessionId, samples) =>
+            _repo.insertSamples(sessionId, samples),
+        isGenerationCurrent: (generation) => generation == _sessionGeneration,
+      );
+
+  List<LocationSample> get _pendingPersist => _persistence.pendingSamples;
+
+  SessionMaintenanceQueue get _maintenanceQueue => _persistence.queue;
 
   /// Last filter-accepted sample for O(1) live distance updates.
   LocationSample? _lastValidSample;
@@ -187,7 +199,6 @@ class SessionController extends Notifier<LiveSessionState> {
   late SessionNotificationService _notifications;
   late DateTime Function() _clock;
   late Future<String> Function() _timezone;
-  final _maintenanceQueue = SessionMaintenanceQueue();
   var _sessionGeneration = 0;
   var _endingSession = false;
   bool _autoStopInProgress = false;
@@ -207,6 +218,7 @@ class SessionController extends Notifier<LiveSessionState> {
   bool _restoring = false;
   Future<void>? _restoreOperation;
   Future<void>? _locationFailureCleanup;
+  LocationEngine? _resolvedEngine;
   SessionNotificationTap? _pendingNotificationTap;
   Future<void> _notificationTail = Future<void>.value();
 
@@ -232,8 +244,38 @@ class SessionController extends Notifier<LiveSessionState> {
       unawaited(_enqueueNotification(_notifications.cancelAllWarnings));
       unawaited(_sampleSub?.cancel() ?? Future<void>.value());
       _sampleSub = null;
+      final engine = _resolvedEngine;
+      if (engine != null) {
+        unawaited(_disposeLocationEngine(engine));
+      }
     });
     return const LiveSessionState();
+  }
+
+  /// A provider/container can be torn down independently of an explicit stop
+  /// action (for example during a hot restart or host replacement). Cancelling
+  /// the Dart subscription alone does not guarantee that a native FGS/GPS
+  /// provider has released its resources, so make engine cleanup idempotent
+  /// and best-effort at the lifecycle boundary as well.
+  Future<void> _disposeLocationEngine(LocationEngine engine) async {
+    final failureCleanup = _locationFailureCleanup;
+    if (failureCleanup != null) {
+      try {
+        await failureCleanup;
+      } catch (_) {
+        // Continue to the native stop/dispose calls even after failed cleanup.
+      }
+    }
+    try {
+      await engine.stop();
+    } catch (_) {
+      // Teardown must not surface an asynchronous provider error.
+    }
+    try {
+      await engine.dispose();
+    } catch (_) {
+      // Teardown is best-effort; the host is already disposing this scope.
+    }
   }
 
   /// Call after app start (bootstrap) to recover incomplete sessions.
@@ -290,7 +332,14 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   WalkRepository get _repo => ref.read(walkRepositoryProvider);
-  LocationEngine get _engine => ref.read(locationEngineProvider);
+  LocationEngine get _engine {
+    final cached = _resolvedEngine;
+    if (cached != null) return cached;
+    final resolved = ref.read(locationEngineProvider);
+    _resolvedEngine = resolved;
+    return resolved;
+  }
+
   SessionPipeline get _pipeline => ref.read(sessionPipelineProvider);
 
   void _recomputeLiveMetricsFromBuffer({
@@ -538,8 +587,9 @@ class SessionController extends Notifier<LiveSessionState> {
     _sessionDeadlines = _deadlinesFromSession(session);
     final stationaryWarningAt = _sessionDeadlines?.stationaryWarningAt;
     final stationaryLimitAt = _sessionDeadlines?.stationaryLimitAt;
-    _persistedStationarySince = stationaryWarningAt
-        ?.subtract(_sessionGuard.policy.stationaryWarningAfter);
+    _persistedStationarySince = stationaryWarningAt?.subtract(
+      _sessionGuard.policy.stationaryWarningAfter,
+    );
     _persistedStationarySince ??= stationaryLimitAt?.subtract(
       _sessionGuard.policy.stationaryLimit,
     );
@@ -754,14 +804,14 @@ class SessionController extends Notifier<LiveSessionState> {
         (_endingSession && !allowEnding)) {
       return;
     }
-    final batch = List<LocationSample>.of(_pendingPersist);
-    _pendingPersist.clear();
-    try {
-      await _repo.insertSamples(session.id, batch);
-    } catch (_) {
-      // Keep samples in memory; retry on next checkpoint / stop.
-      _pendingPersist.insertAll(0, batch);
-    }
+    final write = allowEnding
+        ? _persistence.flushForStop
+        : _persistence.checkpoint;
+    await write(
+      sessionId: session.id,
+      samples: _pendingPersist,
+      generation: generation,
+    );
   }
 
   Future<void> start({TrackingMode mode = TrackingMode.balanced}) async {
@@ -1036,7 +1086,7 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   bool _isTerminalLocationStreamError(Object error) {
-    return error.toString().contains('location_stream_ended');
+    return classifyLocationFailure(error) == LocationFailureKind.streamEnded;
   }
 
   void _handleLocationStreamDone(int generation) {
@@ -1057,13 +1107,11 @@ class SessionController extends Notifier<LiveSessionState> {
       await _maintenanceQueue.close();
       final session = state.session;
       if (session == null || _pendingPersist.isEmpty) return;
-      final batch = List<LocationSample>.of(_pendingPersist);
-      _pendingPersist.clear();
-      try {
-        await _repo.insertSamples(session.id, batch);
-      } catch (_) {
-        _pendingPersist.insertAll(0, batch);
-      }
+      await _persistence.flushForStop(
+        sessionId: session.id,
+        samples: _pendingPersist,
+        generation: _sessionGeneration,
+      );
     } finally {
       await _cancelSessionGuard();
     }
@@ -1512,36 +1560,32 @@ class SessionController extends Notifier<LiveSessionState> {
   }
 
   String _locationErrorMessage(Object e) {
-    final s = e.toString().toLowerCase();
-    if (s.contains('permission')) {
-      return '위치 권한이 필요합니다. 허용 후 다시 시작해 주세요.';
-    }
-    if (s.contains('service') || s.contains('disabled')) {
-      return '위치 서비스가 꺼져 있습니다. 기기 설정에서 위치를 켜 주세요.';
-    }
-    if (s.contains('timeout') || s.contains('no_fix')) {
-      return 'GPS 신호를 받지 못했어요. 하늘이 보이는 곳에서 다시 시도하고 정확한 위치 권한을 확인해 주세요.';
-    }
-    if (s.contains('notification') || s.contains('foreground')) {
-      return '백그라운드 위치 기록을 시작하지 못했어요. 앱 화면에서 다시 시작하고 위치 권한을 확인해 주세요.';
-    }
-    return '위치를 받는 중 문제가 생겼습니다. 잠시 후 다시 시도해 주세요.';
+    return switch (classifyLocationFailure(e)) {
+      LocationFailureKind.permission => '위치 권한이 필요합니다. 허용 후 다시 시작해 주세요.',
+      LocationFailureKind.serviceDisabled =>
+        '위치 서비스가 꺼져 있습니다. 기기 설정에서 위치를 켜 주세요.',
+      LocationFailureKind.timeout =>
+        'GPS 신호를 받지 못했어요. 하늘이 보이는 곳에서 다시 시도하고 정확한 위치 권한을 확인해 주세요.',
+      LocationFailureKind.notification ||
+      LocationFailureKind.backgroundLocation =>
+        '백그라운드 위치 기록을 시작하지 못했어요. 앱 화면에서 다시 시작하고 위치 권한을 확인해 주세요.',
+      LocationFailureKind.streamEnded ||
+      LocationFailureKind.generic => '위치를 받는 중 문제가 생겼습니다. 잠시 후 다시 시도해 주세요.',
+    };
   }
 
   SessionErrorCode _locationErrorCode(Object e) {
-    final value = e.toString().toLowerCase();
-    if (value.contains('permission')) return SessionErrorCode.permission;
-    if (value.contains('service') || value.contains('disabled')) {
-      return SessionErrorCode.locationServiceDisabled;
-    }
-    if (value.contains('notification')) return SessionErrorCode.notification;
-    if (value.contains('foreground')) {
-      return SessionErrorCode.backgroundLocation;
-    }
-    if (value.contains('timeout') || value.contains('no_fix')) {
-      return SessionErrorCode.unavailable;
-    }
-    return SessionErrorCode.generic;
+    return switch (classifyLocationFailure(e)) {
+      LocationFailureKind.permission => SessionErrorCode.permission,
+      LocationFailureKind.serviceDisabled =>
+        SessionErrorCode.locationServiceDisabled,
+      LocationFailureKind.notification => SessionErrorCode.notification,
+      LocationFailureKind.backgroundLocation =>
+        SessionErrorCode.backgroundLocation,
+      LocationFailureKind.timeout => SessionErrorCode.unavailable,
+      LocationFailureKind.streamEnded ||
+      LocationFailureKind.generic => SessionErrorCode.generic,
+    };
   }
 
   /// Test / recovery helper: inject samples into the live session path.
@@ -1575,7 +1619,12 @@ class SessionController extends Notifier<LiveSessionState> {
     _appInactive = false;
     if (_appForeground == foreground && !(foreground && wasInactive)) return;
     _appForeground = foreground;
-    unawaited(_engine.setAppForeground(foreground));
+    // An idle scope may not have a location engine override (for example a
+    // standalone HomeScreen widget test). Do not resolve or wake the native
+    // adapter until a session is active or the engine has already been used.
+    if (_resolvedEngine != null || state.isTracking || state.isBusy) {
+      unawaited(_engine.setAppForeground(foreground));
+    }
     if (!foreground) {
       _ticker?.cancel();
       _ticker = null;
