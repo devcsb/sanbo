@@ -4,8 +4,8 @@
 |---|---|
 | 문서 ID | `PRD-SANBO-ARCH-UX-v0.9` |
 | 상태 | 구현 기준선 및 후속 검증 계획 |
-| 기준 릴리즈 | 0.8.x |
-| 범위 | Android 우선, 로컬 우선, GPS 세션 기록 |
+| 기준 릴리즈 | 0.9.0 |
+| 범위 | Android 우선, 로컬 우선, GPS 세션 기록 (Android API 26+) |
 | 관련 문서 | [PRD](./PRD.md), [TRD](./TRD.md), [PLATFORM_AND_MAPS](./PLATFORM_AND_MAPS.md) |
 
 ## 1. 제품 판단 요약
@@ -169,18 +169,17 @@ Recoverable ── retry/restore → Tracking or Saving
 
 ## 7. 릴리즈 단계
 
-### v0.9 (이번 기준선)
+### v0.9.0 (이번 기준선)
 
 - DB v6 안전 데드라인·단일 active 세션·멱등 저장
 - 모드별 위치 요청 프로필과 FGS/알림 오류 분리
-- 일 단위 GPS/Health 데이터 분리 계약
+- 일 단위 GPS/Health 데이터 분리 계약과 Health Connect/HealthKit 읽기 어댑터
 - 백업/가져오기와 복구 UX
 - 상세 화면 장소 조회·지도 geometry 캐시
 - reduced-motion·Semantics·오류 CTA 정리
 
 ### v0.10 (실기기 검증 후)
 
-- 실제 Health Connect/HealthKit 읽기 어댑터
 - 기기별 배터리 회귀 대시보드(로컬 진단 파일, 기본 전송 없음)
 - 오프라인 지도 캐시 정책의 명시적 UX
 - 다중 세션 날짜 집계·시간대 변경 시나리오 확장
@@ -195,7 +194,8 @@ Recoverable ── retry/restore → Tracking or Saving
 
 1. `SessionController`와 `WalkRepository`는 여전히 크다. 이번 릴리즈에서는 순수 정책·저장 경계를 추가해 위험을 낮추고, 다음 단계에서 수명주기·안전·표시 조정자를 별도 서비스로 추출한다.
 2. 실제 기기 배터리와 Android 제조사별 백그라운드 정책은 자동 테스트로 증명할 수 없다. 출시 전 매트릭스를 필수 QA로 둔다.
-3. Health Connect/HealthKit은 계약만 준비되어 있고 플랫폼 권한·집계 중복·기기 간 source precedence는 어댑터 구현 시 확정한다.
+3. Health Connect/HealthKit 읽기는 사용자가 명시적으로 연결할 때만 실행한다. Android Health Connect의
+   기본 과거 조회 한도(권한 허용 시점 기준 30일)와 iOS 잠금 상태의 보호 데이터 제한은 UI/설정 안내와
+   실기기 QA에서 확인해야 한다. 여러 기기의 합계는 플랫폼 aggregate API에 맡기고 앱에서 GPS와 합산하지 않는다.
 4. OSM/CARTO 타일 사용량·약관·오프라인 캐시 정책은 배포 환경에서 재검토한다.
 5. 행동과학 근거는 일반 UX 원칙의 참고자료이지 사용자 개인의 정신건강 상태를 추론하거나 치료하는 근거가 아니다.
-

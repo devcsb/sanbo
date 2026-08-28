@@ -4,6 +4,7 @@ import '../../data/activity_data_source.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/services/daily_walk_stats.dart';
+import '../../domain/services/local_calendar.dart' as calendar;
 import '../../domain/services/walk_stats.dart';
 
 const historyPageSize = 50;
@@ -72,16 +73,16 @@ final dailyActivityProvider = FutureProvider<DailyActivitySnapshot>((
 ) async {
   ref.watch(historyTickProvider);
   final weekEnd = ref.watch(dailyWeekEndProvider);
-  final weekStart = weekEnd.subtract(const Duration(days: 6));
+  final weekStart = addLocalCalendarDays(weekEnd, -6);
   final repo = ref.watch(walkRepositoryProvider);
   final days = await repo.dailyStats(
     startDate: weekStart,
-    endDateExclusive: weekEnd.add(const Duration(days: 1)),
+    endDateExclusive: addLocalCalendarDays(weekEnd, 1),
   );
   final source = ref.watch(activityDataSourceProvider);
   final sourceRows = await source.readDailySteps(
     startDate: weekStart,
-    endDateExclusive: weekEnd.add(const Duration(days: 1)),
+    endDateExclusive: addLocalCalendarDays(weekEnd, 1),
   );
   final stepsByDate = <DateTime, DailyStepSnapshot>{
     for (final row in sourceRows) localDateOnly(row.date): row,
@@ -104,8 +105,11 @@ final dailyActivityProvider = FutureProvider<DailyActivitySnapshot>((
 final historyTickProvider = StateProvider<int>((ref) => 0);
 
 DateTime localDateOnly(DateTime value) {
-  final local = value.isUtc ? value.toLocal() : value;
-  return DateTime(local.year, local.month, local.day);
+  return calendar.localDateOnly(value);
+}
+
+DateTime addLocalCalendarDays(DateTime value, int days) {
+  return calendar.addLocalCalendarDays(value, days);
 }
 
 /// Refreshes the automatic “today” window without overwriting a week the user

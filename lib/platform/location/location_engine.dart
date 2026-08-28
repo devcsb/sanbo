@@ -1,8 +1,50 @@
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/tracking_mode.dart';
 
+enum LocationFailureKind {
+  permission,
+  serviceDisabled,
+  notification,
+  backgroundLocation,
+  timeout,
+  streamEnded,
+  generic,
+}
+
+/// Stable error vocabulary shared by platform adapters and the controller.
+/// Native/plugin exceptions are still accepted at the boundary, but UI code
+/// no longer has to parse their localized `toString()` output.
+final class LocationEngineFailure implements Exception {
+  const LocationEngineFailure(this.kind, {this.cause});
+
+  final LocationFailureKind kind;
+  final Object? cause;
+
+  @override
+  String toString() => 'location_${kind.name}';
+}
+
+LocationFailureKind classifyLocationFailure(Object error) {
+  if (error is LocationEngineFailure) return error.kind;
+  final value = error.toString().toLowerCase();
+  if (value.contains('permission')) return LocationFailureKind.permission;
+  if (value.contains('service') || value.contains('disabled')) {
+    return LocationFailureKind.serviceDisabled;
+  }
+  if (value.contains('notification')) return LocationFailureKind.notification;
+  if (value.contains('foreground')) {
+    return LocationFailureKind.backgroundLocation;
+  }
+  if (value.contains('timeout') || value.contains('no_fix')) {
+    return LocationFailureKind.timeout;
+  }
+  if (value.contains('stream_ended')) return LocationFailureKind.streamEnded;
+  return LocationFailureKind.generic;
+}
+
 enum LocationPermissionState {
   granted,
+
   /// Foreground location is available, but iOS Always permission was denied.
   /// Tracking can continue while the app is visible.
   grantedForegroundOnly,

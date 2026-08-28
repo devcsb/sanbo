@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Harden the existing local-first walk recorder so concurrent writes, crash recovery, five-hour safety limits, detail playback, and daily activity presentation remain correct and battery-conscious while leaving room for Health Connect/HealthKit adapters.
+**Goal:** Harden the existing local-first walk recorder so concurrent writes, crash recovery, five-hour safety limits, detail playback, and daily activity presentation remain correct and battery-conscious, with an explicit Health Connect/HealthKit read path.
 
 **Architecture:** Keep the current Riverpod and repository seams while extracting only deterministic policies and transactional boundaries that can be tested without a device. SQLite remains the source of truth for sessions, samples, and windows; GPS remains an explicit-session adapter, while a future health adapter exposes daily steps as a separate provenance-bearing stream. UI providers stay read-only and map playback separates static geometry from the moving cursor.
 
@@ -31,7 +31,7 @@
 - Modify `lib/features/session_detail/session_detail_screen.dart`: make the detail provider read-only and move place enrichment to an explicit command.
 - Modify `lib/shared/widgets/route_map.dart`: cache static `LatLng` geometry and keep playback cursor layers dynamic.
 - Modify `lib/features/history/history_providers.dart`: refresh local date selection on resume/date rollover.
-- Create `lib/data/activity_data_source.dart`: source/provenance contract for future Health Connect/HealthKit daily steps without coupling GPS and health data; `DailyActivitySnapshot` gains `Map<DateTime, DailyStepSnapshot> stepsByDate`.
+- Create `lib/data/activity_data_source.dart`: source/provenance contract for Health Connect/HealthKit daily steps without coupling GPS and health data; `DailyActivitySnapshot` gains `Map<DateTime, DailyStepSnapshot> stepsByDate`.
 - Modify `lib/features/history/daily_activity_panel.dart` and its providers: present steps, GPS walk totals, and coverage/permission state as separate cards.
 - Extend `test/data/app_database_migration_test.dart`, `test/data/walk_repository_test.dart`, `test/features/session_guard_flow_test.dart`, `test/features/ux_history_detail_widget_test.dart`, and create `test/domain/session_deadline_test.dart` and `test/data/activity_data_source_test.dart`.
 
@@ -235,7 +235,7 @@ Expected: FAIL because the source contract and resume refresh do not exist.
 
 - [ ] **Step 3: Add the source seam and explicit daily aggregate model**
 
-Create the contract and unavailable adapter. Add an `activityDataSourceProvider` override point. In `dailyActivityProvider`, read the source and return both `DailyWalkStats` and `DailyStepSnapshot` keyed by local date; never convert unavailable to 0. Keep the actual Health Connect/HealthKit plugin adapters out of this slice until platform permission UX and aggregate query behavior are validated separately.
+Create the contract and unavailable adapter. Add an `activityDataSourceProvider` override point. In `dailyActivityProvider`, read the source and return both `DailyWalkStats` and `DailyStepSnapshot` keyed by local date; never convert unavailable to 0. Add a platform adapter behind a separate reader interface so permission UX and aggregate query behavior can be tested independently of method channels.
 
 - [ ] **Step 4: Refresh local date state on resume and render separate cards**
 
@@ -300,4 +300,4 @@ Commit with `git add lib/features/session_detail/session_detail_screen.dart lib/
 - Spec coverage: Tasks 1–2 cover durable storage, idempotency, and five-hour/stationary safety; Task 3 covers read purity and playback performance; Task 4 covers date rollover and the Health source seam; Task 5 covers reduced motion, typed errors, atomic flags, and evidence/document drift.
 - Placeholder scan: no step relies on “later”, “TBD”, or unspecified error handling; all new interfaces and test commands are named.
 - Type consistency: `SessionDeadlines`, `SessionDeadlinePolicy`, `DailyStepSnapshot`, `ActivityDataSource`, `RouteMapGeometry`, and `SessionErrorCode` are introduced before consumers and retain existing repository/controller entry points.
-- Scope control: real Health Connect/HealthKit permission adapters and physical measurements are intentionally verification/follow-up work, not simulated in the local test suite.
+- Scope control: the Health Connect/HealthKit adapter is read-only and on-demand; physical battery measurements and store-policy validation remain verification/follow-up work, not simulated in the local test suite.

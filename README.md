@@ -6,7 +6,7 @@
 
 <img src="https://img.shields.io/badge/Flutter-3.47-02569B?style=flat-square&logo=flutter&logoColor=white" />
 <img src="https://img.shields.io/badge/Dart-3.12-0175C2?style=flat-square&logo=dart&logoColor=white" />
-<img src="https://img.shields.io/badge/Android-API%2024+-3DDC84?style=flat-square&logo=android&logoColor=white" />
+<img src="https://img.shields.io/badge/Android-API%2026+-3DDC84?style=flat-square&logo=android&logoColor=white" />
 <img src="https://img.shields.io/badge/License-MIT-yellow?style=flat-square" />
 
 # 산보 (sanbo)
@@ -122,7 +122,7 @@
 
 **요구 사항**
 - Flutter 3.47.1+ / Dart 3.12.2+
-- Android SDK (API 24+, JDK 17)  
+- Android SDK (API 26+, JDK 17)
 
 ```bash
 # 1. 저장소 클론
@@ -259,6 +259,7 @@ flutter test --concurrency=1
 | 0.7.1 | 장기 기록 저장 복구 · GPS gap 통계 · 대용량 백업 응답성 · 릴리스 서명/manifest 게이트 강화 | ✅ |
 | 0.7.2 | 기록 화면 최근 7일 일별 운동량 API·UI · 장시간 GPS 거리·속도 보정 · 5시간 세션 자동 종료 정책 | ✅ |
 | 0.8.0 | 고속 이동 종료 확인·알림 · 완료 기록 구간 제외/복원 · 위치 스트림·알림 복구 강화 · iOS 알림 탭 경로 정비 | ✅ |
+| 0.9.0 | 배터리·Health 데이터 캐시·일별 운동량 · 저장/복구 경계 · 접근성·화면 전환·긴 경로 재생 성능 고도화 | ✅ |
 | v1 | 공유 시트 · GPX 내보내기 · POI 카테고리 | 🔜 |
 | Later | iOS, 온디바이스 ML, 일기 연동 | 🔜 |
 

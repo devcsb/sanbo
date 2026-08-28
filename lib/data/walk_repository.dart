@@ -17,6 +17,7 @@ import '../domain/pipeline/segment_merger.dart';
 import '../domain/pipeline/session_rollup.dart';
 import '../domain/services/app_backup.dart';
 import '../domain/services/daily_walk_stats.dart';
+import '../domain/services/local_calendar.dart' as calendar;
 import '../domain/services/session_deadline.dart';
 import '../domain/services/session_guard.dart';
 import '../domain/services/session_pipeline.dart';
@@ -250,7 +251,7 @@ WHERE status = ?
     for (
       var day = start;
       day.isBefore(end);
-      day = day.add(const Duration(days: 1))
+      day = calendar.addLocalCalendarDays(day, 1)
     ) {
       days.add(grouped[_dateKey(day)] ?? DailyWalkStats.zero(day));
     }
@@ -1989,8 +1990,7 @@ WHERE w.session_id = ?
   }
 
   DateTime _localDateOnly(DateTime value) {
-    final local = value.isUtc ? value.toLocal() : value;
-    return DateTime(local.year, local.month, local.day);
+    return calendar.localDateOnly(value);
   }
 
   String _dateKey(DateTime value) {

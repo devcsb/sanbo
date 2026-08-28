@@ -9,7 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
@@ -37,7 +37,7 @@ internal fun shouldAcceptNotificationReadinessAck(
     ackGeneration: Int,
 ): Boolean = currentGeneration == ackGeneration
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FlutterFragmentActivity() {
     private val methodChannelName = "sanbo/session_notifications"
     private val notificationChannelId = "sanbo_session_alerts"
     private var notificationMethodChannel: MethodChannel? = null

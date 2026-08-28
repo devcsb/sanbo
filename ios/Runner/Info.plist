@@ -12,6 +12,10 @@
 	<string>산책 경로를 분 단위로 기록하기 위해 위치가 필요합니다.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>백그라운드에서도 산책 동선을 이어 기록하려면 위치 권한이 필요합니다.</string>
+	<key>NSHealthShareUsageDescription</key>
+	<string>일별 운동량 화면에서 걸음 수를 보여주기 위해 건강 데이터 읽기 권한이 필요합니다.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>산보는 건강 데이터를 기록하거나 수정하지 않습니다.</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>

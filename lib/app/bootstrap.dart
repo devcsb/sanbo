@@ -7,13 +7,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import '../app.dart';
+import '../data/activity_data_source.dart';
 import '../data/walk_repository.dart';
 import '../features/home/session_controller.dart';
+import '../features/history/history_providers.dart';
 import '../features/intro/intro_providers.dart';
 import '../features/settings/tracking_mode_setting.dart';
 import '../platform/location/geolocator_location_engine.dart';
 import '../platform/location/location_engine.dart';
 import '../platform/location/synthetic_location_engine.dart';
+import '../platform/activity/health_activity_data_source.dart';
 import '../platform/notifications/session_notification_service.dart';
 import '../platform/prefs/app_flags.dart';
 
@@ -23,6 +26,7 @@ const appLogName = 'sanbo';
 Future<void> bootstrapAndRun({
   WalkRepository? repository,
   LocationEngine? locationEngine,
+  ActivityDataSource? activityDataSource,
 }) async {
   WidgetsFlutterBinding.ensureInitialized();
   _installErrorLogging();
@@ -36,6 +40,11 @@ Future<void> bootstrapAndRun({
           : SyntheticLocationEngine(
               permission: LocationPermissionState.granted,
             ));
+  final activity =
+      activityDataSource ??
+      (Platform.isAndroid || Platform.isIOS
+          ? createPlatformHealthActivityDataSource()
+          : const UnavailableActivityDataSource());
 
   final flagsStore = AppFlagsStore();
   final flags = await flagsStore.load();
@@ -47,6 +56,7 @@ Future<void> bootstrapAndRun({
     overrides: [
       walkRepositoryProvider.overrideWithValue(repo),
       locationEngineProvider.overrideWithValue(engine),
+      activityDataSourceProvider.overrideWithValue(activity),
       sessionNotificationServiceProvider.overrideWithValue(notifications),
       appFlagsStoreProvider.overrideWithValue(flagsStore),
       introSeenProvider.overrideWith((ref) => flags.hasSeenIntro),
