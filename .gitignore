@@ -30,6 +30,9 @@ migrate_working_dir/
 *.apk
 *.aab
 
+# Local isolated worktrees
+.worktrees/
+
 # Source brand drops at repo root (canonical copies live in assets/branding/)
 /sanbo-icon.jpg
 /sanbo-main.jpg
