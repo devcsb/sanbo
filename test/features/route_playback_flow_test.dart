@@ -91,6 +91,8 @@ void main() {
     await tester.pump(const Duration(milliseconds: 850));
     final advancedSlider = tester.widget<Slider>(sliderFinder);
     expect(advancedSlider.value, greaterThan(0));
+    final advancedMap = tester.widget<RouteMap>(find.byType(RouteMap));
+    expect(identical(advancedMap.geometry, initialMap.geometry), isTrue);
 
     final segmentFinder = find.byWidgetPredicate((widget) {
       final key = widget.key;

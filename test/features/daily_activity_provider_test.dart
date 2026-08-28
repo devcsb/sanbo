@@ -1,3 +1,4 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sanbo/data/activity_data_source.dart';
@@ -129,6 +130,50 @@ void main() {
 
     expect(snapshot.days.last.totalDistanceM, 0);
     expect(snapshot.stepsByDate[fixedToday]?.steps, 1234);
+  });
+
+  testWidgets('foreground rollover advances an automatic today window', (
+    tester,
+  ) async {
+    late WidgetRef capturedRef;
+    final oldToday = DateTime(2026, 8, 15);
+    final container = ProviderContainer(
+      overrides: [
+        dailyWeekEndProvider.overrideWith((_) => oldToday),
+        dailySelectedDayProvider.overrideWith((_) => oldToday),
+        dailyAutoWeekEndProvider.overrideWith((_) => oldToday),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: Consumer(
+          builder: (context, ref, child) {
+            capturedRef = ref;
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+
+    refreshCurrentLocalDate(capturedRef, now: DateTime(2026, 8, 16, 0, 5));
+    expect(container.read(dailyWeekEndProvider), DateTime(2026, 8, 16));
+    expect(container.read(dailySelectedDayProvider), DateTime(2026, 8, 16));
+
+    // Once the user navigates to another week, a later resume updates only
+    // the automatic anchor and leaves that deliberate selection untouched.
+    container.read(dailyWeekEndProvider.notifier).state = DateTime(2026, 8, 8);
+    container.read(dailySelectedDayProvider.notifier).state = DateTime(
+      2026,
+      8,
+      8,
+    );
+    refreshCurrentLocalDate(capturedRef, now: DateTime(2026, 8, 17));
+    expect(container.read(dailyWeekEndProvider), DateTime(2026, 8, 8));
+    expect(container.read(dailySelectedDayProvider), DateTime(2026, 8, 8));
+    expect(container.read(dailyAutoWeekEndProvider), DateTime(2026, 8, 17));
   });
 }
 

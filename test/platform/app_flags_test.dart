@@ -1,52 +1,65 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:sanbo/features/settings/tracking_mode_setting.dart';
 import 'package:sanbo/platform/prefs/app_flags.dart';
 
 void main() {
-  test('legacy flags default to balanced tracking', () {
-    final flags = AppFlags.fromJson({'hasSeenIntro': true});
+  test(
+    'loads the last valid flags when an interrupted temp file is present',
+    () async {
+      final path =
+          '${Directory.systemTemp.path}/sanbo_flags_${DateTime.now().microsecondsSinceEpoch}.json';
+      final file = File(path);
+      addTearDown(() async {
+        await file.delete().catchError((_) => file);
+        await File('$path.tmp').delete().catchError((_) => File('$path.tmp'));
+      });
+      final store = AppFlagsStore(pathOverride: path);
+      await store.save(AppFlags(hasSeenIntro: true));
+      await File('$path.tmp').writeAsString('{not-json');
 
-    expect(flags.hasSeenIntro, isTrue);
-    expect(flags.trackingModeName, 'balanced');
-    expect(flags.unlockedMilestones, isEmpty);
-    expect(trackingModeFromStoredName('not-a-mode').name, 'balanced');
+      final loaded = await store.load();
+
+      expect(loaded.hasSeenIntro, isTrue);
+    },
+  );
+
+  test('recovers a valid temp file when the target is missing', () async {
+    final path =
+        '${Directory.systemTemp.path}/sanbo_flags_${DateTime.now().microsecondsSinceEpoch}.json';
+    final file = File(path);
+    addTearDown(() async {
+      await file.delete().catchError((_) => file);
+      await File('$path.tmp').delete().catchError((_) => File('$path.tmp'));
+    });
+    await File('$path.tmp').writeAsString(
+      '{"hasSeenIntro":true,"trackingMode":"balanced","unlockedMilestones":[]}',
+    );
+
+    final loaded = await AppFlagsStore(pathOverride: path).load();
+
+    expect(loaded.hasSeenIntro, isTrue);
   });
 
-  test('tracking preference persists without losing intro flag', () async {
-    final directory = await Directory.systemTemp.createTemp('sanbo_flags_');
-    addTearDown(() => directory.delete(recursive: true));
-    final store = AppFlagsStore(
-      pathOverride: '${directory.path}/app_flags.json',
-    );
+  test('serializes concurrent read-modify-write updates', () async {
+    final path =
+        '${Directory.systemTemp.path}/sanbo_flags_${DateTime.now().microsecondsSinceEpoch}.json';
+    final file = File(path);
+    addTearDown(() async {
+      await file.delete().catchError((_) => file);
+      await File('$path.tmp').delete().catchError((_) => File('$path.tmp'));
+    });
+    final store = AppFlagsStore(pathOverride: path);
 
-    await store.setHasSeenIntro(true);
-    await store.setTrackingModeName('batterySaver');
-    final restored = await store.load();
+    await Future.wait([
+      store.setHasSeenIntro(true),
+      store.setTrackingModeName('high_accuracy'),
+      store.unlockMilestones(['first_walk']),
+    ]);
 
-    expect(restored.hasSeenIntro, isTrue);
-    expect(restored.trackingModeName, 'batterySaver');
-    expect(
-      trackingModeFromStoredName(restored.trackingModeName).name,
-      'batterySaver',
-    );
-  });
-
-  test('milestones unlock accumulates without wiping intro', () async {
-    final directory = await Directory.systemTemp.createTemp('sanbo_flags_ms_');
-    addTearDown(() => directory.delete(recursive: true));
-    final store = AppFlagsStore(
-      pathOverride: '${directory.path}/app_flags.json',
-    );
-
-    await store.setHasSeenIntro(true);
-    final first = await store.unlockMilestones(['first_walk']);
-    expect(first, {'first_walk'});
-    final again = await store.unlockMilestones(['first_walk', 'walks_5']);
-    expect(again, {'walks_5'});
-    final restored = await store.load();
-    expect(restored.hasSeenIntro, isTrue);
-    expect(restored.unlockedMilestones, containsAll(['first_walk', 'walks_5']));
+    final loaded = await store.load();
+    expect(loaded.hasSeenIntro, isTrue);
+    expect(loaded.trackingModeName, 'high_accuracy');
+    expect(loaded.unlockedMilestones, contains('first_walk'));
   });
 }

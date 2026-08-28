@@ -29,10 +29,10 @@ class AppFlags {
   }
 
   Map<String, Object?> toJson() => {
-        'hasSeenIntro': hasSeenIntro,
-        'trackingMode': trackingModeName,
-        'unlockedMilestones': unlockedMilestones.toList()..sort(),
-      };
+    'hasSeenIntro': hasSeenIntro,
+    'trackingMode': trackingModeName,
+    'unlockedMilestones': unlockedMilestones.toList()..sort(),
+  };
 
   static AppFlags fromJson(Map<String, Object?> json) {
     final trackingMode = json['trackingMode'];
@@ -57,6 +57,7 @@ class AppFlagsStore {
   AppFlagsStore({this.pathOverride});
 
   final String? pathOverride;
+  Future<void> _writeTail = Future<void>.value();
 
   Future<File> _file() async {
     final override = pathOverride;
@@ -66,43 +67,84 @@ class AppFlagsStore {
   }
 
   Future<AppFlags> load() async {
+    // Reads wait for an in-flight atomic rename so callers never observe the
+    // previous generation halfway through a read-modify-write update.
+    await _writeTail;
+    return _loadNow();
+  }
+
+  Future<AppFlags> _loadNow() async {
+    final file = await _file();
     try {
-      final file = await _file();
-      if (!await file.exists()) return AppFlags();
-      final raw = await file.readAsString();
-      if (raw.trim().isEmpty) return AppFlags();
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return AppFlags();
-      return AppFlags.fromJson(Map<String, Object?>.from(decoded));
+      return await _readFlagsFile(file);
     } on Object {
-      return AppFlags();
+      // A process kill between the temp write and rename can leave only the
+      // sibling file. Recover it when it is valid; otherwise keep defaults.
+      try {
+        return await _readFlagsFile(File('${file.path}.tmp'));
+      } on Object {
+        return AppFlags();
+      }
     }
   }
 
   Future<void> save(AppFlags flags) async {
+    await _enqueueWrite(() => _saveNow(flags));
+  }
+
+  Future<void> _saveNow(AppFlags flags) async {
     final file = await _file();
     await file.parent.create(recursive: true);
-    await file.writeAsString(jsonEncode(flags.toJson()));
+    final temporary = File('${file.path}.tmp');
+    final access = await temporary.open(mode: FileMode.write);
+    try {
+      await access.writeString(jsonEncode(flags.toJson()));
+      await access.flush();
+    } finally {
+      await access.close();
+    }
+    await temporary.rename(file.path);
+  }
+
+  Future<AppFlags> _readFlagsFile(File file) async {
+    if (!await file.exists()) throw const FileSystemException('flags missing');
+    final raw = await file.readAsString();
+    if (raw.trim().isEmpty) throw const FormatException('flags empty');
+    final decoded = jsonDecode(raw);
+    if (decoded is! Map) throw const FormatException('flags must be an object');
+    return AppFlags.fromJson(Map<String, Object?>.from(decoded));
   }
 
   Future<void> setHasSeenIntro(bool value) async {
-    final current = await load();
-    await save(current.copyWith(hasSeenIntro: value));
+    await _enqueueWrite(() async {
+      final current = await _loadNow();
+      await _saveNow(current.copyWith(hasSeenIntro: value));
+    });
   }
 
   Future<void> setTrackingModeName(String value) async {
-    final current = await load();
-    await save(current.copyWith(trackingModeName: value));
+    await _enqueueWrite(() async {
+      final current = await _loadNow();
+      await _saveNow(current.copyWith(trackingModeName: value));
+    });
   }
 
   Future<Set<String>> unlockMilestones(Iterable<String> ids) async {
-    final current = await load();
-    final next = {...current.unlockedMilestones, ...ids};
-    if (next.length == current.unlockedMilestones.length) {
-      return {};
-    }
-    final newly = next.difference(current.unlockedMilestones);
-    await save(current.copyWith(unlockedMilestones: next));
-    return newly;
+    return _enqueueWrite(() async {
+      final current = await _loadNow();
+      final next = {...current.unlockedMilestones, ...ids};
+      if (next.length == current.unlockedMilestones.length) {
+        return <String>{};
+      }
+      final newly = next.difference(current.unlockedMilestones);
+      await _saveNow(current.copyWith(unlockedMilestones: next));
+      return newly;
+    });
+  }
+
+  Future<T> _enqueueWrite<T>(Future<T> Function() operation) {
+    final next = _writeTail.then<T>((_) => operation());
+    _writeTail = next.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return next;
   }
 }

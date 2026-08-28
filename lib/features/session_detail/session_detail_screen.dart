@@ -617,7 +617,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     if (mapContext == null && _scrollController.hasClients) {
       await _scrollController.animateTo(
         0,
-        duration: const Duration(milliseconds: 260),
+        duration: _motionDuration(context, const Duration(milliseconds: 260)),
         curve: Curves.easeOutCubic,
       );
       if (!mounted) return;
@@ -627,10 +627,16 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     if (!mounted || mapContext == null || !mapContext.mounted) return;
     await Scrollable.ensureVisible(
       mapContext,
-      duration: const Duration(milliseconds: 350),
+      duration: _motionDuration(context, const Duration(milliseconds: 350)),
       curve: Curves.easeOutCubic,
       alignment: 0.08,
     );
+  }
+
+  Duration _motionDuration(BuildContext context, Duration normal) {
+    return (MediaQuery.maybeOf(context)?.disableAnimations ?? false)
+        ? Duration.zero
+        : normal;
   }
 
   Future<void> _copySummary(BuildContext context, WidgetRef ref) async {
@@ -1579,8 +1585,12 @@ class _SegmentRow extends StatelessWidget {
       ],
     );
 
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 180),
       decoration: BoxDecoration(
         color: selected
             ? theme.colorScheme.primaryContainer.withValues(alpha: 0.42)

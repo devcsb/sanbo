@@ -1133,6 +1133,9 @@ void main() {
       overrides: [
         walkRepositoryProvider.overrideWithValue(repo),
         locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(
+          () => start.add(const Duration(minutes: 10)),
+        ),
       ],
     );
     addTearDown(container.dispose);

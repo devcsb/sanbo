@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/session_warning.dart';
+import '../../domain/models/session_error_code.dart';
 import '../../domain/models/tracking_mode.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/geo.dart';
@@ -41,6 +42,7 @@ class LiveSessionState {
     this.lastAccuracyM,
     this.permissionState = LocationPermissionState.unknown,
     this.errorMessage,
+    this.errorCode,
     this.statusMessage,
     this.notice,
     this.activeWarning,
@@ -63,6 +65,7 @@ class LiveSessionState {
   final double? lastAccuracyM;
   final LocationPermissionState permissionState;
   final String? errorMessage;
+  final SessionErrorCode? errorCode;
   final String? statusMessage;
 
   /// Calm neutral note shown on the idle home (e.g. a benign "walk not saved"
@@ -90,6 +93,7 @@ class LiveSessionState {
     double? lastAccuracyM,
     LocationPermissionState? permissionState,
     String? errorMessage,
+    SessionErrorCode? errorCode,
     String? statusMessage,
     String? notice,
     SessionWarning? activeWarning,
@@ -112,6 +116,7 @@ class LiveSessionState {
       lastAccuracyM: lastAccuracyM ?? this.lastAccuracyM,
       permissionState: permissionState ?? this.permissionState,
       errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+      errorCode: clearError ? null : (errorCode ?? this.errorCode),
       statusMessage: statusMessage,
       notice: clearNotice ? null : (notice ?? this.notice),
       activeWarning: clearActiveWarning
@@ -186,6 +191,10 @@ class SessionController extends Notifier<LiveSessionState> {
   bool _highSpeedWarningPublished = false;
   SessionDeadlines? _sessionDeadlines;
   bool _durationDeadlineWarningIssued = false;
+  bool _stationaryDeadlineWarningIssued = false;
+  DateTime? _persistedStationarySince;
+  Future<void> _stationaryDeadlineTail = Future<void>.value();
+  var _disposed = false;
   bool _appForeground = true;
   bool _appInactive = false;
   bool _locationStreamFailed = false;
@@ -209,6 +218,7 @@ class SessionController extends Notifier<LiveSessionState> {
     _clock = ref.read(sessionClockProvider);
     _timezone = ref.read(sessionTimezoneProvider);
     ref.onDispose(() {
+      _disposed = true;
       _ticker?.cancel();
       _ticker = null;
       _checkpointTimer?.cancel();
@@ -387,7 +397,7 @@ class SessionController extends Notifier<LiveSessionState> {
         return true;
       }
       active = await _ensureSessionDeadlines(active);
-      _sessionDeadlines = _deadlinesFromSession(active);
+      _setSessionDeadlines(active);
       final existing = await _repo.getSamples(active.id);
       _sessionSamples
         ..clear()
@@ -408,6 +418,10 @@ class SessionController extends Notifier<LiveSessionState> {
         samples: _liveFilter.apply(boundedExisting),
         observedAt: recoveryNow,
       );
+      _sessionGuard.rebuildStationaryState(
+        samples: _liveFilter.apply(boundedExisting),
+        observedAt: recoveryNow,
+      );
       state = LiveSessionState(
         session: active,
         isTracking: false,
@@ -420,12 +434,25 @@ class SessionController extends Notifier<LiveSessionState> {
             ? '이전에 끝내지 못한 산책이 있어요.'
             : '이전에 끝내지 못한 산책이 있어요. 위치 ${existing.length}개가 저장되어 있습니다.',
       );
+      // A process can be killed while Dart timers are suspended. Resolve a
+      // persisted hard limit before showing the recovery card so reopening
+      // the app cannot silently keep an expired GPS session alive.
+      final deadlineEvent = SessionDeadlinePolicy.evaluate(
+        _sessionDeadlines!,
+        recoveryNow,
+      );
+      if (deadlineEvent == SessionDeadlineEvent.durationLimit) {
+        await _autoStop(completionNotice: '5시간이 지나 산책을 자동으로 저장하고 종료했어요.');
+      } else if (deadlineEvent == SessionDeadlineEvent.stationaryLimit) {
+        await _autoStop(completionNotice: '한곳에 30분 머물러 산책을 자동으로 저장하고 종료했어요.');
+      }
       return true;
     } catch (_) {
       // A storage failure must be visible: silently treating it as "no active
       // session" can make a user believe an in-progress walk disappeared.
       state = state.copyWith(
         errorMessage: '이전 기록을 확인하지 못했어요. 저장 공간을 확인한 뒤 다시 시도해 주세요.',
+        errorCode: SessionErrorCode.storage,
         statusMessage: '복구할 기록을 확인하지 못했어요.',
         canRetryRecovery: true,
       );
@@ -504,16 +531,39 @@ class SessionController extends Notifier<LiveSessionState> {
     unawaited(_evaluateSessionGuard(_clock()));
   }
 
+  void _setSessionDeadlines(WalkSession session) {
+    _sessionDeadlines = _deadlinesFromSession(session);
+    final stationaryWarningAt = _sessionDeadlines?.stationaryWarningAt;
+    final stationaryLimitAt = _sessionDeadlines?.stationaryLimitAt;
+    _persistedStationarySince = stationaryWarningAt
+        ?.subtract(_sessionGuard.policy.stationaryWarningAfter);
+    _persistedStationarySince ??= stationaryLimitAt?.subtract(
+      _sessionGuard.policy.stationaryLimit,
+    );
+  }
+
   Future<WalkSession> _ensureSessionDeadlines(WalkSession session) async {
     final calculated = SessionDeadlinePolicy.calculate(
       session.startedAt,
       _sessionGuard.policy,
     );
-    final hasSameDuration =
+    final hasSameDeadlines =
+        _sameInstant(
+          session.stationaryWarningAt,
+          calculated.stationaryWarningAt,
+        ) &&
+        _sameInstant(session.stationaryLimitAt, calculated.stationaryLimitAt) &&
         _sameInstant(session.durationWarningAt, calculated.durationWarningAt) &&
         _sameInstant(session.durationLimitAt, calculated.durationLimitAt);
-    if (hasSameDuration) return session;
-    return _repo.updateSessionDeadlines(session.id, calculated);
+    if (hasSameDeadlines) return session;
+    // Keep a previously persisted stationary window while backfilling only
+    // missing duration deadlines. A migration/restart must never erase the
+    // crash-recovery anchor used by the safety guard.
+    final merged = calculated.copyWith(
+      stationaryWarningAt: session.stationaryWarningAt,
+      stationaryLimitAt: session.stationaryLimitAt,
+    );
+    return _repo.updateSessionDeadlines(session.id, merged);
   }
 
   SessionDeadlines _deadlinesFromSession(WalkSession session) {
@@ -533,6 +583,102 @@ class SessionController extends Notifier<LiveSessionState> {
   bool _sameInstant(DateTime? left, DateTime? right) {
     if (left == null || right == null) return left == right;
     return left.toUtc().isAtSameMomentAs(right.toUtc());
+  }
+
+  /// Queues a low-frequency checkpoint for the stationary anchor. We wait a
+  /// minute before persisting a new anchor so normal moving samples do not
+  /// turn into one SQLite update per GPS fix. Once an anchor is persisted, a
+  /// moving fix clears it exactly once, preventing a stale crash-recovery
+  /// deadline from auto-stopping a later moving segment.
+  void _scheduleStationaryDeadlineSync(WalkSession session, DateTime now) {
+    if (_disposed) return;
+    final generation = _sessionGeneration;
+    _stationaryDeadlineTail = _stationaryDeadlineTail.then<void>(
+      (_) async {
+        if (_disposed ||
+            _endingSession ||
+            generation != _sessionGeneration ||
+            state.session?.id != session.id ||
+            !state.isTracking) {
+          return;
+        }
+        await _syncStationaryDeadline(session, now, generation: generation);
+      },
+      onError: (Object _, StackTrace _) async {
+        // Keep later checkpoints usable after a transient database failure.
+        if (_disposed ||
+            _endingSession ||
+            generation != _sessionGeneration ||
+            state.session?.id != session.id ||
+            !state.isTracking) {
+          return;
+        }
+        await _syncStationaryDeadline(session, now, generation: generation);
+      },
+    );
+  }
+
+  Future<void> _syncStationaryDeadline(
+    WalkSession session,
+    DateTime now, {
+    required int generation,
+  }) async {
+    final current = _sessionDeadlines ?? _deadlinesFromSession(session);
+    final stationarySince = _sessionGuard.stationarySince?.toUtc();
+    SessionDeadlines? next;
+    if (stationarySince == null) {
+      if (current.stationaryWarningAt == null &&
+          current.stationaryLimitAt == null) {
+        return;
+      }
+      next = current.copyWith(clearStationary: true);
+    } else {
+      final age = now.toUtc().difference(stationarySince);
+      final persistedSince = _persistedStationarySince;
+      final anchorChanged =
+          persistedSince != null &&
+          !_sameInstant(persistedSince, stationarySince);
+      if (age < const Duration(minutes: 1)) {
+        if (!anchorChanged) return;
+        next = current.copyWith(clearStationary: true);
+      } else {
+        final warningAt = stationarySince.add(
+          _sessionGuard.policy.stationaryWarningAfter,
+        );
+        final limitAt = stationarySince.add(
+          _sessionGuard.policy.stationaryLimit,
+        );
+        if (_sameInstant(current.stationaryWarningAt, warningAt) &&
+            _sameInstant(current.stationaryLimitAt, limitAt) &&
+            _sameInstant(persistedSince, stationarySince)) {
+          return;
+        }
+        next = current.copyWith(
+          stationaryWarningAt: warningAt,
+          stationaryLimitAt: limitAt,
+        );
+      }
+    }
+    try {
+      final updated = await _repo.updateSessionDeadlines(session.id, next);
+      if (_disposed ||
+          _endingSession ||
+          generation != _sessionGeneration ||
+          state.session?.id != session.id) {
+        return;
+      }
+      _setSessionDeadlines(updated);
+      state = state.copyWith(
+        session: updated,
+        statusMessage: state.statusMessage,
+      );
+      if (next.stationaryWarningAt == null) {
+        _persistedStationarySince = null;
+      }
+    } catch (_) {
+      // A failed checkpoint is retried on the next accepted sample or
+      // maintenance pass; recording itself must continue.
+    }
   }
 
   /// Native warning identifiers are shared by related warning kinds. Serialize
@@ -562,6 +708,8 @@ class SessionController extends Notifier<LiveSessionState> {
     _sessionGuard.reset();
     _sessionDeadlines = null;
     _durationDeadlineWarningIssued = false;
+    _stationaryDeadlineWarningIssued = false;
+    _persistedStationarySince = null;
     _highSpeedWarningPublished = false;
     try {
       await _enqueueNotification(
@@ -641,6 +789,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = state.copyWith(
         isBusy: false,
         errorMessage: _locationErrorMessage(e),
+        errorCode: _locationErrorCode(e),
       );
       return;
     }
@@ -649,6 +798,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = state.copyWith(
         isBusy: false,
         errorMessage: '위치 서비스가 꺼져 있습니다. 기기 설정에서 위치를 켠 뒤 다시 시도해 주세요.',
+        errorCode: SessionErrorCode.locationServiceDisabled,
       );
       return;
     }
@@ -659,6 +809,7 @@ class SessionController extends Notifier<LiveSessionState> {
         errorMessage: perm == LocationPermissionState.deniedForever
             ? '위치 권한이 꺼져 있습니다. 설정 앱에서 산보에 위치 권한을 허용해 주세요.'
             : '산책을 기록하려면 위치 권한이 필요합니다. 허용을 선택한 뒤 다시 시작해 주세요.',
+        errorCode: SessionErrorCode.permission,
       );
       return;
     }
@@ -667,6 +818,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = state.copyWith(
         isBusy: false,
         errorMessage: '위치 권한 상태를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+        errorCode: SessionErrorCode.unavailable,
       );
       return;
     }
@@ -692,8 +844,9 @@ class SessionController extends Notifier<LiveSessionState> {
         timezone: await _timezone(),
       );
       session = await _ensureSessionDeadlines(session);
-      _sessionDeadlines = _deadlinesFromSession(session);
+      _setSessionDeadlines(session);
       _durationDeadlineWarningIssued = false;
+      _stationaryDeadlineWarningIssued = false;
 
       if (resuming) {
         _lastJumpRejectedSample = null;
@@ -716,6 +869,10 @@ class SessionController extends Notifier<LiveSessionState> {
           observedAt: recoveryNow,
         );
         _sessionGuard.rebuildHighSpeedState(
+          samples: _liveFilter.apply(boundedRecovered),
+          observedAt: recoveryNow,
+        );
+        _sessionGuard.rebuildStationaryState(
           samples: _liveFilter.apply(boundedRecovered),
           observedAt: recoveryNow,
         );
@@ -776,6 +933,7 @@ class SessionController extends Notifier<LiveSessionState> {
           isTracking: false,
           needsRecovery: true,
           errorMessage: _locationErrorMessage(e),
+          errorCode: _locationErrorCode(e),
         );
         return;
       }
@@ -819,6 +977,7 @@ class SessionController extends Notifier<LiveSessionState> {
         isTracking: false,
         needsRecovery: session != null || state.needsRecovery,
         errorMessage: '시작할 수 없습니다. 잠시 후 다시 시도해 주세요.',
+        errorCode: SessionErrorCode.generic,
       );
     }
   }
@@ -828,6 +987,7 @@ class SessionController extends Notifier<LiveSessionState> {
       if (generation == _sessionGeneration && !_endingSession) {
         state = state.copyWith(
           errorMessage: _locationErrorMessage(error),
+          errorCode: _locationErrorCode(error),
           statusMessage: state.isTracking ? state.statusMessage : null,
         );
       }
@@ -858,6 +1018,7 @@ class SessionController extends Notifier<LiveSessionState> {
       needsRecovery: true,
       clearActiveWarning: true,
       errorMessage: _locationErrorMessage(error),
+      errorCode: _locationErrorCode(error),
       statusMessage: '기록은 기기에 남아 있습니다.',
     );
     final cleanup = _cleanupAfterLocationStreamError();
@@ -982,7 +1143,7 @@ class SessionController extends Notifier<LiveSessionState> {
       if (startsNewFragment) {
         _sessionGuard.interruptHighSpeedContinuity();
       }
-      observation = _sessionGuard.observe(marked, observedAt: _clock());
+      observation = _sessionGuard.observe(marked, observedAt: receiptNow);
     } else {
       _sessionGuard.interruptHighSpeedContinuity();
     }
@@ -1020,6 +1181,9 @@ class SessionController extends Notifier<LiveSessionState> {
     final clearVisibleStationaryWarning =
         observation?.clearedStationaryWarning == true &&
         state.activeWarning?.kind == SessionWarningKind.stationary;
+    if (observation?.clearedStationaryWarning == true) {
+      _stationaryDeadlineWarningIssued = false;
+    }
     // Native location recording continues in the background, but rebuilding
     // the Riverpod/UI tree for every GPS fix does not. The latest aggregates
     // are published once when the app returns to the foreground.
@@ -1045,6 +1209,10 @@ class SessionController extends Notifier<LiveSessionState> {
       );
     }
     if (acceptedByIncrementalFilter) {
+      final activeSession = state.session;
+      if (activeSession != null) {
+        _scheduleStationaryDeadlineSync(activeSession, receiptNow);
+      }
       unawaited(
         _evaluateSessionGuard(_clock(), generation: _sessionGeneration),
       );
@@ -1093,6 +1261,36 @@ class SessionController extends Notifier<LiveSessionState> {
       }
       _sessionGuard.acknowledgeDurationWarning();
     }
+    if (persistedEvent == SessionDeadlineEvent.stationaryLimit) {
+      if (deferAutoStop) {
+        unawaited(
+          _autoStop(completionNotice: '한곳에 30분 머물러 산책을 자동으로 저장하고 종료했어요.'),
+        );
+      } else {
+        await _autoStop(completionNotice: '한곳에 30분 머물러 산책을 자동으로 저장하고 종료했어요.');
+      }
+      return;
+    }
+    if (persistedEvent == SessionDeadlineEvent.stationaryWarning) {
+      if (!_stationaryDeadlineWarningIssued) {
+        _stationaryDeadlineWarningIssued = true;
+        const warning = SessionWarning(
+          kind: SessionWarningKind.stationary,
+          title: '산책을 계속 기록할까요?',
+          message: '한곳에 20분 이상 머물고 있어요. 정지 상태가 30분 이어지면 자동으로 저장하고 종료합니다.',
+          actions: {SessionWarningAction.continueRecording},
+        );
+        state = state.copyWith(
+          activeWarning: warning,
+          statusMessage: '정지 상태 확인 중',
+        );
+        await _enqueueNotification(
+          () => _notifications.showWarning(warning, sessionId: session.id),
+        );
+      }
+      _sessionGuard.acknowledgeStationaryWarning();
+      return;
+    }
     final decision = _sessionGuard.evaluate(
       startedAt: session.startedAt,
       now: now,
@@ -1101,6 +1299,7 @@ class SessionController extends Notifier<LiveSessionState> {
       case SessionGuardEvent.none:
         return;
       case SessionGuardEvent.stationaryWarning:
+        _stationaryDeadlineWarningIssued = true;
         const warning = SessionWarning(
           kind: SessionWarningKind.stationary,
           title: '산책을 계속 기록할까요?',
@@ -1194,9 +1393,13 @@ class SessionController extends Notifier<LiveSessionState> {
       return;
     }
     if (!state.isTracking) return;
+    final session = state.session;
     switch (warning.kind) {
       case SessionWarningKind.stationary:
+        if (session == null) return;
         _sessionGuard.continueStationaryTracking(_clock());
+        _stationaryDeadlineWarningIssued = false;
+        _scheduleStationaryDeadlineSync(session, _clock());
         break;
       case SessionWarningKind.highSpeed:
         _sessionGuard.dismissHighSpeedWarning();
@@ -1299,6 +1502,7 @@ class SessionController extends Notifier<LiveSessionState> {
         errorMessage:
             '위치를 아직 받지 못했어요. 기기 위치 서비스와 정확한 위치 권한을 확인하고, '
             '하늘이 보이는 곳에서 잠시 기다려 주세요.',
+        errorCode: SessionErrorCode.unavailable,
         statusMessage: 'GPS 대기 중',
       );
     });
@@ -1319,6 +1523,22 @@ class SessionController extends Notifier<LiveSessionState> {
       return '백그라운드 위치 기록을 시작하지 못했어요. 앱 화면에서 다시 시작하고 위치 권한을 확인해 주세요.';
     }
     return '위치를 받는 중 문제가 생겼습니다. 잠시 후 다시 시도해 주세요.';
+  }
+
+  SessionErrorCode _locationErrorCode(Object e) {
+    final value = e.toString().toLowerCase();
+    if (value.contains('permission')) return SessionErrorCode.permission;
+    if (value.contains('service') || value.contains('disabled')) {
+      return SessionErrorCode.locationServiceDisabled;
+    }
+    if (value.contains('notification')) return SessionErrorCode.notification;
+    if (value.contains('foreground')) {
+      return SessionErrorCode.backgroundLocation;
+    }
+    if (value.contains('timeout') || value.contains('no_fix')) {
+      return SessionErrorCode.unavailable;
+    }
+    return SessionErrorCode.generic;
   }
 
   /// Test / recovery helper: inject samples into the live session path.
@@ -1604,6 +1824,7 @@ class SessionController extends Notifier<LiveSessionState> {
         needsRecovery: true,
         clearActiveWarning: true,
         errorMessage: '저장에 실패했습니다. 아래 ‘저장하고 종료’를 다시 눌러 주세요.',
+        errorCode: SessionErrorCode.storage,
         statusMessage: '기록은 기기에 남아 있습니다.',
       );
       return null;
@@ -1647,6 +1868,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = state.copyWith(
         isBusy: false,
         errorMessage: '삭제에 실패했습니다. 다시 시도해 주세요.',
+        errorCode: SessionErrorCode.storage,
       );
     } finally {
       await _cancelSessionGuard();

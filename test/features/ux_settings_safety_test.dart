@@ -48,7 +48,7 @@ void main() {
       repository = await openTestRepository();
       await repository.startSession(
         mode: TrackingMode.highAccuracy,
-        startedAt: DateTime(2026, 7, 16, 8),
+        startedAt: DateTime.now().subtract(const Duration(hours: 1)),
       );
     });
     addTearDown(() => tester.runAsync(repository.close));

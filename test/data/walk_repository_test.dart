@@ -194,6 +194,28 @@ void main() {
     },
   );
 
+  test('bulk label updates roll back when one window is missing', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final fixture = await seedCompletedTwoMinuteWalk(repo);
+    final windows = await repo.getWindows(fixture.session.id);
+
+    await expectLater(
+      repo.updateWindowsUserLabel(
+        sessionId: fixture.session.id,
+        windowStarts: [
+          windows.first.windowStart,
+          windows.last.windowStart.add(const Duration(hours: 1)),
+        ],
+        userLabel: ActivityLabel.vehicle,
+      ),
+      throwsA(isA<StateError>()),
+    );
+
+    final restored = await repo.getWindows(fixture.session.id);
+    expect(restored.first.userLabel, isNull);
+  });
+
   test('DST fold windows mutate the selected UTC occurrence only', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

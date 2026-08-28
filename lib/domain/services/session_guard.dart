@@ -65,10 +65,18 @@ class SessionGuardObservation {
   const SessionGuardObservation({
     this.acceptedForHighSpeed = false,
     this.clearedStationaryWarning = false,
+    this.stationarySinceChanged = false,
+    this.stationarySince,
   });
 
   final bool acceptedForHighSpeed;
   final bool clearedStationaryWarning;
+
+  /// True when the stationary anchor was created or reset by this sample.
+  /// Consumers can use this to checkpoint a recoverable deadline without
+  /// coupling persistence to the guard's internal state machine.
+  final bool stationarySinceChanged;
+  final DateTime? stationarySince;
 }
 
 class _TrustedSpeedSpan {
@@ -148,9 +156,16 @@ class SessionGuard {
       _interruptHighSpeedContinuity();
     }
 
+    final stationaryBefore = _stationarySince;
+    final clearedStationaryWarning = _observeStationary(sample, receivedAt);
+    final stationaryAfter = _stationarySince;
+    final stationarySinceChanged =
+        stationaryBefore?.toUtc() != stationaryAfter?.toUtc();
     return SessionGuardObservation(
       acceptedForHighSpeed: acceptedForHighSpeed,
-      clearedStationaryWarning: _observeStationary(sample, receivedAt),
+      clearedStationaryWarning: clearedStationaryWarning,
+      stationarySinceChanged: stationarySinceChanged,
+      stationarySince: stationaryAfter,
     );
   }
 
@@ -193,6 +208,31 @@ class SessionGuard {
     }
   }
 
+  /// Rebuilds the stationary anchor independently of the high-speed state.
+  /// Persisted samples carry timestamps but not their original receipt time,
+  /// so the latest sample is aligned to [observedAt] and the same offset is
+  /// applied to the preceding fixes. This preserves a long stationary window
+  /// across a process death without making the first post-restart fix reset
+  /// the safety deadline unconditionally.
+  void rebuildStationaryState({
+    required Iterable<LocationSample> samples,
+    required DateTime observedAt,
+  }) {
+    _anchor = null;
+    _lastUsableSample = null;
+    _stationarySince = null;
+    _stationaryWarningIssued = false;
+    final ordered = samples.toList()
+      ..sort((a, b) => a.timestamp.toUtc().compareTo(b.timestamp.toUtc()));
+    if (ordered.isEmpty) return;
+    final offset = observedAt.toUtc().difference(
+      ordered.last.timestamp.toUtc(),
+    );
+    for (final sample in ordered) {
+      _observeStationary(sample, sample.timestamp.toUtc().add(offset));
+    }
+  }
+
   void dismissHighSpeedWarning() {
     _highSpeedPending = false;
     _highSpeedPendingAt = null;
@@ -202,6 +242,12 @@ class SessionGuard {
   /// deadline check does not mask other guard events in the same pass.
   void acknowledgeDurationWarning() {
     _durationWarningIssued = true;
+  }
+
+  /// Marks a persisted stationary warning as delivered so a cold-recovery
+  /// deadline check does not emit the same warning again in the same pass.
+  void acknowledgeStationaryWarning() {
+    _stationaryWarningIssued = true;
   }
 
   /// Breaks speed accumulation when the caller rejects a provider fix before

@@ -110,8 +110,8 @@ DateTime localDateOnly(DateTime value) {
 
 /// Refreshes the automatic “today” window without overwriting a week the user
 /// deliberately browsed. The anchor tracks only automatic selections.
-void refreshCurrentLocalDate(WidgetRef ref) {
-  final today = localDateOnly(DateTime.now());
+void refreshCurrentLocalDate(WidgetRef ref, {DateTime? now}) {
+  final today = localDateOnly(now ?? DateTime.now());
   final automaticEnd = ref.read(dailyAutoWeekEndProvider);
   final currentEnd = ref.read(dailyWeekEndProvider);
   if (currentEnd == automaticEnd && currentEnd != today) {

@@ -351,6 +351,77 @@ void main() {
     },
   );
 
+  test(
+    'stable stationary anchors are checkpointed for cold recovery',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      var now = DateTime(2026, 8, 1, 9);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final session = controller.state.session!;
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: session.startedAt,
+          latitude: 37.5665,
+          longitude: 126.978,
+          accuracyM: 6,
+        ),
+      ]);
+      now = session.startedAt.add(const Duration(minutes: 1));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.56651,
+          longitude: 126.97801,
+          accuracyM: 6,
+        ),
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      var persisted = await repo.getSession(session.id);
+      expect(
+        persisted?.stationaryWarningAt?.isAtSameMomentAs(
+          session.startedAt.add(const Duration(minutes: 20)),
+        ),
+        isTrue,
+      );
+      expect(
+        persisted?.stationaryLimitAt?.isAtSameMomentAs(
+          session.startedAt.add(const Duration(minutes: 30)),
+        ),
+        isTrue,
+      );
+
+      now = session.startedAt.add(const Duration(minutes: 2));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.568,
+          longitude: 126.978,
+          accuracyM: 6,
+        ),
+      ]);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      persisted = await repo.getSession(session.id);
+      expect(persisted?.stationaryWarningAt, isNull);
+      expect(persisted?.stationaryLimitAt, isNull);
+    },
+  );
+
   test('five-hour limit warns at 4h45 and auto-saves at 5h', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
@@ -1201,6 +1272,38 @@ void main() {
     expect(await controller.stopFromHighSpeedWarning(), isNull);
     expect(await repo.getActiveSession(), isNull);
     expect(await repo.listCompleted(), hasLength(1));
+  });
+
+  test('cold recovery auto-finalizes an expired duration deadline', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final now = DateTime(2026, 8, 21, 14);
+    final session = await repo.startSession(
+      mode: TrackingMode.balanced,
+      startedAt: now.subtract(const Duration(hours: 5)),
+    );
+    await repo.insertSamples(
+      session.id,
+      _highSpeedTrace(session.startedAt, seconds: 60),
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+
+    await controller.restoreIfNeeded();
+
+    expect(await repo.getActiveSession(), isNull);
+    expect(await repo.getSession(session.id), isNotNull);
+    expect((await repo.listCompleted()), hasLength(1));
+    expect(controller.state.isTracking, isFalse);
   });
 
   test('a notification tap for an older session is ignored', () async {

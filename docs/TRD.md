@@ -38,7 +38,7 @@
 | 1차 OS | **Android (MVP)** | D-PLAT-02; FGS·권한 먼저 검증 |
 | 2차 OS | **iOS (Later)** | 동일 `domain/` 재사용 |
 | 저장 | **sqflite (SQLite)** 온디바이스 | FR-19 |
-| 지도 렌더러 | **MapLibre GL** (Flutter 플러그인) | D-MAP-01; 타일 교체 가능 |
+| 지도 렌더러 | **flutter_map** (Flutter 위젯) | D-MAP-01; 타일 교체 가능 |
 | MVP 타일 | **OSM 호환 공개 타일** + attribution | D-MAP-02; 영감 UX 패리티 |
 | 베이스맵 | **OSM 공개 타일만** (VWorld 연동 제외, D-MAP-03 개정) | D-MAP-02·03 |
 | 상용 맵 SDK | **MVP 비포함** (카카오/네이버/구글 맵 뷰) | D-MAP-04 |
@@ -81,8 +81,9 @@ lib/
 
 ## 3. 데이터 모델 (스키마 수준)
 
-DB 스키마 버전은 `4`다. v4는 완료 기록의 가역적 사용자 제외를 위한
-`route_exclusions`와 `minute_windows.user_exclusion_id`를 추가한다.
+DB 스키마 버전은 `6`이다. v4는 완료 기록의 가역적 사용자 제외를 위한
+`route_exclusions`와 `minute_windows.user_exclusion_id`를 추가했고, v5~v6은
+단일 active 세션·샘플 멱등성·안전 종료 데드라인을 추가한다.
 
 ### 3.1 `sessions`
 
@@ -101,6 +102,8 @@ DB 스키마 버전은 `4`다. v4는 완료 기록의 가역적 사용자 제외
 | `avg_speed_mps` | float? | moving 구 간 기준 권장 |
 | `median_accuracy_m` | float? | |
 | `valid_sample_count` | int? | |
+| `stationary_warning_at` / `stationary_limit_at` | datetime? | 정지 anchor 기준 20분/30분 안전 데드라인; 아직 안정된 anchor가 없으면 null |
+| `duration_warning_at` / `duration_limit_at` | datetime? | 세션 시작 기준 4시간 45분/5시간 절대 데드라인 |
 | `polyline_simplified` | blob/text? | 인코딩 폴리라인 또는 JSON coords |
 | `notes` | text? | 세션 메모 |
 
@@ -215,10 +218,11 @@ DB 스키마 버전은 `4`다. v4는 완료 기록의 가역적 사용자 제외
 
 완료 세션의 사용자 제외 원본은 UTC ISO 8601으로 저장한 반개구간 `[startAt, endAt)`인 `route_exclusions`다. 저장소는 transaction snapshot의 분 기록으로 authoritative `ActivitySegment`를 다시 만들고 요청이 그중 정확히 하나와 일치할 때만 허용한다. 첫 부분 분의 시작은 `max(first.windowStart, session.startedAt)`, 마지막 분의 끝은 `min(last.windowStart + 1분, session.endedAt)`이다. 임의의 같은 분 부분 범위와 불연속 분 선택은 거부한다. 겹치는 범위는 거부하고 맞닿은 authoritative 범위는 별도 레코드로 보존한다. 원시 `location_samples.is_filtered_out` 값과 행은 제외와 복원에서 절대 변경하지 않으며, `location_samples.user_exclusion_id` 열은 만들지 않는다.
 
-DB v4는 `route_exclusions`와 `minute_windows.user_exclusion_id`를 추가한다.
+DB v4에서 `route_exclusions`와 `minute_windows.user_exclusion_id`를 추가했고,
+현재 DB v6은 단일 active 세션·샘플 멱등성 인덱스와 안전 종료 데드라인을 더한다.
 
 ```sql
--- DB schemaVersion = 4
+-- DB schemaVersion = 6
 CREATE TABLE route_exclusions (
   id TEXT PRIMARY KEY NOT NULL,
   session_id TEXT NOT NULL,
@@ -797,8 +801,10 @@ OS가 `speed_mps = 0` 또는 값을 생략한 경우에는 인접한 신뢰 fix�
   `DailyWalkStats.zero`로 채워 항상 7개를 반환한다.
 - UI provider는 `historyTickProvider`를 구독해 산책 종료·삭제·가져오기 뒤 갱신한다.
   날짜 선택은 이미 로드된 7개 행만 바꾸고, 주간 이동에서만 새 쿼리를 실행한다.
-- 패널은 거리·시간·횟수만 노출한다. 걸음 수, 칼로리, Samsung Health/Health Connect,
-  월간 차트는 이 API의 범위가 아니다. 최근 산책 목록은 선택일로 필터링하지 않는다.
+- 패널은 GPS 산책 거리·시간·횟수와 별도의 걸음 수 슬롯을 노출한다. 현재 기본 어댑터는
+  권한을 요청하지 않고 “연결 전” 상태를 표시하며, Samsung Health/Health Connect·HealthKit
+  읽기 어댑터는 누적값 중복을 피하는 후속 범위다. 걸음 수를 GPS 거리로 환산하지 않는다.
+  최근 산책 목록은 선택일로 필터링하지 않는다.
 - API 오류는 패널 내부 재시도 상태로 열화하며 전체 기록 목록을 가리지 않는다.
 
 **매핑**: FR-14, FR-25, NFR-05, NFR-06.
@@ -852,7 +858,7 @@ UI는 세션 카드에 **세션 거리**를 1차 표시 (레퍼런스와 동일 
 |------|------|------|
 | GPS 꺼짐 | provider status | 수집 pause, UI 경고, gap 윈도우 |
 | 권한 철회 | OS callback | 동일 + 설정 유도 |
-| 샘플 공백 > 90s | 타임스탬프 | 중간 분에 gap; 거리 보간 **하지 않음**(허위 경로 방지) |
+| 샘플 공백 > 60s | 타임스탬프 | 중간 분에 gap; 거리 보간 **하지 않음**(허위 경로 방지) |
 | 좌표 점프 | filter | 제외, quality 하락 가능 |
 | 앱 프로세스 사망 | cold start | `active` 세션 있으면 `crashed_recovered`; 버퍼 체크포인트에서 윈도우 재집계; 사용자에 “복구된 기록” 표시 |
 | 지오코딩 실패 | HTTP/timeout | place null, 추측은 속도만 |
@@ -885,7 +891,7 @@ UI는 세션 카드에 **세션 거리**를 1차 표시 (레퍼런스와 동일 
 | 항목 | MVP | 비고 |
 |------|-----|------|
 | 인터넷 | 타일 로드·(선택) 역지오코딩에 필요 | **오프라인**: 이미 캐시된 타일 범위 외 맵은 빈 격자 가능; **GPS 기록·DB는 오프라인 동작** |
-| 타일 캐시 | MapLibre/HTTP 캐시 기본 활용 | 경로 원본을 직접 보내지는 않지만 조회 타일 좌표·IP 등 네트워크 정보로 대략적 표시 영역이 CARTO에 노출될 수 있으므로 설정·개인정보 안내에 고지 |
+| 타일 캐시 | flutter_map/HTTP 캐시 기본 활용 | 경로 원본을 직접 보내지는 않지만 조회 타일 좌표·IP 등 네트워크 정보로 대략적 표시 영역이 CARTO에 노출될 수 있으므로 설정·개인정보 안내에 고지 |
 
 ### 7.2 배터리 트레이드오프
 
@@ -930,7 +936,7 @@ NFR-02: 기본 balanced; 정밀 모드만 CPU WakeLock을 유지한다. 실기�
 |------|------|------|---------|
 | OS Location (Android) | 예 | 샘플 | 앱 핵심 불가 |
 | SQLite (sqflite) | 예 | 저장 | — |
-| MapLibre + **OSM 타일** | 예(조회) | FR-06, D-MAP-02 | 좌표 텍스트 리스트 폴백 |
+| flutter_map + **OSM 타일** | 예(조회) | FR-06, D-MAP-02 | 좌표 텍스트 리스트 폴백 |
 | **VWorld API/타일** | **아니오** (제품 제외) | 비교만 — D-MAP-03 | OSM 단일 소스 |
 | Reverse geocoder REST | 아니오 | FR-08/09 | 좌표만 · `장소 미확인` |
 | 카카오/네이버/구글 **Map SDK** | **아니오** | — | 사용하지 않음 (D-MAP-04) |
@@ -1101,7 +1107,7 @@ PRD §14와 정합. 기술 결론:
 1. Flutter 프로젝트 · Android 권한 · **FGS + 알림**  
 2. `domain/` 분 윈도우·필터·롤업 + 단위 테스트  
 3. sqflite 세션/샘플/윈도우 저장 + 크래시 복구  
-4. **MapLibre + OSM 타일** + 폴리라인 + attribution  
+4. **flutter_map + OSM 타일** + 폴리라인 + attribution
 5. 홈 시작/종료 · 라이브 3숫자 · 요약 카드 (러닝앱 심플 골격)  
 6. 타임라인 + 활동 칩 수정  
 7. 설정: 추적 모드 · 전체 백업/병합 복원 · 데이터 삭제 · 지도 정보

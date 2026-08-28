@@ -906,6 +906,26 @@ WHERE w.session_id = ?
     String? note,
     bool confirmed = true,
   }) async {
+    await _db.transaction((txn) async {
+      await _updateWindowUserLabelIn(
+        txn,
+        sessionId: sessionId,
+        windowStart: windowStart,
+        userLabel: userLabel,
+        note: note,
+        confirmed: confirmed,
+      );
+    });
+  }
+
+  Future<bool> _updateWindowUserLabelIn(
+    DatabaseExecutor executor, {
+    required String sessionId,
+    required DateTime windowStart,
+    required ActivityLabel userLabel,
+    String? note,
+    required bool confirmed,
+  }) async {
     final payload = <String, Object?>{
       'user_label': userLabel.storageKey,
       'user_note': note,
@@ -914,16 +934,16 @@ WHERE w.session_id = ?
     final keys = _windowStartKeys(windowStart);
     var updated = 0;
     for (final key in keys) {
-      updated = await _db.update(
+      updated = await executor.update(
         'minute_windows',
         payload,
         where: 'session_id = ? AND window_start = ?',
         whereArgs: [sessionId, key],
       );
-      if (updated > 0) return;
+      if (updated > 0) return true;
     }
     // Last resort: match any row whose parsed window_start equals target minute.
-    final rows = await _db.query(
+    final rows = await executor.query(
       'minute_windows',
       columns: ['window_start'],
       where: 'session_id = ?',
@@ -950,14 +970,15 @@ WHERE w.session_id = ?
           parsed.hour == targetWall.hour &&
           parsed.minute == targetWall.minute;
       if (!sameInstant && !sameWallMinute) continue;
-      await _db.update(
+      final changed = await executor.update(
         'minute_windows',
         payload,
         where: 'session_id = ? AND window_start = ?',
         whereArgs: [sessionId, raw],
       );
-      return;
+      return changed > 0;
     }
+    return false;
   }
 
   /// Apply the same user label to every minute in [windowStarts] (segment edit).
@@ -969,15 +990,21 @@ WHERE w.session_id = ?
     bool confirmed = true,
   }) async {
     if (windowStarts.isEmpty) return;
-    for (final start in windowStarts) {
-      await updateWindowUserLabel(
-        sessionId: sessionId,
-        windowStart: start,
-        userLabel: userLabel,
-        note: note,
-        confirmed: confirmed,
-      );
-    }
+    await _db.transaction((txn) async {
+      for (final start in windowStarts) {
+        final updated = await _updateWindowUserLabelIn(
+          txn,
+          sessionId: sessionId,
+          windowStart: start,
+          userLabel: userLabel,
+          note: note,
+          confirmed: confirmed,
+        );
+        if (!updated) {
+          throw StateError('시간 구간을 찾을 수 없습니다');
+        }
+      }
+    });
   }
 
   /// Find a previously user-confirmed place close enough to reuse.

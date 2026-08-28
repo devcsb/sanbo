@@ -851,6 +851,7 @@ void main() {
           fixture.session.id,
           mediaQueryData: const MediaQueryData(
             textScaler: TextScaler.linear(2),
+            disableAnimations: true,
           ),
         ),
       );

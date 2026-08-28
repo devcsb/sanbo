@@ -9,6 +9,7 @@ import '../../core/theme/app_theme.dart';
 import '../../platform/location/location_engine.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/session_warning.dart';
+import '../../domain/models/session_error_code.dart';
 import '../../domain/models/walk_session.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
@@ -33,10 +34,13 @@ class HomeScreen extends ConsumerWidget {
         live.permissionState == LocationPermissionState.deniedForever ||
         live.permissionState == LocationPermissionState.grantedForegroundOnly ||
         live.permissionState == LocationPermissionState.serviceDisabled ||
-        (live.errorMessage != null &&
-            (live.errorMessage!.contains('설정') ||
-                live.errorMessage!.contains('알림') ||
-                live.errorMessage!.contains('권한')));
+        switch (live.errorCode) {
+          SessionErrorCode.permission ||
+          SessionErrorCode.locationServiceDisabled ||
+          SessionErrorCode.backgroundLocation ||
+          SessionErrorCode.notification => true,
+          _ => false,
+        };
     final km = live.liveDistanceM / 1000.0;
     final kmh = live.liveSpeedMps * 3.6;
 

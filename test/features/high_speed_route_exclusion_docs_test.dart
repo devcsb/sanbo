@@ -44,7 +44,7 @@ void main() {
     final export = _section(trd, '### 9.2 Export 포맷', '---\n\n## 10.');
 
     for (final contract in [
-      'DB schemaVersion = 4',
+      'DB schemaVersion = 6',
       'route_exclusions',
       'minute_windows.user_exclusion_id',
       'location_samples.user_exclusion_id` 열은 만들지 않는다',

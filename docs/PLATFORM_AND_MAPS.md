@@ -4,7 +4,7 @@
 |------|------|
 | 문서 ID | `DEC-SANBO-PLATFORM-v1.0` |
 | 버전 | 1.0 |
-| 상태 | **제품·기술 결정 고정** (구현 전) |
+| 상태 | **제품·기술 결정 고정** (구현 반영본) |
 | 관련 | [PRD](./PRD.md) v1.2 · [TRD](./TRD.md) v1.2 |
 | 대상 | 대한민국 거주 개인 사용자 · Android 우선 · Flutter 클라이언트 |
 
@@ -19,7 +19,7 @@
 | 클라이언트 | **Flutter** (단일 코드베이스) |
 | 출시 순서 | **Android MVP → iOS v1.x** (같은 repo, flavor/target만 확장) |
 | 지도 철학 | **공개·저비용·국내 지명 가독** 우선. 상용 맵 SDK 종속을 MVP 핵심 경로에서 피함 |
-| 지도 렌더링 | **MapLibre GL (Flutter)** + 타일 소스 교체 가능 레이어 |
+| 지도 렌더링 | **flutter_map** + 타일 소스 교체 가능 레이어 (MapLibre GL은 검토한 과거 후보) |
 | MVP 기본 타일 | **OpenStreetMap 계열 공개 타일**(또는 자체 프록시 가능 타일) + 필수 저작권 표기 |
 | 한국 공공 강화 (권장 v1) | **브이월드(VWorld)** 2D/벡터·검색 API 키 발급 후 **베이스맵 또는 검색/역지오코딩** 연동 |
 | 장소 이름 (한국어) | MVP: 좌표 + (가능 시) **VWorld/카카오 로컬 역지오코딩 중 1개 옵트인**. 실패 시 좌표만 |
@@ -48,7 +48,7 @@
 |--------|------|
 | 백그라운드 위치의 플랫폼 특수성 | `LocationEngine` 어댑터 분리(TRD). Android: FGS+알림 정석. iOS는 later 전용 절 |
 | 일부 한국 맵 공식 Flutter SDK 성숙도 편차 | **맵을 “타일+오버레이” 추상화**해 SDK 교체 가능하게 설계 |
-| 앱 용량 | MapLibre 네이티브 엔진 포함 시 용량↑ → 불필요 플러그인 최소화 |
+| 앱 용량 | flutter_map 선택으로 네이티브 엔진 부담을 줄이고 불필요 플러그인 최소화 |
 
 ### 2.3 기각 대안
 
@@ -127,14 +127,14 @@ Phase B: iOS 포트
 │   - setCamera, addPolyline, markers │
 │   - setTileSource(sourceId)         │
 └──────────────┬──────────────────────┘
-               │ MapLibre (권장) 또는 flutter_map
+               │ flutter_map (현재 구현; MapLibre는 교체 후보)
      ┌─────────┴─────────┐
      ▼                   ▼
   tile: osm_public    tile: vworld_2d
   (MVP default)       (키 있으면 전환)
 ```
 
-**결정 D-MAP-01**: 지도 **렌더러 = MapLibre GL Flutter 플러그인** (벡터/래스터 타일·폴리라인·마커).  
+**결정 D-MAP-01**: 지도 **렌더러 = flutter_map** (래스터 타일·폴리라인·마커). MapLibre GL은 초기 후보로 검토했지만 현재 구현에는 포함하지 않는다.
 **결정 D-MAP-02**: 제품 기본 타일 = **공개 OSM 호환 타일**(Carto Voyager) + 화면 코너 **© OpenStreetMap · © CARTO** 표기. **API 키 없음.**  
 **결정 D-MAP-03**: **브이월드(VWorld) 베이스맵 연동은 제품 범위에서 제외** (키·쿼터·약관·배포 복잡도 대비 OSM만으로 충분). 검색/역지오코딩이 필요해지면 별도 검토.  
 **결정 D-MAP-04**: 카카오/네이버 **맵 SDK는 MVP 비포함**. 한국어 상호·주소가 꼭 필요해지면 **REST 역지오코딩만** 검토 (맵 렌더와 분리).
@@ -246,7 +246,7 @@ lib/
 |------|------|------|
 | 위치 | `geolocator` 또는 동등 + Android FGS 설정 | 백그라운드는 추가 설정 필수 |
 | DB | `sqflite` / `drift` | MVP는 sqflite로 충분 |
-| 맵 | `maplibre_gl` (또는 유지보수 활발한 MapLibre 계열) | 타일 소스 교체 |
+| 맵 | `flutter_map` | 타일 소스 교체; MapLibre GL은 대체 후보 |
 | 상태 | `riverpod` 또는 `provider` 중 **하나** | 둘 다 쓰지 말 것 |
 | 경로 | go_router 최소 | 탭+상세 정도 |
 
@@ -298,7 +298,7 @@ Google Maps 패키지·Firebase 기본 탑재는 **하지 않음** (가벼움).
 |------|------|-----------|
 | 1 | Flutter Android 뼈대 + 권한 + FGS 위치 | 백그라운드에서 샘플 파일/DB 적재 |
 | 2 | 분 윈도우 집계 domain + sqflite | 60분 가상 트레이스 테스트 |
-| 3 | MapLibre + OSM 타일 + 폴리라인 | 세션 상세 맵 |
+| 3 | flutter_map + OSM 타일 + 폴리라인 | 세션 상세 맵 |
 | 4 | 요약 카드 + 세션 리스트 | 러닝앱 결과 화면 패리티(심플) |
 | 5 | 활동 가설 규칙 + 타임라인 수정 | 칩 선택 저장 |
 | 6 | ~~(v1) VWorld 타일~~ → **OSM 단일 베이스맵** (D-MAP-03 개정) | 설정 지도 소스는 고정 안내만 |
