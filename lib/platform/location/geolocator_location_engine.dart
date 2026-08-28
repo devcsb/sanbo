@@ -745,8 +745,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     _emitCount++;
     if (kDebugMode && _emitCount <= 3) {
       developer.log(
-        'fix #$_emitCount lat=${pos.latitude.toStringAsFixed(5)} '
-        'lon=${pos.longitude.toStringAsFixed(5)} acc=$accuracy',
+        'location fix #$_emitCount received; accuracy=$accuracy',
         name: _logName,
       );
     }

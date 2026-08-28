@@ -10,6 +10,10 @@
 
 본 TRD는 PRD 요구를 **구현 가능한 데이터 모델·파이프라인·휴리스틱·플랫폼 정책**으로 분해한다. 모호한 “나중에 정함”으로 핵심 경로를 남기지 않는다. 수치가 튜닝 가능하면 **기본값 + 설정 키**로 명시한다.
 
+성능 진단은 로컬 debug/QA 경로에서만 집계한다. 샘플 callback/flush 횟수와 시간
+평균만 보존하고 원시 좌표, 걸음 수, 사용자 식별자, 네트워크 업로드는 포함하지
+않는다. 배터리 평가는 실기기 측정 프로토콜의 결과로만 판단한다.
+
 ---
 
 ## 1. 기술 목표와 범위
@@ -801,9 +805,14 @@ OS가 `speed_mps = 0` 또는 값을 생략한 경우에는 인접한 신뢰 fix�
   `DailyWalkStats.zero`로 채워 항상 7개를 반환한다.
 - UI provider는 `historyTickProvider`를 구독해 산책 종료·삭제·가져오기 뒤 갱신한다.
   날짜 선택은 이미 로드된 7개 행만 바꾸고, 주간 이동에서만 새 쿼리를 실행한다.
-- 패널은 GPS 산책 거리·시간·횟수와 별도의 걸음 수 슬롯을 노출한다. 현재 기본 어댑터는
-  권한을 요청하지 않고 “연결 전” 상태를 표시하며, Samsung Health/Health Connect·HealthKit
-  읽기 어댑터는 누적값 중복을 피하는 후속 범위다. 걸음 수를 GPS 거리로 환산하지 않는다.
+- 패널은 GPS 산책 거리·시간·횟수와 별도의 걸음 수 슬롯을 노출한다. Android/iOS의 기본
+  provider는 `HealthActivityDataSource` 뒤에 Health Connect/HealthKit 읽기 어댑터를 두며,
+  최초 화면 진입에서는 권한을 요청하지 않고 “연결 전” 상태를 표시한다. 사용자가 연결 CTA를
+  눌렀을 때만 Activity Recognition/건강 데이터 읽기 권한을 요청하고, 일별 합계는 플랫폼
+  aggregate API(`getTotalStepsInInterval`)에서 읽는다. 데스크톱·미지원 플랫폼은
+  `UnavailableActivityDataSource`로 열화한다. 걸음 수를 GPS 거리로 환산하거나 GPS 세션에
+  더하지 않는다. Health Connect의 기본 과거 조회 한도(권한 허용 시점 기준 30일)는 UI에서
+  “연결 전”과 구분할 수 있도록 `null`/출처 상태로 보존한다.
   최근 산책 목록은 선택일로 필터링하지 않는다.
 - API 오류는 패널 내부 재시도 상태로 열화하며 전체 기록 목록을 가리지 않는다.
 

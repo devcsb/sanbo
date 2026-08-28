@@ -1,7 +1,9 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../application/diagnostics/session_diagnostics.dart';
 import '../../application/session/session_persistence_coordinator.dart';
 import '../../data/walk_repository.dart';
 import '../../domain/models/location_sample.dart';
@@ -182,6 +184,8 @@ class SessionController extends Notifier<LiveSessionState> {
   List<LocationSample> get _pendingPersist => _persistence.pendingSamples;
 
   SessionMaintenanceQueue get _maintenanceQueue => _persistence.queue;
+
+  final _diagnostics = SessionDiagnostics();
 
   /// Last filter-accepted sample for O(1) live distance updates.
   LocationSample? _lastValidSample;
@@ -807,10 +811,12 @@ class SessionController extends Notifier<LiveSessionState> {
     final write = allowEnding
         ? _persistence.flushForStop
         : _persistence.checkpoint;
-    await write(
-      sessionId: session.id,
-      samples: _pendingPersist,
-      generation: generation,
+    await _diagnostics.measureFlush(
+      () => write(
+        sessionId: session.id,
+        samples: _pendingPersist,
+        generation: generation,
+      ),
     );
   }
 
@@ -885,6 +891,7 @@ class SessionController extends Notifier<LiveSessionState> {
     _streamEndedDuringStart = false;
     _highSpeedWarningPublished = false;
     _sessionGeneration++;
+    _diagnostics.reset();
     _maintenanceQueue.reopen();
 
     WalkSession? session;
@@ -1107,10 +1114,12 @@ class SessionController extends Notifier<LiveSessionState> {
       await _maintenanceQueue.close();
       final session = state.session;
       if (session == null || _pendingPersist.isEmpty) return;
-      await _persistence.flushForStop(
-        sessionId: session.id,
-        samples: _pendingPersist,
-        generation: _sessionGeneration,
+      await _diagnostics.measureFlush(
+        () => _persistence.flushForStop(
+          sessionId: session.id,
+          samples: _pendingPersist,
+          generation: _sessionGeneration,
+        ),
       );
     } finally {
       await _cancelSessionGuard();
@@ -1119,6 +1128,7 @@ class SessionController extends Notifier<LiveSessionState> {
 
   void _onSample(LocationSample rawSample) {
     if (_endingSession) return;
+    _diagnostics.recordCallback(_clock());
     final sample = rawSample.normalizedMetadata();
     final sessionStart = state.session?.startedAt ?? _liveSessionStartedAt;
     final receiptNow = _clock().toUtc();
@@ -1599,6 +1609,12 @@ class SessionController extends Notifier<LiveSessionState> {
   Future<void> debugEvaluateSessionGuard([DateTime? now]) {
     return _evaluateSessionGuard(now ?? _clock());
   }
+
+  /// Bounded local counters for debug/QA surfaces. Raw coordinates and health
+  /// values are intentionally not part of this snapshot.
+  @visibleForTesting
+  SessionDiagnosticsSnapshot debugDiagnosticsSnapshot() =>
+      _diagnostics.snapshot();
 
   /// Suppress high-frequency presentation work while native GPS collection
   /// continues in the background, then publish one caught-up snapshot.

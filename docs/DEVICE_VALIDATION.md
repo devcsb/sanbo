@@ -2,6 +2,14 @@
 
 코드 테스트만으로는 GPS provider, 제조사 절전 정책, 화면 상태에 따른 배터리 사용량을 확정할 수 없다. 이 문서는 같은 조건으로 반복 측정하기 위한 증거 수집 절차다.
 
+## 앱 내부 진단 스냅샷
+
+debug/QA 빌드에서만 `SessionController.debugDiagnosticsSnapshot()`을 호출해 한
+세션의 `callbackCount`, `flushCount`, `averageCallbackInterval`,
+`lastFlushDuration`을 기록한다. 이 값은 원시 좌표·걸음 수·사용자 식별자를 담지
+않으며 네트워크로 전송하지 않는다. 물리 기기 배터리 결과와 함께 모델·OS·모드·화면
+상태를 적고, 진단 카운터만으로 배터리 원인을 단정하지 않는다.
+
 ## 대상과 고정 조건
 
 - 대상: Samsung Galaxy 실기기 1대 이상, Android 13 이상
