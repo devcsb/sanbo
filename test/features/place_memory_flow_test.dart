@@ -244,6 +244,10 @@ void main() {
 
       expect(detail?.windows.single.placeName, '기억한 벤치');
       expect(lookup.callCount, 0);
+      // Opening a detail is read-only; reuse is a display overlay until the
+      // user explicitly edits or saves a place.
+      final persisted = await repo.getWindows(second.id);
+      expect(persisted.single.placeId, isNull);
     },
   );
 }

@@ -25,8 +25,6 @@
 - Modify `lib/data/app_database.dart`: schema version 6, one-active-session and sample idempotency constraints, persisted safety deadlines, and migration deduplication.
 - Modify `lib/data/walk_repository.dart`: transaction wrappers, conflict-safe inserts, update-count checks, and a single aggregate read for session detail.
 - Modify `lib/domain/models/walk_session.dart`: persisted safety deadline fields.
-- Create `lib/domain/models/session_detail_bundle.dart`: read-only session/sample/window/exclusion bundle returned by the repository.
-- Create `lib/domain/models/place_attachment_candidate.dart`: coordinate plus window-starts value passed to explicit place enrichment.
 - Create `lib/domain/models/session_error_code.dart`: stable controller/UI error categories.
 - Create `lib/domain/services/session_deadline.dart`: pure deadline calculation/evaluation shared by live and recovery paths.
 - Modify `lib/features/home/session_controller.dart`: persist deadlines at start, evaluate them during samples/maintenance/foreground recovery, and expose typed safety outcomes through existing state.
@@ -179,8 +177,8 @@ Run `flutter analyze --no-pub` and commit with `git add lib/domain/models/walk_s
 - Test: `test/features/ux_history_detail_widget_test.dart`
 
 **Interfaces:**
-- `WalkRepository.loadSessionDetail(String id) -> Future<SessionDetailBundle?>` performs one consistent read of session, samples, windows, and exclusions; it never writes. `SessionDetailBundle` is defined in `lib/domain/models/session_detail_bundle.dart` and contains only those four typed lists.
-- `WalkRepository.enrichKnownPlaces(String id, List<PlaceAttachmentCandidate>) -> Future<int>` is an explicit transactional command used only after the detail screen is visible. `PlaceAttachmentCandidate` contains `latitude`, `longitude`, and `windowStarts`.
+- `sessionDetailProvider` performs only reads plus an in-memory display overlay for nearby remembered places; it never calls `attachPlaceToWindows`.
+- Existing explicit editor commands (`rememberPlaceForWindows`, `deletePlace`) remain the only persistence paths for place links; no new repository command is required for the overlay.
 - `RouteMap` receives a stable `RouteMapGeometry` for static layers and a nullable `RoutePlaybackCursor` for the dynamic marker/highlight.
 
 - [ ] **Step 1: Write a provider side-effect regression test**
@@ -195,7 +193,7 @@ Expected: FAIL because the current provider enriches and writes while loading.
 
 - [ ] **Step 3: Split read aggregation from explicit enrichment**
 
-Implement `loadSessionDetail` with a transaction/snapshot-style read and move nearest-place lookup plus `attachPlaceToWindows` into a notifier command called from the existing “장소 기억” action. Invalidate the provider only after the command succeeds. Preserve the current “optional enrichment never hides a valid walk” behavior by surfacing a non-blocking notice on command failure.
+Keep the existing parallel session/sample/window/exclusion reads, remove the provider's `attachPlaceToWindows` call, and apply nearby remembered places with `MinuteWindow.copyWithPlace` in memory. The existing “장소 기억” editor remains the explicit write command and invalidates the provider only after it succeeds.
 
 - [ ] **Step 4: Cache static map geometry and keep playback dynamic**
 

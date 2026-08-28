@@ -5,11 +5,46 @@ import 'package:latlong2/latlong.dart';
 import '../../core/theme/app_theme.dart';
 import '../../domain/services/route_playback.dart';
 
+class RouteMapGeometry {
+  const RouteMapGeometry({
+    required this.fragments,
+    required this.points,
+    required this.center,
+  });
+
+  factory RouteMapGeometry.fromFragments(
+    List<List<({double lat, double lon})>> source,
+  ) {
+    final fragments = source
+        .map(
+          (fragment) => fragment
+              .map((point) => LatLng(point.lat, point.lon))
+              .toList(growable: false),
+        )
+        .toList(growable: false);
+    final points = fragments
+        .expand((fragment) => fragment)
+        .toList(growable: false);
+    return RouteMapGeometry(
+      fragments: fragments,
+      points: points,
+      center: points.isEmpty
+          ? const LatLng(37.5665, 126.9780)
+          : points[points.length ~/ 2],
+    );
+  }
+
+  final List<List<LatLng>> fragments;
+  final List<LatLng> points;
+  final LatLng center;
+}
+
 /// OSM basemap (Carto) + session path.
 class RouteMap extends StatelessWidget {
   const RouteMap({
     super.key,
     required this.fragments,
+    this.geometry,
     this.height = 220,
     this.offlinePreview = false,
     this.progress,
@@ -18,6 +53,7 @@ class RouteMap extends StatelessWidget {
   });
 
   final List<List<({double lat, double lon})>> fragments;
+  final RouteMapGeometry? geometry;
   final double height;
   final bool offlinePreview;
 
@@ -38,16 +74,10 @@ class RouteMap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final latLngFragments = fragments
-        .map(
-          (fragment) => fragment
-              .map((point) => LatLng(point.lat, point.lon))
-              .toList(growable: false),
-        )
-        .toList(growable: false);
-    final latLngs = latLngFragments
-        .expand((fragment) => fragment)
-        .toList(growable: false);
+    final staticGeometry =
+        geometry ?? RouteMapGeometry.fromFragments(fragments);
+    final latLngFragments = staticGeometry.fragments;
+    final latLngs = staticGeometry.points;
     final highlightedLatLngFragments = highlightedFragments
         .map(
           (fragment) => fragment
@@ -61,9 +91,7 @@ class RouteMap extends StatelessWidget {
     final currentLatLng = currentPoint == null
         ? null
         : LatLng(currentPoint!.lat, currentPoint!.lon);
-    final center = latLngs.isEmpty
-        ? const LatLng(37.5665, 126.9780)
-        : latLngs[latLngs.length ~/ 2];
+    final center = staticGeometry.center;
 
     return Semantics(
       container: true,

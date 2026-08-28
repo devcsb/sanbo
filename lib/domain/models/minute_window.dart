@@ -66,4 +66,43 @@ class MinuteWindow {
   ActivityLabel get displayLabel => userLabel ?? hypothesisLabel;
 
   bool get isUserExcluded => userExclusionId != null;
+
+  /// Returns a display-only place enrichment without changing persistence.
+  /// Detail providers can safely reuse a known local place while keeping read
+  /// operations free of hidden writes.
+  MinuteWindow copyWithPlace({
+    required int placeId,
+    required String placeName,
+    String? placeAddress,
+  }) {
+    return MinuteWindow(
+      windowStart: windowStart,
+      durationS: durationS,
+      partial: partial,
+      sampleCount: sampleCount,
+      rawSampleCount: rawSampleCount,
+      distanceM: distanceM,
+      avgSpeedMps: avgSpeedMps,
+      maxSpeedMps: maxSpeedMps,
+      stationaryRatio: stationaryRatio,
+      quality: quality,
+      centroidLat: centroidLat,
+      centroidLon: centroidLon,
+      startLat: startLat,
+      startLon: startLon,
+      endLat: endLat,
+      endLon: endLon,
+      gapReason: gapReason,
+      hypothesisLabel: hypothesisLabel,
+      hypothesisConfidence: hypothesisConfidence,
+      evidence: evidence,
+      userLabel: userLabel,
+      userNote: userNote,
+      userConfirmed: userConfirmed,
+      userExclusionId: userExclusionId,
+      placeId: placeId,
+      placeName: placeName,
+      placeAddress: placeAddress,
+    );
+  }
 }

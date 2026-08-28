@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/router.dart';
 import 'core/theme/app_theme.dart';
+import 'features/history/history_providers.dart';
 import 'features/home/session_controller.dart';
 import 'platform/notifications/session_notification_service.dart';
 
@@ -25,9 +26,8 @@ class _SanboAppState extends ConsumerState<SanboApp> {
     super.initState();
     _lifecycleListener = AppLifecycleListener(
       onResume: () {
-        unawaited(
-          ref.read(sessionNotificationServiceProvider).initialize(),
-        );
+        unawaited(ref.read(sessionNotificationServiceProvider).initialize());
+        refreshCurrentLocalDate(ref);
         ref.read(sessionControllerProvider.notifier).setAppForeground(true);
       },
       onInactive: () =>

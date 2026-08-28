@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sanbo/data/activity_data_source.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/features/history/history_providers.dart';
 
@@ -101,6 +102,46 @@ void main() {
     expect(identical(after, before), isFalse);
     expect(after.days.last.walkCount, 1);
   });
+
+  test('health steps remain separate from gps walk totals', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final fixedToday = DateTime(2026, 8, 15);
+    final source = _FakeActivitySource([
+      DailyStepSnapshot(
+        date: DateTime(2026, 8, 15),
+        steps: 1234,
+        source: ActivitySourceKind.healthConnect,
+        coverage: ActivityCoverage.complete,
+      ),
+    ]);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        activityDataSourceProvider.overrideWithValue(source),
+        dailyWeekEndProvider.overrideWith((_) => fixedToday),
+        dailySelectedDayProvider.overrideWith((_) => fixedToday),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final snapshot = await container.read(dailyActivityProvider.future);
+
+    expect(snapshot.days.last.totalDistanceM, 0);
+    expect(snapshot.stepsByDate[fixedToday]?.steps, 1234);
+  });
+}
+
+class _FakeActivitySource implements ActivityDataSource {
+  _FakeActivitySource(this.rows);
+
+  final List<DailyStepSnapshot> rows;
+
+  @override
+  Future<List<DailyStepSnapshot>> readDailySteps({
+    required DateTime startDate,
+    required DateTime endDateExclusive,
+  }) async => rows;
 }
 
 Future<void> _completeSession(WalkRepository repo, DateTime startedAt) async {

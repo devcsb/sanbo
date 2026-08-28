@@ -12,6 +12,7 @@ import '../../data/walk_repository.dart';
 import '../../domain/models/activity_label.dart';
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/minute_window.dart';
+import '../../domain/models/place_memory.dart';
 import '../../domain/models/route_exclusion.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/route_partitioner.dart';
@@ -54,8 +55,10 @@ final sessionDetailProvider = FutureProvider.autoDispose
       );
 
       // Reuse only places the user previously named. This is a local DB
-      // lookup; opening a detail never triggers geocoding or network work.
-      var attachedKnownPlace = false;
+      // lookup; opening a detail never triggers geocoding, network work, or a
+      // hidden write. The result is a display-only enrichment; the explicit
+      // place editor remains the only path that changes place links.
+      final knownPlacesByWindow = <String, PlaceMemory>{};
       for (final segment in segments) {
         if (!canRememberPlace(segment) || segmentPlaceId(segment) != null) {
           continue;
@@ -68,20 +71,18 @@ final sessionDetailProvider = FutureProvider.autoDispose
             longitude: coordinate.longitude,
           );
           if (known == null) continue;
-          await repo.attachPlaceToWindows(
-            sessionId: id,
-            windowStarts: segment.windows
-                .map((window) => window.windowStart)
-                .toList(),
-            placeId: known.id,
-          );
-          attachedKnownPlace = true;
+          for (final window in segment.windows) {
+            knownPlacesByWindow[_windowIdentity(window.windowStart)] = known;
+          }
         } on Object {
           // Place enrichment is optional; never hide an otherwise valid walk.
         }
       }
-      if (attachedKnownPlace) {
-        windows = await repo.getWindows(id);
+      if (knownPlacesByWindow.isNotEmpty) {
+        windows = [
+          for (final window in windows)
+            _withKnownPlace(window, knownPlacesByWindow),
+        ];
         segments = SegmentMerger().merge(
           windows,
           sessionId: id,
@@ -98,6 +99,22 @@ final sessionDetailProvider = FutureProvider.autoDispose
         segments: segments,
       );
     });
+
+String _windowIdentity(DateTime value) => value.toUtc().toIso8601String();
+
+MinuteWindow _withKnownPlace(
+  MinuteWindow window,
+  Map<String, PlaceMemory> knownPlacesByWindow,
+) {
+  final place = knownPlacesByWindow[_windowIdentity(window.windowStart)];
+  return place == null
+      ? window
+      : window.copyWithPlace(
+          placeId: place.id,
+          placeName: place.name,
+          placeAddress: place.address,
+        );
+}
 
 final _detailCommandBusyProvider = StateProvider.autoDispose
     .family<bool, String>((ref, id) => false);
@@ -141,6 +158,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   RoutePartitionResult? _playbackSource;
   List<RoutePlaybackPoint> _playbackCache = const [];
   List<List<({double lat, double lon})>> _fragmentCache = const [];
+  RouteMapGeometry? _mapGeometry;
 
   String get sessionId => widget.sessionId;
 
@@ -265,6 +283,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                   key: _mapSectionKey,
                   child: RouteMap(
                     fragments: fragments,
+                    geometry: _mapGeometry,
                     height: 220,
                     progress: currentPlaybackPoint == null
                         ? null
@@ -556,6 +575,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
               .toList(growable: false),
         )
         .toList(growable: false);
+    _mapGeometry = RouteMapGeometry.fromFragments(_fragmentCache);
     return _playbackCache;
   }
 
@@ -588,6 +608,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
       _playbackSource = null;
       _playbackCache = const [];
       _fragmentCache = const [];
+      _mapGeometry = null;
     });
   }
 
