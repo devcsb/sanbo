@@ -22,7 +22,7 @@
 
 ## File Map
 
-- Modify `lib/data/app_database.dart`: schema version 5, one-active-session and sample idempotency constraints, migration deduplication.
+- Modify `lib/data/app_database.dart`: schema version 6, one-active-session and sample idempotency constraints, persisted safety deadlines, and migration deduplication.
 - Modify `lib/data/walk_repository.dart`: transaction wrappers, conflict-safe inserts, update-count checks, and a single aggregate read for session detail.
 - Modify `lib/domain/models/walk_session.dart`: persisted safety deadline fields.
 - Create `lib/domain/models/session_detail_bundle.dart`: read-only session/sample/window/exclusion bundle returned by the repository.
@@ -46,7 +46,7 @@
 - Test: `test/data/walk_repository_test.dart`
 
 **Interfaces:**
-- Produces `schemaVersion == 5` with `idx_sessions_single_active` and a unique location-sample key `(session_id, ts, lat, lon)`.
+- Produces `schemaVersion == 5` for persistence constraints with `idx_sessions_single_active` and a unique location-sample key `(session_id, ts, lat, lon)`; Task 2 advances the schema to v6 for deadline columns.
 - `WalkRepository.insertSamples(String, List<LocationSample>)` becomes retry-safe by using `ConflictAlgorithm.ignore`.
 - `WalkRepository.replaceSamples` and `replaceWindows` become single-transaction delete-and-reinsert operations.
 - `WalkRepository.finalizeSession` and `completeSession` throw `StateError` when the session update affects anything other than exactly one row.
@@ -89,7 +89,7 @@ Expected: FAIL because the current schema is v4, there is no idempotency index, 
 
 - [ ] **Step 3: Add the v5 migration and fresh-install schema constraints**
 
-Set `schemaVersion` to `5`. In `onUpgrade`, for `oldVersion < 5`, remove duplicate samples with a `DELETE ... WHERE id NOT IN (SELECT MIN(id) ... GROUP BY session_id, ts, lat, lon)` statement, then create:
+Set `schemaVersion` to `5` for this task. In `onUpgrade`, for `oldVersion < 5`, remove duplicate samples with a `DELETE ... WHERE id NOT IN (SELECT MIN(id) ... GROUP BY session_id, ts, lat, lon)` statement, then create:
 
 ```sql
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_single_active
@@ -154,7 +154,7 @@ Expected: FAIL because the policy/value types do not exist.
 
 - [ ] **Step 3: Implement the pure deadline policy and persist fields**
 
-Add nullable ISO-8601 columns to `sessions` in schema v5 (`stationary_warning_at`, `stationary_limit_at`, `duration_warning_at`, `duration_limit_at`), migrate existing active sessions by calculating deadlines from `started_at`, and map them in `_sessionFromRow`/`_sessionToRow`. Extend `WalkSession.copyWith` without changing existing call sites. Implement the pure policy with UTC instants and a deterministic event enum.
+Advance `schemaVersion` to `6`. Add nullable ISO-8601 columns to `sessions` in the v6 migration (`stationary_warning_at`, `stationary_limit_at`, `duration_warning_at`, `duration_limit_at`), migrate existing active sessions by calculating deadlines from `started_at`, and map them in `_sessionFromRow`/`_sessionToRow`. Add the same columns to fresh installs. Extend `WalkSession.copyWith` without changing existing call sites. Implement the pure policy with UTC instants and a deterministic event enum.
 
 - [ ] **Step 4: Integrate deadlines into start, maintenance, foreground, and cold recovery**
 

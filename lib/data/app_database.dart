@@ -2,7 +2,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-const schemaVersion = 5;
+const schemaVersion = 6;
 
 const routeExclusionsTableSql = '''
 CREATE TABLE route_exclusions (
@@ -81,10 +81,7 @@ CREATE TABLE places (
         for (final row in activeRows.skip(1)) {
           await db.update(
             'sessions',
-            {
-              'status': 'crashedRecovered',
-              'ended_at': row['ended_at'],
-            },
+            {'status': 'crashedRecovered', 'ended_at': row['ended_at']},
             where: 'id = ?',
             whereArgs: [row['id']],
           );
@@ -117,6 +114,26 @@ ON location_samples(session_id, ts, lat, lon)
 ''');
         }
       }
+      if (oldVersion < 6) {
+        for (final column in const [
+          'stationary_warning_at',
+          'stationary_limit_at',
+          'duration_warning_at',
+          'duration_limit_at',
+        ]) {
+          await db.execute('ALTER TABLE sessions ADD COLUMN $column TEXT');
+        }
+        // Existing active rows retain their original start time while gaining
+        // the durable five-hour boundary. Stationary deadlines are derived
+        // only after a trusted stationary anchor is observed by the guard.
+        await db.execute('''
+UPDATE sessions
+SET duration_warning_at = strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+4 hours 45 minutes'),
+    duration_limit_at = strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+5 hours')
+WHERE duration_warning_at IS NULL
+  AND status = 'active'
+''');
+      }
     },
     onOpen: (db) async {
       final check = await db.rawQuery('PRAGMA quick_check(1)');
@@ -143,6 +160,10 @@ CREATE TABLE sessions (
   avg_speed_mps REAL,
   valid_sample_count INTEGER,
   median_accuracy_m REAL,
+  stationary_warning_at TEXT,
+  stationary_limit_at TEXT,
+  duration_warning_at TEXT,
+  duration_limit_at TEXT,
   notes TEXT
 )''');
   await db.execute(

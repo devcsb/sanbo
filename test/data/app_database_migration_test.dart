@@ -10,28 +10,41 @@ import '../helpers/route_exclusion_fixture.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('fresh v5 database passes quick, foreign key, and safety index checks', () async {
-    ensureSqfliteFfi();
-    final path =
-        '${Directory.systemTemp.path}/sanbo_v4_fresh_${DateTime.now().microsecondsSinceEpoch}.db';
-    addTearDown(() => databaseFactory.deleteDatabase(path));
+  test(
+    'fresh v6 database passes quick, foreign key, safety index, and deadline checks',
+    () async {
+      ensureSqfliteFfi();
+      final path =
+          '${Directory.systemTemp.path}/sanbo_v4_fresh_${DateTime.now().microsecondsSinceEpoch}.db';
+      addTearDown(() => databaseFactory.deleteDatabase(path));
 
-    final db = await openAppDatabase(path: path);
-    addTearDown(db.close);
+      final db = await openAppDatabase(path: path);
+      addTearDown(db.close);
 
-    expect(await db.rawQuery('PRAGMA quick_check(1)'), [
-      {'quick_check': 'ok'},
-    ]);
-    expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
-    final indexes = await db.rawQuery(
-      "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN "
-      "('idx_sessions_single_active', 'idx_samples_idempotency')",
-    );
-    expect(
-      indexes.map((row) => row['name']),
-      containsAll(['idx_sessions_single_active', 'idx_samples_idempotency']),
-    );
-  });
+      expect(await db.rawQuery('PRAGMA quick_check(1)'), [
+        {'quick_check': 'ok'},
+      ]);
+      expect(await db.rawQuery('PRAGMA foreign_key_check'), isEmpty);
+      final indexes = await db.rawQuery(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN "
+        "('idx_sessions_single_active', 'idx_samples_idempotency')",
+      );
+      expect(
+        indexes.map((row) => row['name']),
+        containsAll(['idx_sessions_single_active', 'idx_samples_idempotency']),
+      );
+      final sessionColumns = await db.rawQuery('PRAGMA table_info(sessions)');
+      expect(
+        sessionColumns.map((row) => row['name']),
+        containsAll([
+          'stationary_warning_at',
+          'stationary_limit_at',
+          'duration_warning_at',
+          'duration_limit_at',
+        ]),
+      );
+    },
+  );
 
   test('schema v1 upgrades with places and place_id intact', () async {
     ensureSqfliteFfi();
@@ -259,10 +272,7 @@ CREATE TABLE minute_windows (
         await db.query(
           'sqlite_master',
           where: "type = 'index' AND name IN (?, ?)",
-          whereArgs: [
-            'idx_sessions_single_active',
-            'idx_samples_idempotency',
-          ],
+          whereArgs: ['idx_sessions_single_active', 'idx_samples_idempotency'],
         ),
         hasLength(2),
       );

@@ -17,6 +17,8 @@ import '../domain/pipeline/segment_merger.dart';
 import '../domain/pipeline/session_rollup.dart';
 import '../domain/services/app_backup.dart';
 import '../domain/services/daily_walk_stats.dart';
+import '../domain/services/session_deadline.dart';
+import '../domain/services/session_guard.dart';
 import '../domain/services/session_pipeline.dart';
 import '../domain/services/walk_stats.dart';
 import 'app_database.dart';
@@ -282,8 +284,16 @@ WHERE status = ?
       trackingMode: mode,
       status: SessionStatus.active,
     );
+    final deadlines = SessionDeadlinePolicy.calculate(
+      session.startedAt,
+      const SessionGuardPolicy(),
+    );
+    final persisted = session.copyWith(
+      durationWarningAt: deadlines.durationWarningAt,
+      durationLimitAt: deadlines.durationLimitAt,
+    );
     try {
-      await _db.insert('sessions', _sessionToRow(session));
+      await _db.insert('sessions', _sessionToRow(persisted));
     } on DatabaseException catch (error) {
       final message = error.toString();
       if (message.contains('idx_sessions_single_active') ||
@@ -292,7 +302,7 @@ WHERE status = ?
       }
       rethrow;
     }
-    return session;
+    return persisted;
   }
 
   Future<void> insertSamples(
@@ -1162,6 +1172,37 @@ WHERE w.session_id = ?
     );
   }
 
+  Future<WalkSession> updateSessionDeadlines(
+    String sessionId,
+    SessionDeadlines deadlines,
+  ) async {
+    final updated = await _db.update(
+      'sessions',
+      {
+        'stationary_warning_at': deadlines.stationaryWarningAt
+            ?.toUtc()
+            .toIso8601String(),
+        'stationary_limit_at': deadlines.stationaryLimitAt
+            ?.toUtc()
+            .toIso8601String(),
+        'duration_warning_at': deadlines.durationWarningAt
+            .toUtc()
+            .toIso8601String(),
+        'duration_limit_at': deadlines.durationLimitAt
+            .toUtc()
+            .toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [sessionId],
+    );
+    if (updated != 1) {
+      throw StateError('산책 안전 종료 시점을 저장하지 못했습니다');
+    }
+    final session = await getSession(sessionId);
+    if (session == null) throw StateError('세션을 찾을 수 없습니다');
+    return session;
+  }
+
   Future<void> deleteSession(String id) async {
     await _db.delete('sessions', where: 'id = ?', whereArgs: [id]);
     await _deleteOrphanPlaces();
@@ -1975,8 +2016,25 @@ WHERE w.session_id = ?
     'avg_speed_mps': s.avgSpeedMps,
     'valid_sample_count': s.validSampleCount,
     'median_accuracy_m': s.medianAccuracyM,
+    'stationary_warning_at': s.stationaryWarningAt == null
+        ? null
+        : _canonicalUtcInstant(s.stationaryWarningAt!),
+    'stationary_limit_at': s.stationaryLimitAt == null
+        ? null
+        : _canonicalUtcInstant(s.stationaryLimitAt!),
+    'duration_warning_at': s.durationWarningAt == null
+        ? null
+        : _canonicalUtcInstant(s.durationWarningAt!),
+    'duration_limit_at': s.durationLimitAt == null
+        ? null
+        : _canonicalUtcInstant(s.durationLimitAt!),
     'notes': s.notes,
   };
+
+  DateTime? _nullableUtcInstant(Object? raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    return DateTime.tryParse(raw)?.toUtc();
+  }
 
   WalkSession _sessionFromRow(Map<String, Object?> r) {
     final timezone = r['timezone']! as String;
@@ -2002,6 +2060,10 @@ WHERE w.session_id = ?
       avgSpeedMps: (r['avg_speed_mps'] as num?)?.toDouble(),
       validSampleCount: r['valid_sample_count'] as int?,
       medianAccuracyM: (r['median_accuracy_m'] as num?)?.toDouble(),
+      stationaryWarningAt: _nullableUtcInstant(r['stationary_warning_at']),
+      stationaryLimitAt: _nullableUtcInstant(r['stationary_limit_at']),
+      durationWarningAt: _nullableUtcInstant(r['duration_warning_at']),
+      durationLimitAt: _nullableUtcInstant(r['duration_limit_at']),
       notes: r['notes'] as String?,
     );
   }

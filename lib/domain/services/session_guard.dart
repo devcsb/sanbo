@@ -198,6 +198,12 @@ class SessionGuard {
     _highSpeedPendingAt = null;
   }
 
+  /// Marks the persisted duration warning as delivered so a cold-recovery
+  /// deadline check does not mask other guard events in the same pass.
+  void acknowledgeDurationWarning() {
+    _durationWarningIssued = true;
+  }
+
   /// Breaks speed accumulation when the caller rejects a provider fix before
   /// it reaches [observe]. The next trusted fix becomes a fresh anchor.
   void interruptHighSpeedContinuity() {

@@ -38,33 +38,50 @@ void main() {
     expect(await repo.getSamples(session.id), hasLength(1));
   });
 
-  test('replaceWindows rolls back when a replacement violates uniqueness', () async {
+  test('new sessions persist recoverable duration deadlines', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
-    final session = await repo.startSession(
-      startedAt: DateTime.utc(2026, 8, 29, 0),
-    );
-    MinuteWindow makeWindow() => MinuteWindow(
-      windowStart: DateTime.utc(2026, 8, 29, 0),
-      durationS: 60,
-      partial: false,
-      sampleCount: 1,
-      rawSampleCount: 1,
-      distanceM: 1,
-      avgSpeedMps: 1,
-      maxSpeedMps: 1,
-      stationaryRatio: 0,
-      quality: WindowQuality.high,
-      hypothesisLabel: ActivityLabel.walkSteady,
-    );
-    await repo.replaceWindows(session.id, [makeWindow()]);
+    final started = DateTime.utc(2026, 8, 29);
+    final session = await repo.startSession(startedAt: started);
+    final restored = await repo.getSession(session.id);
 
-    await expectLater(
-      repo.replaceWindows(session.id, [makeWindow(), makeWindow()]),
-      throwsA(isA<DatabaseException>()),
+    expect(
+      restored?.durationWarningAt,
+      started.add(const Duration(hours: 4, minutes: 45)),
     );
-    expect(await repo.getWindows(session.id), hasLength(1));
+    expect(restored?.durationLimitAt, started.add(const Duration(hours: 5)));
   });
+
+  test(
+    'replaceWindows rolls back when a replacement violates uniqueness',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final session = await repo.startSession(
+        startedAt: DateTime.utc(2026, 8, 29, 0),
+      );
+      MinuteWindow makeWindow() => MinuteWindow(
+        windowStart: DateTime.utc(2026, 8, 29, 0),
+        durationS: 60,
+        partial: false,
+        sampleCount: 1,
+        rawSampleCount: 1,
+        distanceM: 1,
+        avgSpeedMps: 1,
+        maxSpeedMps: 1,
+        stationaryRatio: 0,
+        quality: WindowQuality.high,
+        hypothesisLabel: ActivityLabel.walkSteady,
+      );
+      await repo.replaceWindows(session.id, [makeWindow()]);
+
+      await expectLater(
+        repo.replaceWindows(session.id, [makeWindow(), makeWindow()]),
+        throwsA(isA<DatabaseException>()),
+      );
+      expect(await repo.getWindows(session.id), hasLength(1));
+    },
+  );
 
   test('daily stats sums completed sessions by local start date', () async {
     final repo = await openTestRepository();

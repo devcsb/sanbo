@@ -9,6 +9,7 @@ import '../../domain/models/tracking_mode.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/geo.dart';
 import '../../domain/pipeline/sample_filter.dart';
+import '../../domain/services/session_deadline.dart';
 import '../../domain/services/session_guard.dart';
 import '../../domain/services/session_pipeline.dart';
 import '../../platform/location/location_engine.dart';
@@ -183,6 +184,8 @@ class SessionController extends Notifier<LiveSessionState> {
   var _endingSession = false;
   bool _autoStopInProgress = false;
   bool _highSpeedWarningPublished = false;
+  SessionDeadlines? _sessionDeadlines;
+  bool _durationDeadlineWarningIssued = false;
   bool _appForeground = true;
   bool _appInactive = false;
   bool _locationStreamFailed = false;
@@ -366,7 +369,7 @@ class SessionController extends Notifier<LiveSessionState> {
 
   Future<bool> _restoreActive() async {
     try {
-      final active = await _repo.getActiveSession();
+      var active = await _repo.getActiveSession();
       if (active == null) {
         // A previous lookup may have failed after leaving a retryable error in
         // state. A successful retry that finds no active row is a clean idle
@@ -383,6 +386,8 @@ class SessionController extends Notifier<LiveSessionState> {
         state = const LiveSessionState();
         return true;
       }
+      active = await _ensureSessionDeadlines(active);
+      _sessionDeadlines = _deadlinesFromSession(active);
       final existing = await _repo.getSamples(active.id);
       _sessionSamples
         ..clear()
@@ -499,6 +504,37 @@ class SessionController extends Notifier<LiveSessionState> {
     unawaited(_evaluateSessionGuard(_clock()));
   }
 
+  Future<WalkSession> _ensureSessionDeadlines(WalkSession session) async {
+    final calculated = SessionDeadlinePolicy.calculate(
+      session.startedAt,
+      _sessionGuard.policy,
+    );
+    final hasSameDuration =
+        _sameInstant(session.durationWarningAt, calculated.durationWarningAt) &&
+        _sameInstant(session.durationLimitAt, calculated.durationLimitAt);
+    if (hasSameDuration) return session;
+    return _repo.updateSessionDeadlines(session.id, calculated);
+  }
+
+  SessionDeadlines _deadlinesFromSession(WalkSession session) {
+    final fallback = SessionDeadlinePolicy.calculate(
+      session.startedAt,
+      _sessionGuard.policy,
+    );
+    return SessionDeadlines(
+      stationaryWarningAt: session.stationaryWarningAt,
+      stationaryLimitAt: session.stationaryLimitAt,
+      durationWarningAt:
+          session.durationWarningAt ?? fallback.durationWarningAt,
+      durationLimitAt: session.durationLimitAt ?? fallback.durationLimitAt,
+    );
+  }
+
+  bool _sameInstant(DateTime? left, DateTime? right) {
+    if (left == null || right == null) return left == right;
+    return left.toUtc().isAtSameMomentAs(right.toUtc());
+  }
+
   /// Native warning identifiers are shared by related warning kinds. Serialize
   /// every notification operation so a late cancel cannot erase a newer show.
   Future<void> _enqueueNotification(Future<void> Function() operation) {
@@ -524,6 +560,8 @@ class SessionController extends Notifier<LiveSessionState> {
 
   Future<void> _cancelSessionGuard() async {
     _sessionGuard.reset();
+    _sessionDeadlines = null;
+    _durationDeadlineWarningIssued = false;
     _highSpeedWarningPublished = false;
     try {
       await _enqueueNotification(
@@ -653,6 +691,9 @@ class SessionController extends Notifier<LiveSessionState> {
         startedAt: _clock(),
         timezone: await _timezone(),
       );
+      session = await _ensureSessionDeadlines(session);
+      _sessionDeadlines = _deadlinesFromSession(session);
+      _durationDeadlineWarningIssued = false;
 
       if (resuming) {
         _lastJumpRejectedSample = null;
@@ -1030,6 +1071,28 @@ class SessionController extends Notifier<LiveSessionState> {
         _autoStopInProgress) {
       return;
     }
+    final persistedDeadlines =
+        _sessionDeadlines ?? _deadlinesFromSession(session);
+    _sessionDeadlines = persistedDeadlines;
+    final persistedEvent = SessionDeadlinePolicy.evaluate(
+      persistedDeadlines,
+      now,
+    );
+    if (persistedEvent == SessionDeadlineEvent.durationLimit) {
+      if (deferAutoStop) {
+        unawaited(_autoStop(completionNotice: '5시간이 지나 산책을 자동으로 저장하고 종료했어요.'));
+      } else {
+        await _autoStop(completionNotice: '5시간이 지나 산책을 자동으로 저장하고 종료했어요.');
+      }
+      return;
+    }
+    if (persistedEvent == SessionDeadlineEvent.durationWarning) {
+      if (!_durationDeadlineWarningIssued) {
+        _durationDeadlineWarningIssued = true;
+        await _publishDurationWarning(session);
+      }
+      _sessionGuard.acknowledgeDurationWarning();
+    }
     final decision = _sessionGuard.evaluate(
       startedAt: session.startedAt,
       now: now,
@@ -1062,19 +1125,9 @@ class SessionController extends Notifier<LiveSessionState> {
         }
         return;
       case SessionGuardEvent.durationWarning:
-        const warning = SessionWarning(
-          kind: SessionWarningKind.duration,
-          title: '산책 기록이 곧 종료돼요',
-          message: '산책 기록이 4시간 45분을 넘었어요. 총 5시간이 되면 자동으로 저장하고 종료합니다.',
-          actions: {},
-        );
-        state = state.copyWith(
-          activeWarning: warning,
-          statusMessage: '자동 종료 예정',
-        );
-        await _enqueueNotification(
-          () => _notifications.showWarning(warning, sessionId: session.id),
-        );
+        if (_durationDeadlineWarningIssued) return;
+        _durationDeadlineWarningIssued = true;
+        await _publishDurationWarning(session);
         return;
       case SessionGuardEvent.durationLimit:
         if (deferAutoStop) {
@@ -1104,6 +1157,19 @@ class SessionController extends Notifier<LiveSessionState> {
         }
         return;
     }
+  }
+
+  Future<void> _publishDurationWarning(WalkSession session) async {
+    const warning = SessionWarning(
+      kind: SessionWarningKind.duration,
+      title: '산책 기록이 곧 종료돼요',
+      message: '산책 기록이 4시간 45분을 넘었어요. 총 5시간이 되면 자동으로 저장하고 종료합니다.',
+      actions: {},
+    );
+    state = state.copyWith(activeWarning: warning, statusMessage: '자동 종료 예정');
+    await _enqueueNotification(
+      () => _notifications.showWarning(warning, sessionId: session.id),
+    );
   }
 
   Future<void> continueAfterWarning() async {

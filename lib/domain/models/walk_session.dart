@@ -17,6 +17,10 @@ class WalkSession {
     this.avgSpeedMps,
     this.validSampleCount,
     this.medianAccuracyM,
+    this.stationaryWarningAt,
+    this.stationaryLimitAt,
+    this.durationWarningAt,
+    this.durationLimitAt,
     this.notes,
   });
 
@@ -33,6 +37,10 @@ class WalkSession {
   final double? avgSpeedMps;
   final int? validSampleCount;
   final double? medianAccuracyM;
+  final DateTime? stationaryWarningAt;
+  final DateTime? stationaryLimitAt;
+  final DateTime? durationWarningAt;
+  final DateTime? durationLimitAt;
   final String? notes;
 
   bool get isActive => status == SessionStatus.active && endedAt == null;
@@ -47,6 +55,11 @@ class WalkSession {
     double? avgSpeedMps,
     int? validSampleCount,
     double? medianAccuracyM,
+    DateTime? stationaryWarningAt,
+    DateTime? stationaryLimitAt,
+    DateTime? durationWarningAt,
+    DateTime? durationLimitAt,
+    bool clearStationaryDeadlines = false,
     String? notes,
   }) {
     return WalkSession(
@@ -63,6 +76,14 @@ class WalkSession {
       avgSpeedMps: avgSpeedMps ?? this.avgSpeedMps,
       validSampleCount: validSampleCount ?? this.validSampleCount,
       medianAccuracyM: medianAccuracyM ?? this.medianAccuracyM,
+      stationaryWarningAt: clearStationaryDeadlines
+          ? null
+          : (stationaryWarningAt ?? this.stationaryWarningAt),
+      stationaryLimitAt: clearStationaryDeadlines
+          ? null
+          : (stationaryLimitAt ?? this.stationaryLimitAt),
+      durationWarningAt: durationWarningAt ?? this.durationWarningAt,
+      durationLimitAt: durationLimitAt ?? this.durationLimitAt,
       notes: notes ?? this.notes,
     );
   }
