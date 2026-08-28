@@ -6,6 +6,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/activity_data_source.dart';
 import '../../domain/services/daily_walk_stats.dart';
 import '../../domain/services/walk_stats.dart';
+import '../../shared/widgets/app_motion.dart';
 import '../../shared/widgets/ui_bits.dart';
 import 'history_providers.dart';
 
@@ -15,58 +16,89 @@ class DailyActivityPanel extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(dailyActivityProvider);
-    return async.when(
-      loading: () => const SoftPanel(
-        child: SizedBox(
-          height: 140,
-          child: Center(child: CircularProgressIndicator()),
+    final source = ref.watch(activityDataSourceProvider);
+    final ActivityDataSourceConnector? connector =
+        source is ActivityDataSourceConnector
+        ? source as ActivityDataSourceConnector
+        : null;
+    return SmoothSwitcher(
+      transitionKey: _activityTransitionKey(async),
+      child: async.when(
+        loading: () => const SoftPanel(
+          child: SizedBox(
+            height: 140,
+            child: Center(child: CircularProgressIndicator()),
+          ),
         ),
-      ),
-      error: (_, _) => SoftPanel(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('일별 운동량'),
-            const SizedBox(height: 8),
-            Text(
-              '일별 운동량을 불러오지 못했어요',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
+        error: (_, _) => SoftPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('일별 운동량'),
+              const SizedBox(height: 8),
+              Text(
+                '일별 운동량을 불러오지 못했어요',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-            ),
-            const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: () => ref.invalidate(dailyActivityProvider),
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('다시 시도'),
-            ),
-          ],
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: () => ref.invalidate(dailyActivityProvider),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('다시 시도'),
+              ),
+            ],
+          ),
         ),
-      ),
-      data: (snapshot) => _DailyActivityLoaded(
-        snapshot: snapshot,
-        selectedDay: ref.watch(dailySelectedDayProvider),
-        onSelectDay: (day) {
-          ref.read(dailySelectedDayProvider.notifier).state = day;
-        },
-        onMoveWeek: (weekEnd) {
-          ref.read(dailyWeekEndProvider.notifier).state = weekEnd;
-          ref.read(dailySelectedDayProvider.notifier).state = weekEnd;
-        },
+        data: (snapshot) => _DailyActivityLoaded(
+          snapshot: snapshot,
+          connector: connector,
+          onConnect: connector == null
+              ? null
+              : () async {
+                  final result = await connector.requestAccess();
+                  ref.invalidate(dailyActivityProvider);
+                  return result;
+                },
+          selectedDay: ref.watch(dailySelectedDayProvider),
+          onSelectDay: (day) {
+            ref.read(dailySelectedDayProvider.notifier).state = day;
+          },
+          onMoveWeek: (weekEnd) {
+            ref.read(dailyWeekEndProvider.notifier).state = weekEnd;
+            ref.read(dailySelectedDayProvider.notifier).state = weekEnd;
+          },
+        ),
       ),
     );
+  }
+
+  Object _activityTransitionKey(AsyncValue<DailyActivitySnapshot> async) {
+    if (async.hasValue) {
+      final snapshot = async.valueOrNull;
+      if (snapshot == null) return 'data:empty';
+      return 'data:${snapshot.weekStart.toIso8601String()}: '
+          '${snapshot.weekEnd.toIso8601String()}';
+    }
+    if (async.hasError) return 'error';
+    return 'loading';
   }
 }
 
 class _DailyActivityLoaded extends StatelessWidget {
   const _DailyActivityLoaded({
     required this.snapshot,
+    required this.connector,
+    required this.onConnect,
     required this.selectedDay,
     required this.onSelectDay,
     required this.onMoveWeek,
   });
 
   final DailyActivitySnapshot snapshot;
+  final ActivityDataSourceConnector? connector;
+  final Future<ActivityAccessState> Function()? onConnect;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onSelectDay;
   final ValueChanged<DateTime> onMoveWeek;
@@ -80,9 +112,10 @@ class _DailyActivityLoaded extends StatelessWidget {
       orElse: () => DailyWalkStats.zero(selected),
     );
     final today = localDateOnly(DateTime.now());
-    final canMoveForward = snapshot.weekEnd
-        .add(const Duration(days: 7))
-        .isBefore(today.add(const Duration(days: 1)));
+    final canMoveForward = addLocalCalendarDays(
+      snapshot.weekEnd,
+      7,
+    ).isBefore(addLocalCalendarDays(today, 1));
     final dateFormat = DateFormat('M월 d일', 'ko');
     final steps =
         snapshot.stepsByDate[selected] ??
@@ -95,7 +128,9 @@ class _DailyActivityLoaded extends StatelessWidget {
       ActivitySourceKind.healthKit => 'Apple 건강에서 가져옴',
       ActivitySourceKind.denied => '건강 데이터 권한이 필요해요',
       ActivitySourceKind.unavailable => '건강 데이터 연결 전',
+      ActivitySourceKind.error => '건강 데이터를 불러오지 못했어요',
     };
+    final showConnectAction = connector != null && steps.steps == null;
 
     return SoftPanel(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
@@ -122,17 +157,15 @@ class _DailyActivityLoaded extends StatelessWidget {
               ),
               IconButton(
                 tooltip: '이전 7일',
-                onPressed: () => onMoveWeek(
-                  snapshot.weekEnd.subtract(const Duration(days: 7)),
-                ),
+                onPressed: () =>
+                    onMoveWeek(addLocalCalendarDays(snapshot.weekEnd, -7)),
                 icon: const Icon(Icons.chevron_left_rounded),
               ),
               IconButton(
                 tooltip: '다음 7일',
                 onPressed: canMoveForward
-                    ? () => onMoveWeek(
-                        snapshot.weekEnd.add(const Duration(days: 7)),
-                      )
+                    ? () =>
+                          onMoveWeek(addLocalCalendarDays(snapshot.weekEnd, 7))
                     : null,
                 icon: const Icon(Icons.chevron_right_rounded),
               ),
@@ -231,37 +264,46 @@ class _DailyActivityLoaded extends StatelessWidget {
                   horizontal: 12,
                   vertical: 10,
                 ),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(
-                      Icons.directions_walk_rounded,
-                      color: theme.colorScheme.primary,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('걸음 수', style: theme.textTheme.labelLarge),
-                          const SizedBox(height: 2),
-                          Text(
-                            stepsValue,
-                            style: theme.textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.directions_walk_rounded,
+                          color: theme.colorScheme.primary,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('걸음 수', style: theme.textTheme.labelLarge),
+                              const SizedBox(height: 2),
+                              Text(
+                                stepsValue,
+                                style: theme.textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Flexible(
+                          child: Text(
+                            stepsStatus,
+                            textAlign: TextAlign.end,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
-                        ],
-                      ),
-                    ),
-                    Flexible(
-                      child: Text(
-                        stepsStatus,
-                        textAlign: TextAlign.end,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                      ),
+                      ],
                     ),
+                    if (showConnectAction) ...[
+                      const SizedBox(height: 8),
+                      _ActivityConnectButton(onConnect: onConnect!),
+                    ],
                   ],
                 ),
               ),
@@ -270,5 +312,72 @@ class _DailyActivityLoaded extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _ActivityConnectButton extends StatefulWidget {
+  const _ActivityConnectButton({required this.onConnect});
+
+  final Future<ActivityAccessState> Function() onConnect;
+
+  @override
+  State<_ActivityConnectButton> createState() => _ActivityConnectButtonState();
+}
+
+class _ActivityConnectButtonState extends State<_ActivityConnectButton> {
+  bool _busy = false;
+  String? _message;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextButton.icon(
+          onPressed: _busy ? null : _connect,
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.link_rounded),
+          label: Text(_busy ? '연결 확인 중…' : '건강 데이터 연결'),
+        ),
+        if (_message != null)
+          Text(
+            _message!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _connect() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    ActivityAccessState result;
+    try {
+      result = await widget.onConnect();
+    } catch (_) {
+      // A connector is expected to normalize platform errors, but keep the
+      // button recoverable if a future adapter violates that contract.
+      result = ActivityAccessState.error;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = switch (result) {
+        ActivityAccessState.connected => '연결했어요. 최신 걸음 수를 불러옵니다.',
+        ActivityAccessState.denied => '권한을 허용하지 않아 연결하지 못했어요.',
+        ActivityAccessState.unavailable => '건강 데이터 앱을 준비한 뒤 다시 시도해 주세요.',
+        ActivityAccessState.error => '연결 상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.',
+      };
+    });
   }
 }
