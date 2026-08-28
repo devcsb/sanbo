@@ -207,7 +207,51 @@ class GeolocatorLocationEngine implements LocationEngine {
 
   @override
   Future<void> setMode(TrackingMode mode) async {
+    if (_mode == mode) return;
     _mode = mode;
+    if (!_running) return;
+
+    // A recovery and a user-requested profile change both replace the native
+    // stream. Let the in-flight recovery finish; it reads the latest mode
+    // before arming its replacement stream, so two subscriptions are never
+    // active at once.
+    if (_streamRecoveryInFlight) return;
+    _streamRecoveryInFlight = true;
+    final keepFallback = _usingLocationManagerFallback;
+    try {
+      try {
+        await _startStream(forceLocationManager: keepFallback);
+      } catch (error, stackTrace) {
+        // Android's fused provider can fail during a settings change just as
+        // it can during the initial start. Reuse the existing fallback path
+        // rather than leaving a running controller with no native stream.
+        if (!keepFallback && Platform.isAndroid && _running) {
+          developer.log(
+            'Fused location reconfigure failed, retrying LocationManager',
+            name: _logName,
+            error: error,
+            stackTrace: stackTrace,
+          );
+          await _startStream(forceLocationManager: true);
+          _usingLocationManagerFallback = true;
+        } else {
+          Error.throwWithStackTrace(error, stackTrace);
+        }
+      }
+      if (_running) {
+        unawaited(
+          _emitCurrentPosition(
+            retries: 1,
+            forceLocationManager: _usingLocationManagerFallback,
+          ),
+        );
+      }
+    } catch (error, stackTrace) {
+      _reportEndedStream(stackTrace);
+      Error.throwWithStackTrace(error, stackTrace);
+    } finally {
+      _streamRecoveryInFlight = false;
+    }
   }
 
   @override
@@ -333,7 +377,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     final perm = await Geolocator.checkPermission();
     if (perm == LocationPermission.denied ||
         perm == LocationPermission.deniedForever) {
-      final error = StateError('location_permission_denied');
+      const error = LocationEngineFailure(LocationFailureKind.permission);
       _controller.addError(error, StackTrace.current);
       _running = false;
       throw error;
@@ -341,7 +385,7 @@ class GeolocatorLocationEngine implements LocationEngine {
 
     final serviceOn = await Geolocator.isLocationServiceEnabled();
     if (!serviceOn) {
-      final error = StateError('location_service_disabled');
+      const error = LocationEngineFailure(LocationFailureKind.serviceDisabled);
       _controller.addError(error, StackTrace.current);
       _running = false;
       throw error;
@@ -571,7 +615,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     _stallWatchdog = null;
     if (!_controller.isClosed) {
       _controller.addError(
-        StateError('location_stream_ended'),
+        const LocationEngineFailure(LocationFailureKind.streamEnded),
         stackTrace ?? StackTrace.current,
       );
     }
