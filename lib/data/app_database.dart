@@ -2,7 +2,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
-const schemaVersion = 4;
+const schemaVersion = 5;
 
 const routeExclusionsTableSql = '''
 CREATE TABLE route_exclusions (
@@ -68,6 +68,55 @@ CREATE TABLE places (
           'CREATE INDEX idx_windows_user_exclusion ON minute_windows(user_exclusion_id)',
         );
       }
+      if (oldVersion < 5) {
+        // Preserve every historical session while resolving any duplicate
+        // active rows created before the database-level invariant existed.
+        final activeRows = await db.query(
+          'sessions',
+          columns: const ['id'],
+          where: 'status = ?',
+          whereArgs: ['active'],
+          orderBy: 'started_at ASC, id ASC',
+        );
+        for (final row in activeRows.skip(1)) {
+          await db.update(
+            'sessions',
+            {
+              'status': 'crashedRecovered',
+              'ended_at': row['ended_at'],
+            },
+            where: 'id = ?',
+            whereArgs: [row['id']],
+          );
+        }
+        // A retry after an interrupted commit can leave byte-identical fixes
+        // in legacy databases. Keep the first row for each logical fix. Very
+        // old v1 fixtures did not have a samples table yet, so skip it there.
+        final sampleTable = await db.query(
+          'sqlite_master',
+          columns: const ['name'],
+          where: "type = 'table' AND name = 'location_samples'",
+        );
+        if (sampleTable.isNotEmpty) {
+          await db.execute('''
+DELETE FROM location_samples
+WHERE id NOT IN (
+  SELECT MIN(id)
+  FROM location_samples
+  GROUP BY session_id, ts, lat, lon
+)''');
+        }
+        await db.execute('''
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_single_active
+ON sessions(status) WHERE status = 'active'
+''');
+        if (sampleTable.isNotEmpty) {
+          await db.execute('''
+CREATE UNIQUE INDEX IF NOT EXISTS idx_samples_idempotency
+ON location_samples(session_id, ts, lat, lon)
+''');
+        }
+      }
     },
     onOpen: (db) async {
       final check = await db.rawQuery('PRAGMA quick_check(1)');
@@ -126,6 +175,10 @@ CREATE TABLE location_samples (
   await db.execute(
     'CREATE INDEX idx_samples_session ON location_samples(session_id, ts)',
   );
+  await db.execute('''
+CREATE UNIQUE INDEX idx_samples_idempotency
+ON location_samples(session_id, ts, lat, lon)
+''');
   await db.execute(routeExclusionsTableSql);
   await db.execute(
     'CREATE INDEX idx_route_exclusions_session_range '
@@ -173,6 +226,10 @@ CREATE TABLE minute_windows (
   await db.execute(
     'CREATE INDEX idx_windows_user_exclusion ON minute_windows(user_exclusion_id)',
   );
+  await db.execute('''
+CREATE UNIQUE INDEX idx_sessions_single_active
+ON sessions(status) WHERE status = 'active'
+''');
 }
 
 Future<String> _defaultPath() async {

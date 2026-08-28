@@ -282,7 +282,16 @@ WHERE status = ?
       trackingMode: mode,
       status: SessionStatus.active,
     );
-    await _db.insert('sessions', _sessionToRow(session));
+    try {
+      await _db.insert('sessions', _sessionToRow(session));
+    } on DatabaseException catch (error) {
+      final message = error.toString();
+      if (message.contains('idx_sessions_single_active') ||
+          message.contains('sessions.status')) {
+        throw StateError('이미 진행 중인 산책이 있습니다');
+      }
+      rethrow;
+    }
     return session;
   }
 
@@ -297,7 +306,11 @@ WHERE status = ?
     if (persistable.isEmpty) return;
     final batch = _db.batch();
     for (final s in persistable) {
-      batch.insert('location_samples', _sampleToRow(sessionId, s));
+      batch.insert(
+        'location_samples',
+        _sampleToRow(sessionId, s),
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
     }
     await batch.commit(noResult: true);
   }
@@ -411,7 +424,11 @@ WHERE status = ?
       );
       final sampleBatch = txn.batch();
       for (final s in samples.where(_isPersistableSample)) {
-        sampleBatch.insert('location_samples', _sampleToRow(session.id, s));
+        sampleBatch.insert(
+          'location_samples',
+          _sampleToRow(session.id, s),
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
       }
       await sampleBatch.commit(noResult: true);
 
@@ -426,12 +443,15 @@ WHERE status = ?
       }
       await windowBatch.commit(noResult: true);
 
-      await txn.update(
+      final updated = await txn.update(
         'sessions',
         _sessionToRow(ended),
         where: 'id = ?',
         whereArgs: [session.id],
       );
+      if (updated != 1) {
+        throw StateError('산책 완료 상태를 저장하지 못했습니다');
+      }
     });
     return ended;
   }
@@ -441,12 +461,26 @@ WHERE status = ?
     String sessionId,
     List<LocationSample> samples,
   ) async {
-    await _db.delete(
-      'location_samples',
-      where: 'session_id = ?',
-      whereArgs: [sessionId],
-    );
-    await insertSamples(sessionId, samples);
+    await _db.transaction((txn) async {
+      await txn.delete(
+        'location_samples',
+        where: 'session_id = ?',
+        whereArgs: [sessionId],
+      );
+      final persistable = samples
+          .where(_isPersistableSample)
+          .map((sample) => sample.normalizedMetadata())
+          .toList(growable: false);
+      final batch = txn.batch();
+      for (final sample in persistable) {
+        batch.insert(
+          'location_samples',
+          _sampleToRow(sessionId, sample),
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   Future<List<LocationSample>> getSamples(String sessionId) async {
@@ -476,16 +510,18 @@ WHERE status = ?
     String sessionId,
     List<MinuteWindow> windows,
   ) async {
-    await _db.delete(
-      'minute_windows',
-      where: 'session_id = ?',
-      whereArgs: [sessionId],
-    );
-    final batch = _db.batch();
-    for (final w in windows) {
-      batch.insert('minute_windows', _windowToRow(sessionId, w));
-    }
-    await batch.commit(noResult: true);
+    await _db.transaction((txn) async {
+      await txn.delete(
+        'minute_windows',
+        where: 'session_id = ?',
+        whereArgs: [sessionId],
+      );
+      final batch = txn.batch();
+      for (final w in windows) {
+        batch.insert('minute_windows', _windowToRow(sessionId, w));
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   Future<List<MinuteWindow>> getWindows(String sessionId) async {
@@ -839,12 +875,17 @@ WHERE w.session_id = ?
       validSampleCount: validSampleCount,
       medianAccuracyM: medianAccuracyM,
     );
-    await _db.update(
-      'sessions',
-      _sessionToRow(ended),
-      where: 'id = ?',
-      whereArgs: [sessionId],
-    );
+    await _db.transaction((txn) async {
+      final updated = await txn.update(
+        'sessions',
+        _sessionToRow(ended),
+        where: 'id = ?',
+        whereArgs: [sessionId],
+      );
+      if (updated != 1) {
+        throw StateError('산책 완료 상태를 저장하지 못했습니다');
+      }
+    });
     return ended;
   }
 
@@ -1127,10 +1168,12 @@ WHERE w.session_id = ?
   }
 
   Future<void> deleteAll() async {
-    await _db.delete('minute_windows');
-    await _db.delete('location_samples');
-    await _db.delete('sessions');
-    await _db.delete('places');
+    await _db.transaction((txn) async {
+      await txn.delete('minute_windows');
+      await txn.delete('location_samples');
+      await txn.delete('sessions');
+      await txn.delete('places');
+    });
   }
 
   /// Full, versioned local backup. Only completed walks are included, so an

@@ -19,6 +19,53 @@ import '../helpers/route_exclusion_fixture.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('retrying the same sample batch is idempotent', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final session = await repo.startSession(
+      startedAt: DateTime.utc(2026, 8, 29, 0),
+    );
+    final sample = LocationSample(
+      timestamp: session.startedAt,
+      latitude: 37.5665,
+      longitude: 126.978,
+      accuracyM: 6,
+      speedMps: 1,
+    );
+    await repo.insertSamples(session.id, [sample]);
+    await repo.insertSamples(session.id, [sample]);
+
+    expect(await repo.getSamples(session.id), hasLength(1));
+  });
+
+  test('replaceWindows rolls back when a replacement violates uniqueness', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final session = await repo.startSession(
+      startedAt: DateTime.utc(2026, 8, 29, 0),
+    );
+    MinuteWindow makeWindow() => MinuteWindow(
+      windowStart: DateTime.utc(2026, 8, 29, 0),
+      durationS: 60,
+      partial: false,
+      sampleCount: 1,
+      rawSampleCount: 1,
+      distanceM: 1,
+      avgSpeedMps: 1,
+      maxSpeedMps: 1,
+      stationaryRatio: 0,
+      quality: WindowQuality.high,
+      hypothesisLabel: ActivityLabel.walkSteady,
+    );
+    await repo.replaceWindows(session.id, [makeWindow()]);
+
+    await expectLater(
+      repo.replaceWindows(session.id, [makeWindow(), makeWindow()]),
+      throwsA(isA<DatabaseException>()),
+    );
+    expect(await repo.getWindows(session.id), hasLength(1));
+  });
+
   test('daily stats sums completed sessions by local start date', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
