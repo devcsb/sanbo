@@ -296,6 +296,17 @@ void main() {
     expect(source, contains('-parallel-testing-enabled NO'));
   });
 
+  test('native XCTest wrapper resolves ignored CocoaPods before xcodebuild', () {
+    final source = File(
+      'scripts/run_native_platform_tests.sh',
+    ).readAsStringSync();
+    final pods = source.indexOf('pod install --no-repo-update');
+    final xcodebuild = source.indexOf('xcodebuild test');
+
+    expect(pods, greaterThanOrEqualTo(0));
+    expect(xcodebuild, greaterThan(pods));
+  });
+
   test('iOS simulator smoke terminates stale app before reinstalling', () {
     final script = File(
       'scripts/run_ios_simulator_smoke.sh',

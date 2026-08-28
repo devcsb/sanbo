@@ -54,6 +54,17 @@ if ! command -v xcrun >/dev/null 2>&1 || ! command -v xcodebuild >/dev/null 2>&1
   exit 1
 fi
 
+if ! command -v pod >/dev/null 2>&1; then
+  echo "iOS native XCTest requires CocoaPods (pod)" >&2
+  exit 1
+fi
+
+# Pods are intentionally ignored and are not present in a fresh CI checkout.
+# Resolve them after Flutter has generated the plugin symlinks so xcodebuild
+# can load the Runner and RunnerTests base configurations and xcfilelists.
+step "Resolve iOS CocoaPods"
+(cd "$ROOT/ios" && pod install --no-repo-update)
+
 simulator_id="${IOS_SIMULATOR_ID:-}"
 if [[ -z "$simulator_id" ]]; then
   simulator_id="$(
