@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/core/theme/app_theme.dart';
+import 'package:sanbo/data/activity_data_source.dart';
 import 'package:sanbo/domain/services/daily_walk_stats.dart';
 import 'package:sanbo/features/history/daily_activity_panel.dart';
 import 'package:sanbo/features/history/history_providers.dart';
@@ -138,6 +139,102 @@ void main() {
 
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('daily panel offers an explicit health connection action', (
+    tester,
+  ) async {
+    final source = _ConnectableActivitySource();
+    final days = _days();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activityDataSourceProvider.overrideWithValue(source),
+          dailyActivityProvider.overrideWith(
+            (ref) async => DailyActivitySnapshot(
+              days: days,
+              weekStart: days.first.date,
+              weekEnd: days.last.date,
+            ),
+          ),
+          dailyWeekEndProvider.overrideWith((ref) => days.last.date),
+          dailySelectedDayProvider.overrideWith((ref) => days.last.date),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(body: DailyActivityPanel()),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+
+    expect(find.text('건강 데이터 연결'), findsOneWidget);
+    await tester.tap(find.text('건강 데이터 연결'));
+    await tester.pumpAndSettle();
+
+    expect(source.requestCalls, 1);
+    expect(find.textContaining('연결했어요'), findsOneWidget);
+  });
+
+  testWidgets('partial health coverage is not presented as a complete total', (
+    tester,
+  ) async {
+    final days = _days();
+    final selected = days.last.date;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          dailyActivityProvider.overrideWith(
+            (ref) async => DailyActivitySnapshot(
+              days: days,
+              weekStart: days.first.date,
+              weekEnd: days.last.date,
+              stepsByDate: {
+                selected: DailyStepSnapshot(
+                  date: selected,
+                  steps: 1234,
+                  source: ActivitySourceKind.healthConnect,
+                  coverage: ActivityCoverage.partial,
+                ),
+              },
+            ),
+          ),
+          dailyWeekEndProvider.overrideWith((ref) => selected),
+          dailySelectedDayProvider.overrideWith((ref) => selected),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(body: DailyActivityPanel()),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
+
+    expect(find.text('일부 기간만 확인됨'), findsOneWidget);
+    expect(find.text('1,234걸음'), findsNothing);
+  });
+}
+
+final class _ConnectableActivitySource
+    implements ActivityDataSource, ActivityDataSourceConnector {
+  var requestCalls = 0;
+
+  @override
+  Future<ActivityAccessState> getAccessState() async =>
+      ActivityAccessState.denied;
+
+  @override
+  Future<ActivityAccessState> requestAccess() async {
+    requestCalls++;
+    return ActivityAccessState.connected;
+  }
+
+  @override
+  Future<List<DailyStepSnapshot>> readDailySteps({
+    required DateTime startDate,
+    required DateTime endDateExclusive,
+  }) async => const [];
 }
 
 Future<void> _pumpPanel(

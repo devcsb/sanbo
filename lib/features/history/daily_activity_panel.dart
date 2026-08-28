@@ -120,16 +120,22 @@ class _DailyActivityLoaded extends StatelessWidget {
     final steps =
         snapshot.stepsByDate[selected] ??
         DailyStepSnapshot.unavailable(selected);
-    final stepsValue = steps.steps == null
-        ? '연결되지 않음'
-        : '${NumberFormat.decimalPattern('ko').format(steps.steps)}걸음';
-    final stepsStatus = switch (steps.source) {
+    final stepsValue = switch (steps.coverage) {
+      ActivityCoverage.partial => '일부 기간만 확인됨',
+      ActivityCoverage.complete when steps.steps != null =>
+        '${NumberFormat.decimalPattern('ko').format(steps.steps)}걸음',
+      ActivityCoverage.complete || ActivityCoverage.unavailable => '연결되지 않음',
+    };
+    final sourceLabel = switch (steps.source) {
       ActivitySourceKind.healthConnect => 'Health Connect에서 가져옴',
       ActivitySourceKind.healthKit => 'Apple 건강에서 가져옴',
       ActivitySourceKind.denied => '건강 데이터 권한이 필요해요',
       ActivitySourceKind.unavailable => '건강 데이터 연결 전',
       ActivitySourceKind.error => '건강 데이터를 불러오지 못했어요',
     };
+    final stepsStatus = steps.coverage == ActivityCoverage.partial
+        ? '일부 기간만 확인됨 · $sourceLabel'
+        : sourceLabel;
     final showConnectAction = connector != null && steps.steps == null;
 
     return SoftPanel(
