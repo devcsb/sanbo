@@ -40,9 +40,10 @@ class SmoothSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final resolvedDuration = AppMotion.duration(context, duration);
     return AnimatedSwitcher(
-      duration: AppMotion.duration(context, duration),
-      reverseDuration: AppMotion.duration(context, duration),
+      duration: resolvedDuration,
+      reverseDuration: resolvedDuration,
       switchInCurve: AppMotion.curve,
       switchOutCurve: AppMotion.curve,
       layoutBuilder: (currentChild, previousChildren) {
