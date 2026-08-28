@@ -50,8 +50,6 @@ class HistoryScreen extends ConsumerWidget {
                       description: '오늘의 움직임을 확인하고, 산책을 시작해 보세요.',
                     ),
                     const SizedBox(height: 20),
-                    const DailyActivityPanel(),
-                    const SizedBox(height: 20),
                     SoftPanel(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -80,6 +78,8 @@ class HistoryScreen extends ConsumerWidget {
                         ],
                       ),
                     ),
+                    const SizedBox(height: 20),
+                    const DailyActivityPanel(),
                   ],
                 ),
               );

@@ -107,6 +107,7 @@ void main() {
       );
 
       expect(reader.readCalls, 2);
+      expect(reader.permissionChecks, 1);
     },
   );
 
@@ -163,6 +164,7 @@ final class _FakeDailyStepsReader implements DailyStepsReader {
   final Map<DateTime, int> totals;
   final DateTime? throwOn;
   var configureCalls = 0;
+  var permissionChecks = 0;
   var readCalls = 0;
   final ranges = <List<DateTime>>[];
 
@@ -174,6 +176,7 @@ final class _FakeDailyStepsReader implements DailyStepsReader {
 
   @override
   Future<bool?> hasReadPermission() async {
+    permissionChecks++;
     if (permissionError) throw StateError('temporary health failure');
     return permission;
   }

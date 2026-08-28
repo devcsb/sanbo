@@ -160,6 +160,24 @@ class HealthActivityDataSource
           : previousEnd;
     }
 
+    final requestedDates = [
+      for (
+        var date = start;
+        date.isBefore(end);
+        date = addLocalCalendarDays(date, 1)
+      )
+        date,
+    ];
+    final cachedRows = [
+      for (final date in requestedDates) _cachedSnapshot(date),
+    ];
+    if (cachedRows.every((row) => row != null)) {
+      // Avoid even a permission round-trip when the whole requested window is
+      // still fresh. This keeps opening history cheap and makes the cache
+      // useful when a protected health store is temporarily unavailable.
+      return [for (final row in cachedRows) row!];
+    }
+
     final access = await getAccessState();
     if (access != ActivityAccessState.connected) {
       return [
@@ -173,11 +191,7 @@ class HealthActivityDataSource
     }
 
     final rows = <DailyStepSnapshot>[];
-    for (
-      var date = start;
-      date.isBefore(end);
-      date = addLocalCalendarDays(date, 1)
-    ) {
+    for (final date in requestedDates) {
       final cached = _cachedSnapshot(date);
       if (cached != null) {
         rows.add(cached);

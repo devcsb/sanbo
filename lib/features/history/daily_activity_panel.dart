@@ -78,7 +78,7 @@ class DailyActivityPanel extends ConsumerWidget {
     if (async.hasValue) {
       final snapshot = async.valueOrNull;
       if (snapshot == null) return 'data:empty';
-      return 'data:${snapshot.weekStart.toIso8601String()}: '
+      return 'data:${snapshot.weekStart.toIso8601String()}:'
           '${snapshot.weekEnd.toIso8601String()}';
     }
     if (async.hasError) return 'error';
