@@ -49,7 +49,11 @@ class SmoothSwitcher extends StatelessWidget {
       layoutBuilder: (currentChild, previousChildren) {
         return Stack(
           alignment: Alignment.topCenter,
-          children: <Widget>[...previousChildren, ?currentChild],
+          children: <Widget>[
+            for (final previous in previousChildren)
+              IgnorePointer(child: previous),
+            ?currentChild,
+          ],
         );
       },
       transitionBuilder: (child, animation) {
