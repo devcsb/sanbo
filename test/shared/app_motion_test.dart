@@ -25,11 +25,8 @@ void main() {
 
   testWidgets('smooth switcher uses a keyed fade transition', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(
-        home: SmoothSwitcher(
-          transitionKey: 'first',
-          child: const Text('first'),
-        ),
+      const MaterialApp(
+        home: SmoothSwitcher(transitionKey: 'first', child: Text('first')),
       ),
     );
 
@@ -43,11 +40,8 @@ void main() {
     );
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: SmoothSwitcher(
-          transitionKey: 'second',
-          child: const Text('second'),
-        ),
+      const MaterialApp(
+        home: SmoothSwitcher(transitionKey: 'second', child: Text('second')),
       ),
     );
     await tester.pump(AppMotion.standard);

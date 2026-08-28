@@ -8,7 +8,7 @@ void main() {
     () async {
       var failNextInsert = false;
       final inserted = <LocationSample>[];
-      var generation = 1;
+      const generation = 1;
       final coordinator = SessionPersistenceCoordinator(
         insertSamples: (sessionId, samples) async {
           if (failNextInsert) {

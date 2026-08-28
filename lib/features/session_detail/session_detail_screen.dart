@@ -19,7 +19,6 @@ import '../../domain/pipeline/route_partitioner.dart';
 import '../../domain/pipeline/segment_merger.dart';
 import '../../domain/services/place_memory.dart';
 import '../../domain/services/route_playback.dart';
-import '../../domain/services/route_playback_cursor.dart';
 import '../../domain/services/session_export.dart';
 import '../../domain/services/walk_stats.dart';
 import '../../platform/place/place_lookup.dart';
