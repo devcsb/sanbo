@@ -21,6 +21,14 @@ class AppTheme {
   static const radiusLarge = 28.0;
   static const radiusPill = 999.0;
 
+  // Motion tokens live next to the rest of the visual language so a future
+  // theme refresh cannot leave transitions with a second, drifting source of
+  // truth.
+  static const motionStandard = Duration(milliseconds: 180);
+  static const motionExpand = Duration(milliseconds: 240);
+  static const motionFeedback = Duration(milliseconds: 120);
+  static const motionCurve = Curves.easeOutCubic;
+
   static const _lightSurface = Color(0xFFF6F3ED);
   static const _lightCard = Color(0xFFFFFFFF);
   static const _lightMuted = Color(0xFFEEE9E0);
