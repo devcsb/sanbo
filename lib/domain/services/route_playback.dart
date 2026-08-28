@@ -1,5 +1,6 @@
 import '../models/location_sample.dart';
 import '../pipeline/route_partitioner.dart';
+export 'route_playback_cursor.dart';
 
 class RoutePlaybackPoint {
   const RoutePlaybackPoint({
@@ -13,16 +14,6 @@ class RoutePlaybackPoint {
   final int pointIndex;
 
   bool get startsFragment => pointIndex == 0;
-}
-
-class RoutePlaybackCursor {
-  const RoutePlaybackCursor({
-    required this.fragmentIndex,
-    required this.pointIndex,
-  });
-
-  final int fragmentIndex;
-  final int pointIndex;
 }
 
 /// Pure helpers for replaying a recorded route without coupling playback

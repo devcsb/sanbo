@@ -98,6 +98,11 @@ class RouteMap extends StatelessWidget {
         ? null
         : LatLng(currentPoint!.lat, currentPoint!.lon);
     final center = staticGeometry.center;
+    final progressVisibility = progress?.visibleFragments(
+      fragmentLengths: [
+        for (final fragment in latLngFragments) fragment.length,
+      ],
+    );
 
     return Semantics(
       container: true,
@@ -157,33 +162,36 @@ class RouteMap extends StatelessWidget {
                                     : theme.colorScheme.outlineVariant,
                                 strokeWidth: 3.5,
                               ),
-                          if (progress != null)
+                          if (progressVisibility != null)
                             for (
                               var index = 0;
-                              index < latLngFragments.length;
+                              index < progressVisibility.fragmentCount;
                               index++
                             )
-                              if (index <= progress!.fragmentIndex)
-                                if ((index < progress!.fragmentIndex
+                              if (progressVisibility.isCompleted(index) ||
+                                  index ==
+                                      progressVisibility.activeFragmentIndex)
+                                if ((progressVisibility.isCompleted(index)
                                         ? latLngFragments[index].length
-                                        : (progress!.pointIndex + 1).clamp(
-                                            0,
-                                            latLngFragments[index].length,
-                                          )) >=
+                                        : progressVisibility
+                                              .activePointCount) >=
                                     2)
                                   Polyline(
-                                    points: latLngFragments[index]
-                                        .take(
-                                          index < progress!.fragmentIndex
-                                              ? latLngFragments[index].length
-                                              : (progress!.pointIndex + 1)
-                                                    .clamp(
-                                                      0,
-                                                      latLngFragments[index]
-                                                          .length,
-                                                    ),
-                                        )
-                                        .toList(growable: false),
+                                    // Reuse completed immutable fragments. A
+                                    // prefix is materialized only for the
+                                    // active fragment and only while partial.
+                                    points:
+                                        progressVisibility.isCompleted(index) ||
+                                            progressVisibility
+                                                    .activePointCount >=
+                                                latLngFragments[index].length
+                                        ? latLngFragments[index]
+                                        : latLngFragments[index]
+                                              .take(
+                                                progressVisibility
+                                                    .activePointCount,
+                                              )
+                                              .toList(growable: false),
                                     color: theme.colorScheme.primary,
                                     strokeWidth: 4,
                                   ),
