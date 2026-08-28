@@ -41,12 +41,47 @@ class HistoryScreen extends ConsumerWidget {
           data: (snapshot) {
             final sessions = snapshot.sessions;
             if (sessions.isEmpty) {
-              return EmptyStateView(
-                icon: Icons.directions_walk_rounded,
-                title: '아직 기록이 없어요',
-                message: '홈에서 산책을 시작하면\n여기에 모입니다.',
-                actionLabel: '산책 시작하기',
-                onAction: () => context.go('/'),
+              return PageFrame(
+                child: ListView(
+                  padding: EdgeInsets.zero,
+                  children: [
+                    const PageIntro(
+                      title: '산책 기록',
+                      description: '오늘의 움직임을 확인하고, 산책을 시작해 보세요.',
+                    ),
+                    const SizedBox(height: 20),
+                    const DailyActivityPanel(),
+                    const SizedBox(height: 20),
+                    SoftPanel(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const TonalIcon(icon: Icons.directions_walk_rounded),
+                          const SizedBox(height: 14),
+                          Text(
+                            '아직 기록이 없어요',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            '홈에서 산책을 시작하면 여기에 차분히 모입니다.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          FilledButton.icon(
+                            onPressed: () => context.go('/'),
+                            icon: const Icon(Icons.play_arrow_rounded),
+                            label: const Text('산책 시작하기'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               );
             }
 
