@@ -43,9 +43,9 @@
 
 | 파일 | 대상 | versionCode | SHA-256 |
 |---|---|---:|---|
-| `app-arm64-v8a-release.apk` | 최근 64비트 Android | `2014` | 아래 `SHA256SUMS_v0.9.0.txt` 참조 |
-| `app-armeabi-v7a-release.apk` | 구형 32비트 Android | `1014` | 아래 `SHA256SUMS_v0.9.0.txt` 참조 |
-| `app-x86_64-release.apk` | x86_64 에뮬레이터·일부 기기 | `4014` | 아래 `SHA256SUMS_v0.9.0.txt` 참조 |
+| `app-arm64-v8a-release.apk` | 최근 64비트 Android | `2014` | `b34a4e6355ad4929395d82f503444636ca1e6bbc7241942eae4229ef57cb052a` |
+| `app-armeabi-v7a-release.apk` | 구형 32비트 Android | `1014` | `8335d74d1f9c326921ad70cf618117c3f8bb9711d8e0294f9f02ad37cf97a62a` |
+| `app-x86_64-release.apk` | x86_64 에뮬레이터·일부 기기 | `4014` | `77fd4a906b0b77feb67b34a9612fd8cccbb25e47268d76baee5525ee552715b6` |
 
 ## 검증
 
