@@ -1044,6 +1044,16 @@ WHERE w.session_id = ?
     return nearest;
   }
 
+  /// Loads the user-confirmed place memories in one query.
+  ///
+  /// Detail views use this bulk read and perform the small-radius matching in
+  /// memory. The existing [findNearestPlace] remains useful for one-off edit
+  /// flows where loading every place would be unnecessary.
+  Future<List<PlaceMemory>> listPlaces() async {
+    final rows = await _db.query('places', orderBy: 'updated_at DESC, id DESC');
+    return rows.map(_placeFromRow).toList(growable: false);
+  }
+
   /// Create or update a local place memory, then link it to every minute in
   /// the edited stay segment.
   Future<PlaceMemory> rememberPlaceForWindows({

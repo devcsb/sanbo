@@ -104,6 +104,9 @@ class LiveSessionState {
     bool clearNotice = false,
     bool clearActiveWarning = false,
   }) {
+    // Unlike the other fields, an omitted status message intentionally clears
+    // the transient banner. Callers that are only changing counters should
+    // pass `statusMessage: state.statusMessage` explicitly to preserve it.
     return LiveSessionState(
       session: clearSession ? null : (session ?? this.session),
       elapsed: elapsed ?? this.elapsed,

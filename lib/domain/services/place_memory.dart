@@ -1,4 +1,6 @@
 import '../models/activity_label.dart';
+import '../models/place_memory.dart';
+import '../pipeline/geo.dart';
 import '../pipeline/segment_merger.dart';
 
 /// Only meaningful stay-like segments may become reusable place memories.
@@ -45,6 +47,34 @@ int? segmentPlaceId(ActivitySegment segment) {
     if (window.placeId != null) return window.placeId;
   }
   return null;
+}
+
+/// Finds a remembered place near a coordinate using only in-memory data.
+///
+/// Keeping this calculation outside the repository lets detail screens load
+/// the small place table once instead of issuing one SQL query per segment.
+PlaceMemory? nearestPlaceMemory(
+  Iterable<PlaceMemory> places, {
+  required double latitude,
+  required double longitude,
+  double radiusM = 35,
+}) {
+  if (!latitude.isFinite || !longitude.isFinite || radiusM < 0) return null;
+  PlaceMemory? nearest;
+  var nearestDistance = double.infinity;
+  for (final place in places) {
+    final distance = haversineMeters(
+      lat1: latitude,
+      lon1: longitude,
+      lat2: place.latitude,
+      lon2: place.longitude,
+    );
+    if (distance <= radiusM && distance < nearestDistance) {
+      nearest = place;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
 }
 
 String? segmentPlaceName(ActivitySegment segment) {

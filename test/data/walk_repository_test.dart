@@ -1348,6 +1348,7 @@ ORDER BY started_at ASC
       longitude: 126.978,
     );
     expect(nearby?.id, place.id);
+    expect((await repo.listPlaces()).map((item) => item.id), contains(place.id));
 
     await repo.deletePlace(place.id);
     final unlinked = await repo.getWindows(session.id);

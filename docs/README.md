@@ -8,6 +8,7 @@
 | 문서 | 내용 |
 |------|------|
 | [PRD.md](./PRD.md) | 제품 요구, 시나리오, FR/NFR, MVP, 재검증 |
+| [PRD_ARCHITECTURE_UX_BATTERY_V0.9.md](./PRD_ARCHITECTURE_UX_BATTERY_V0.9.md) | 아키텍처·배터리·회상 UX 기준선, 벤치마크 근거, 실기기 검증 계획 |
 | [TRD.md](./TRD.md) | 스키마, 파이프라인, Android FGS, MapLibre, 추적 표 |
 | [PLATFORM_AND_MAPS.md](./PLATFORM_AND_MAPS.md) | Flutter/Android, OSM·VWorld 비교, 러닝앱 Borrow/Reject |
 | [UX_REVIEW.md](./UX_REVIEW.md) | 비판적 UI/UX 검토 · major 개선 대응 표 |

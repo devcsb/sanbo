@@ -54,19 +54,32 @@ final sessionDetailProvider = FutureProvider.autoDispose
         sessionEnd: session.endedAt,
       );
 
-      // Reuse only places the user previously named. This is a local DB
-      // lookup; opening a detail never triggers geocoding, network work, or a
-      // hidden write. The result is a display-only enrichment; the explicit
-      // place editor remains the only path that changes place links.
+      // Reuse only places the user previously named. This is one local DB
+      // lookup followed by in-memory matching; opening a detail never
+      // triggers geocoding, network work, or a hidden write. The result is a
+      // display-only enrichment; the explicit place editor remains the only
+      // path that changes place links.
       final knownPlacesByWindow = <String, PlaceMemory>{};
-      for (final segment in segments) {
-        if (!canRememberPlace(segment) || segmentPlaceId(segment) != null) {
-          continue;
-        }
-        final coordinate = placeCoordinate(segment);
-        if (coordinate == null) continue;
+      final placeCandidates = segments
+          .where((segment) {
+            if (!canRememberPlace(segment) || segmentPlaceId(segment) != null) {
+              return false;
+            }
+            return placeCoordinate(segment) != null;
+          })
+          .toList(growable: false);
+      if (placeCandidates.isNotEmpty) {
+        List<PlaceMemory> knownPlaces = const [];
         try {
-          final known = await repo.findNearestPlace(
+          knownPlaces = await repo.listPlaces();
+        } on Object {
+          // Place enrichment is optional; never hide an otherwise valid walk.
+        }
+        for (final segment in placeCandidates) {
+          final coordinate = placeCoordinate(segment);
+          if (coordinate == null) continue;
+          final known = nearestPlaceMemory(
+            knownPlaces,
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
           );
@@ -74,8 +87,6 @@ final sessionDetailProvider = FutureProvider.autoDispose
           for (final window in segment.windows) {
             knownPlacesByWindow[_windowIdentity(window.windowStart)] = known;
           }
-        } on Object {
-          // Place enrichment is optional; never hide an otherwise valid walk.
         }
       }
       if (knownPlacesByWindow.isNotEmpty) {
@@ -159,6 +170,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   List<RoutePlaybackPoint> _playbackCache = const [];
   List<List<({double lat, double lon})>> _fragmentCache = const [];
   RouteMapGeometry? _mapGeometry;
+  RoutePartitionResult? _highlightedGeometrySource;
+  DateTime? _highlightedSegmentStart;
+  RouteMapGeometry? _highlightedGeometry;
+  List<List<({double lat, double lon})>> _highlightedFragments = const [];
 
   String get sessionId => widget.sessionId;
 
@@ -261,9 +276,12 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
           final selectedSegment = _selectedSegmentStart == null
               ? null
               : _segmentStartingAt(segments, _selectedSegmentStart!);
+          final highlightedGeometry = selectedSegment == null
+              ? null
+              : _geometryForSegment(data.route, selectedSegment);
           final highlightedFragments = selectedSegment == null
               ? const <List<({double lat, double lon})>>[]
-              : _fragmentsForSegment(data.route, selectedSegment);
+              : _highlightedFragments;
           final collapsedCount = segments.length;
           final rawCount = data.windows.length;
 
@@ -291,6 +309,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                             fragmentIndex: currentPlaybackPoint.fragmentIndex,
                             pointIndex: currentPlaybackPoint.pointIndex,
                           ),
+                    highlightedGeometry: highlightedGeometry,
                     highlightedFragments: highlightedFragments,
                     currentPoint: currentSample == null
                         ? null
@@ -598,6 +617,28 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
         .toList(growable: false);
   }
 
+  /// Caches selected-segment geometry separately from the base route. The
+  /// playback cursor changes on every tick, but the selected segment normally
+  /// does not; converting its coordinates once keeps animation work bounded.
+  RouteMapGeometry _geometryForSegment(
+    RoutePartitionResult route,
+    ActivitySegment segment,
+  ) {
+    final sameSegment =
+        identical(_highlightedGeometrySource, route) &&
+        _highlightedSegmentStart?.isAtSameMomentAs(segment.startAt) == true;
+    if (sameSegment && _highlightedGeometry != null) {
+      return _highlightedGeometry!;
+    }
+    final fragments = _fragmentsForSegment(route, segment);
+    final geometry = RouteMapGeometry.fromFragments(fragments);
+    _highlightedGeometrySource = route;
+    _highlightedSegmentStart = segment.startAt;
+    _highlightedGeometry = geometry;
+    _highlightedFragments = fragments;
+    return geometry;
+  }
+
   void _resetRouteInteraction() {
     _playbackTimer?.cancel();
     setState(() {
@@ -609,6 +650,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
       _playbackCache = const [];
       _fragmentCache = const [];
       _mapGeometry = null;
+      _highlightedGeometrySource = null;
+      _highlightedSegmentStart = null;
+      _highlightedGeometry = null;
+      _highlightedFragments = const [];
     });
   }
 

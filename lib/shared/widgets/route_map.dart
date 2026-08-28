@@ -45,6 +45,7 @@ class RouteMap extends StatelessWidget {
     super.key,
     required this.fragments,
     this.geometry,
+    this.highlightedGeometry,
     this.height = 220,
     this.offlinePreview = false,
     this.progress,
@@ -54,6 +55,12 @@ class RouteMap extends StatelessWidget {
 
   final List<List<({double lat, double lon})>> fragments;
   final RouteMapGeometry? geometry;
+
+  /// Optional precomputed geometry for the selected timeline segment.
+  ///
+  /// Playback rebuilds the widget frequently; callers can pass this value to
+  /// avoid converting the same tuple coordinates into [LatLng] on every tick.
+  final RouteMapGeometry? highlightedGeometry;
   final double height;
   final bool offlinePreview;
 
@@ -78,16 +85,15 @@ class RouteMap extends StatelessWidget {
         geometry ?? RouteMapGeometry.fromFragments(fragments);
     final latLngFragments = staticGeometry.fragments;
     final latLngs = staticGeometry.points;
-    final highlightedLatLngFragments = highlightedFragments
-        .map(
-          (fragment) => fragment
-              .map((point) => LatLng(point.lat, point.lon))
-              .toList(growable: false),
-        )
-        .toList(growable: false);
-    final highlightedLatLngs = highlightedLatLngFragments
-        .expand((fragment) => fragment)
-        .toList(growable: false);
+    final highlightedStaticGeometry =
+        highlightedGeometry ??
+        (highlightedFragments.isEmpty
+            ? null
+            : RouteMapGeometry.fromFragments(highlightedFragments));
+    final highlightedLatLngFragments =
+        highlightedStaticGeometry?.fragments ?? const <List<LatLng>>[];
+    final highlightedLatLngs =
+        highlightedStaticGeometry?.points ?? const <LatLng>[];
     final currentLatLng = currentPoint == null
         ? null
         : LatLng(currentPoint!.lat, currentPoint!.lon);

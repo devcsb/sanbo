@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
+import 'package:sanbo/domain/models/place_memory.dart';
 import 'package:sanbo/domain/pipeline/segment_merger.dart';
 import 'package:sanbo/domain/services/place_memory.dart';
 
@@ -65,5 +66,33 @@ void main() {
       ),
     ]).single;
     expect(canRememberPlace(segment), isFalse);
+  });
+
+  test('nearest remembered place is selected without database access', () {
+    final places = [
+      PlaceMemory(
+        id: 1,
+        latitude: 37.5665,
+        longitude: 126.978,
+        name: '먼 장소',
+        updatedAt: DateTime(2026, 7, 20),
+      ),
+      PlaceMemory(
+        id: 2,
+        latitude: 37.56653,
+        longitude: 126.978,
+        name: '가까운 장소',
+        updatedAt: DateTime(2026, 7, 20),
+      ),
+    ];
+
+    expect(
+      nearestPlaceMemory(places, latitude: 37.56652, longitude: 126.978)?.id,
+      2,
+    );
+    expect(
+      nearestPlaceMemory(places, latitude: 37.57, longitude: 126.98),
+      isNull,
+    );
   });
 }
