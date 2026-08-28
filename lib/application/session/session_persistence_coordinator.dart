@@ -1,5 +1,5 @@
 import '../../domain/models/location_sample.dart';
-import '../../features/home/session_maintenance_queue.dart';
+import 'session_maintenance_queue.dart';
 
 typedef SessionSampleWriter =
     Future<void> Function(String sessionId, List<LocationSample> samples);
