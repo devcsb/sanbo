@@ -46,8 +46,11 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v5
 
-      - name: Select Xcode 16.4
-        run: sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
+      # health 13.3.2 resolves device_info_plus 13.2.0, which uses the
+      # iOS 26.1 NSProcessInfo API. Xcode 16.4's iOS 18.5 SDK cannot compile
+      # that guarded selector, while macos-15 provides Xcode 26.1.1.
+      - name: Select Xcode 26.1.1
+        run: sudo xcode-select --switch /Applications/Xcode_26.1.1.app/Contents/Developer
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2

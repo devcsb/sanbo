@@ -307,6 +307,16 @@ void main() {
     expect(xcodebuild, greaterThan(pods));
   });
 
+  test('native CI selects an SDK compatible with device_info_plus iOS APIs', () {
+    final workflow = File('.github/workflows/quality.yml').readAsStringSync();
+
+    expect(
+      workflow,
+      contains('/Applications/Xcode_26.1.1.app/Contents/Developer'),
+    );
+    expect(workflow, isNot(contains('/Applications/Xcode_16.4.app')));
+  });
+
   test('iOS simulator smoke terminates stale app before reinstalling', () {
     final script = File(
       'scripts/run_ios_simulator_smoke.sh',
