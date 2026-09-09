@@ -293,7 +293,6 @@ static LocationPermissionState mapPermissionState({
     LocationPermission.unableToDetermine => LocationPermissionState.unknown,
   };
   if (state == LocationPermissionState.granted &&
-      Platform.isAndroid &&
       accuracy == LocationAccuracyStatus.reduced) {
     return LocationPermissionState.reducedAccuracy;
   }
@@ -336,7 +335,7 @@ git commit -m "fix: reject stale Android location fixes at provider boundary"
 - Modify: lib/features/home/session_controller.dart
 - Modify: lib/features/home/home_screen.dart
 - Modify: test/features/session_guard_flow_test.dart
-- Modify: the existing Home permission/error widget test
+- Modify: test/features/ux_busy_and_permission_test.dart and test/features/ux_open_settings_test.dart
 
 **Interfaces:**
 - Consumes Tasks 1 and 2.
@@ -376,9 +375,9 @@ Add a stale callback to the existing debugIngestSamples fixture and assert the r
 
 - [ ] Step 2: Run focused tests and verify the missing behavior.
 
-Run: flutter test --no-pub --concurrency=1 test/features/session_guard_flow_test.dart test/features/ux_home_permission_test.dart
+Run: flutter test --no-pub --concurrency=1 test/features/session_guard_flow_test.dart test/features/ux_busy_and_permission_test.dart test/features/ux_open_settings_test.dart
 
-Expected: FAIL because the controller currently falls through to the generic permission branch. Select the existing Home permission test path with rg -l if its filename differs.
+Expected: FAIL because the controller currently falls through to the generic permission branch.
 
 - [ ] Step 3: Replace duplicated controller boundary logic.
 
@@ -402,10 +401,10 @@ Add reducedAccuracy cases to location error message/code. Include reducedAccurac
 - [ ] Step 5: Run regressions, analyzer, and commit.
 
 ~~~bash
-dart format lib/features/home/session_controller.dart lib/features/home/home_screen.dart test/features/session_guard_flow_test.dart
-flutter test --no-pub --concurrency=1 test/features/session_guard_flow_test.dart test/platform/geolocator_location_engine_policy_test.dart
+dart format lib/features/home/session_controller.dart lib/features/home/home_screen.dart test/features/session_guard_flow_test.dart test/features/ux_busy_and_permission_test.dart test/features/ux_open_settings_test.dart
+flutter test --no-pub --concurrency=1 test/features/session_guard_flow_test.dart test/features/ux_busy_and_permission_test.dart test/features/ux_open_settings_test.dart test/platform/geolocator_location_engine_policy_test.dart
 flutter analyze --no-pub
-git add lib/features/home/session_controller.dart lib/features/home/home_screen.dart test/features/session_guard_flow_test.dart
+git add lib/features/home/session_controller.dart lib/features/home/home_screen.dart test/features/session_guard_flow_test.dart test/features/ux_busy_and_permission_test.dart test/features/ux_open_settings_test.dart
 git commit -m "fix: gate walks on precise location and shared sample quality"
 ~~~
 
