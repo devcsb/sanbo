@@ -208,6 +208,31 @@ SANBO_ANDROID_DEVICE_ID=emulator-5554 \
 이 경로는 Android 에뮬레이터의 provider 장애 회귀를 검증하지만, 제조사별 위치 설정
 화면과 백그라운드 정책을 포함한 물리 기기 검증을 대신하지 않는다.
 
+## Android Health Connect 설정 경로
+
+Health Connect가 연결되지 않은 Android에서 기록 화면의 `Health Connect 설정 열기`
+를 누르면 앱 전용 관리 화면을 우선 열고, 기기 버전에 따라 일반 Health Connect
+설정 화면으로 폴백한다. 설정 화면에서 돌아오면 일일 활동 캐시를 비우고 provider를
+무효화한다. 이 흐름은 읽기 권한만 다루며 GPS 산책 통계와 걸음 수를 합치지 않는다.
+
+실기기 또는 Android emulator에서 아래 행을 각각 실행하고, `통과/실패/미실행` 중
+하나만 기록한다. emulator 결과는 실기기 판정으로 승격하지 않는다.
+
+| ID | 조건 | 확인할 결과 |
+|---|---|---|
+| HC1 | Android 14+, Health Connect 설치·미연결 | 앱 전용 관리 화면이 열림 |
+| HC2 | Android 13 이하, Health Connect provider 사용 | 버전에 맞는 설정 화면이 열림 |
+| HC3 | Health Connect 미설치 또는 업데이트 필요 | 앱이 종료되지 않고 복구 가능한 안내를 표시 |
+| HC4 | 관리 intent를 해석할 앱이 없음 | `설정을 열지 못했어요` 안내를 표시 |
+| HC5 | 설정에서 걸음 수 읽기 권한 허용 | 복귀 후 일일 활동이 새로 조회됨 |
+| HC6 | 설정에서 권한 철회 | 복귀 후 연결되지 않은 상태가 새로 표시됨 |
+| HC7 | 권한은 있으나 해당 날짜의 걸음 수가 0 | 0을 미연결/미지원으로 표시하지 않음 |
+| HC8 | iOS HealthKit 경로 | 기존 권한 요청과 일일 조회 동작이 유지됨 |
+
+각 실행에는 기기 모델·Android 버전·Health Connect 설치 상태만 기록하고, 계정 식별자,
+스크린샷의 개인정보, 실제 건강 수치는 저장소에 남기지 않는다. Android 기기가 연결되지
+않은 실행 환경에서는 HC1–HC7을 `미실행(기기 없음)`으로 둔다.
+
 iOS simulator의 실제 Core Location 경로는 다음 명령으로 반복한다.
 
 ```bash
