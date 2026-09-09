@@ -5,16 +5,35 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.health.connect.client.HealthConnectClient
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 
 internal const val notificationKindExtra = "sanbo_notification_kind"
 internal const val notificationSessionIdExtra = "sanbo_notification_session_id"
+private const val healthConnectChannelName = "sanbo/health_connect"
+
+internal enum class HealthConnectIntentKind { MANAGE_DATA, SETTINGS_ACTION }
+
+internal fun healthConnectIntentKind(
+    sdkAvailable: Boolean,
+    manageIntentResolvable: Boolean,
+): HealthConnectIntentKind? = when {
+    !sdkAvailable -> null
+    manageIntentResolvable -> HealthConnectIntentKind.MANAGE_DATA
+    else -> HealthConnectIntentKind.SETTINGS_ACTION
+}
+
+internal fun shouldReportSettingsOpened(
+    sdkAvailable: Boolean,
+    intentStarted: Boolean,
+): Boolean = sdkAvailable && intentStarted
 
 internal fun notificationKind(kind: String?): String? = kind?.takeIf { it == "highSpeed" }
 
@@ -107,6 +126,15 @@ class MainActivity : FlutterFragmentActivity() {
                 }
             }
         }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            healthConnectChannelName,
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "openSettings" -> openHealthConnectSettings(result)
+                else -> result.notImplemented()
+            }
+        }
         deliverOrQueueTap(intent)
     }
 
@@ -151,6 +179,54 @@ class MainActivity : FlutterFragmentActivity() {
             notificationPermissionRequestCode,
         )
     }
+
+    private fun openHealthConnectSettings(result: MethodChannel.Result) {
+        try {
+            val sdkAvailable = HealthConnectClient.getSdkStatus(this) ==
+                HealthConnectClient.SDK_AVAILABLE
+            if (!sdkAvailable) {
+                result.success(false)
+                return
+            }
+
+            val manageIntent = HealthConnectClient.getHealthConnectManageDataIntent(
+                this,
+                packageName,
+            )
+            val manageResolvable = manageIntent.resolveActivity(packageManager) != null
+            when (healthConnectIntentKind(sdkAvailable, manageResolvable)) {
+                HealthConnectIntentKind.MANAGE_DATA -> {
+                    startActivity(manageIntent)
+                    result.success(shouldReportSettingsOpened(sdkAvailable, true))
+                }
+                HealthConnectIntentKind.SETTINGS_ACTION -> {
+                    val settingsIntent = Intent(
+                        healthConnectSettingsAction(),
+                    )
+                    if (settingsIntent.resolveActivity(packageManager) == null) {
+                        result.success(false)
+                        return
+                    }
+                    startActivity(settingsIntent)
+                    result.success(shouldReportSettingsOpened(sdkAvailable, true))
+                }
+                null -> result.success(false)
+            }
+        } catch (_: ActivityNotFoundException) {
+            result.success(false)
+        } catch (_: SecurityException) {
+            result.success(false)
+        } catch (_: Exception) {
+            result.success(false)
+        }
+    }
+
+    private fun healthConnectSettingsAction(): String =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            "android.health.connect.action.HEALTH_HOME_SETTINGS"
+        } else {
+            "androidx.health.ACTION_HEALTH_CONNECT_SETTINGS"
+        }
 
     private fun deliverOrQueueTap(intent: Intent?) {
         val kind = notificationKind(intent) ?: return

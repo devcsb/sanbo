@@ -4,6 +4,7 @@ import 'package:health/health.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import '../../data/activity_data_source.dart';
+import 'health_connect_settings.dart';
 
 /// Production adapter for Apple HealthKit and Google Health Connect.
 ///
@@ -54,5 +55,12 @@ class HealthPluginDailyStepsReader implements DailyStepsReader {
   }) => _health.getTotalStepsInInterval(start, end);
 }
 
-HealthActivityDataSource createPlatformHealthActivityDataSource() =>
-    HealthActivityDataSource(HealthPluginDailyStepsReader());
+HealthActivityDataSource createPlatformHealthActivityDataSource() {
+  final settingsOpener = Platform.isAndroid
+      ? const HealthConnectSettingsBridge().openSettings
+      : null;
+  return HealthActivityDataSource(
+    HealthPluginDailyStepsReader(),
+    settingsOpener: settingsOpener,
+  );
+}
