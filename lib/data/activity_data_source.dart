@@ -56,6 +56,14 @@ abstract interface class ActivityDataSourceConnector {
   Future<ActivityAccessState> requestAccess();
 }
 
+abstract interface class ActivityDataSourceSettingsOpener {
+  Future<bool> openSettings();
+}
+
+abstract interface class ActivityDataSourceCacheInvalidator {
+  void invalidateCache();
+}
+
 /// Minimal reader contract used by [HealthActivityDataSource]. It keeps the
 /// platform plugin behind a replaceable boundary and makes date/permission
 /// behavior testable without a device or a method channel.
@@ -76,13 +84,18 @@ abstract interface class DailyStepsReader {
 /// Coordinates access state and normalizes daily totals from a platform
 /// health provider. The concrete plugin reader lives in the platform layer.
 class HealthActivityDataSource
-    implements ActivityDataSource, ActivityDataSourceConnector {
-  HealthActivityDataSource(this._reader);
+    implements
+        ActivityDataSource,
+        ActivityDataSourceConnector,
+        ActivityDataSourceSettingsOpener,
+        ActivityDataSourceCacheInvalidator {
+  HealthActivityDataSource(this._reader, {this._settingsOpener});
 
   static const _cacheTtl = Duration(minutes: 5);
   static const _maxCachedDays = 31;
 
   final DailyStepsReader _reader;
+  final Future<bool> Function()? _settingsOpener;
   bool _configured = false;
   final Map<_DailyStepCacheKey, _CachedDailyStep> _cache = {};
   DateTime? _cachedRangeStart;
@@ -130,6 +143,20 @@ class HealthActivityDataSource
       return ActivityAccessState.error;
     }
   }
+
+  @override
+  Future<bool> openSettings() async {
+    final opener = _settingsOpener;
+    if (opener == null) return false;
+    try {
+      return await opener();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  @override
+  void invalidateCache() => _clearCache();
 
   @override
   Future<List<DailyStepSnapshot>> readDailySteps({

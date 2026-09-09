@@ -131,6 +131,35 @@ void main() {
     expect(reader.readCalls, 2);
   });
 
+  test('health source opens settings and invalidates its cache', () async {
+    final reader = _FakeDailyStepsReader(
+      sourceKind: ActivitySourceKind.healthConnect,
+      totals: {DateTime(2026, 8, 1): 100},
+    );
+    var opened = 0;
+    final source = HealthActivityDataSource(
+      reader,
+      settingsOpener: () async {
+        opened++;
+        return true;
+      },
+    );
+
+    await source.readDailySteps(
+      startDate: DateTime(2026, 8, 1),
+      endDateExclusive: DateTime(2026, 8, 2),
+    );
+    (source as ActivityDataSourceCacheInvalidator).invalidateCache();
+    await (source as ActivityDataSourceSettingsOpener).openSettings();
+    await source.readDailySteps(
+      startDate: DateTime(2026, 8, 1),
+      endDateExclusive: DateTime(2026, 8, 2),
+    );
+
+    expect(opened, 1);
+    expect(reader.readCalls, 2);
+  });
+
   test(
     'availability failures remain distinguishable from a read error',
     () async {
