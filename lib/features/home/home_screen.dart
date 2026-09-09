@@ -33,6 +33,7 @@ class HomeScreen extends ConsumerWidget {
     final needsSystemSettings =
         live.permissionState == LocationPermissionState.deniedForever ||
         live.permissionState == LocationPermissionState.grantedForegroundOnly ||
+        live.permissionState == LocationPermissionState.reducedAccuracy ||
         live.permissionState == LocationPermissionState.serviceDisabled ||
         switch (live.errorCode) {
           SessionErrorCode.permission ||

@@ -12,17 +12,19 @@ import '../helpers/test_db.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('openSystemSettings on LocationEngine increments synthetic spy',
-      () async {
-    final engine = SyntheticLocationEngine(
-      permission: LocationPermissionState.deniedForever,
-    );
-    final ok = await engine.openSystemSettings();
-    expect(ok, isTrue);
-    expect(engine.openSystemSettingsCalls, 1);
-    await engine.openSystemSettings();
-    expect(engine.openSystemSettingsCalls, 2);
-  });
+  test(
+    'openSystemSettings on LocationEngine increments synthetic spy',
+    () async {
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.deniedForever,
+      );
+      final ok = await engine.openSystemSettings();
+      expect(ok, isTrue);
+      expect(engine.openSystemSettingsCalls, 1);
+      await engine.openSystemSettings();
+      expect(engine.openSystemSettingsCalls, 2);
+    },
+  );
 
   testWidgets(
     'deniedForever error banner exposes 설정 열기 and calls openSystemSettings',
@@ -121,4 +123,45 @@ void main() {
       expect(engine.openSystemSettingsCalls, 1);
     },
   );
+
+  testWidgets('reduced accuracy exposes precise location settings guidance', (
+    tester,
+  ) async {
+    late WalkRepository repo;
+    await tester.runAsync(() async {
+      repo = await openTestRepository();
+    });
+    addTearDown(() async {
+      await tester.runAsync(() => repo.close());
+    });
+
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.reducedAccuracy,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    await tester.runAsync(() async {
+      await container.read(sessionControllerProvider.notifier).start();
+    });
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('설정 열기'), findsOneWidget);
+    expect(find.textContaining('정확한 위치'), findsWidgets);
+    await tester.tap(find.text('설정 열기'));
+    await tester.pump();
+    expect(engine.openSystemSettingsCalls, 1);
+  });
 }

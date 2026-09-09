@@ -128,6 +128,53 @@ class _ThrowingSessionPipeline extends SessionPipeline {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test(
+    'malformed accuracy stays in the audit buffer but not live metrics',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      final now = DateTime.now();
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+      ]);
+      final validBefore = controller.state.validSampleCount;
+      final distanceBefore = controller.state.liveDistanceM;
+      final speedBefore = controller.state.liveSpeedMps;
+
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now.add(const Duration(seconds: 1)),
+          latitude: 37.5001,
+          longitude: 127.0001,
+          accuracyM: double.nan,
+        ),
+      ]);
+
+      expect(controller.state.sampleCount, 2);
+      expect(controller.state.validSampleCount, validBefore);
+      expect(controller.state.liveDistanceM, distanceBefore);
+      expect(controller.state.liveSpeedMps, speedBefore);
+    },
+  );
+
   test('stop waits for warning cancellation before completing', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);

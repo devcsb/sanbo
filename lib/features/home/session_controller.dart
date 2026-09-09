@@ -15,6 +15,7 @@ import '../../domain/pipeline/geo.dart';
 import '../../domain/pipeline/sample_filter.dart';
 import '../../domain/services/session_deadline.dart';
 import '../../domain/services/session_guard.dart';
+import '../../domain/services/location_quality_policy.dart';
 import '../../domain/services/session_pipeline.dart';
 import '../../platform/location/location_engine.dart';
 import '../../platform/notifications/session_notification_service.dart';
@@ -199,6 +200,7 @@ class SessionController extends Notifier<LiveSessionState> {
   int _validSampleCount = 0;
 
   final SampleFilter _liveFilter = SampleFilter();
+  final _locationQuality = const LocationQualityPolicy();
   late SessionGuard _sessionGuard;
   late SessionNotificationService _notifications;
   late DateTime Function() _clock;
@@ -370,9 +372,7 @@ class SessionController extends Notifier<LiveSessionState> {
     DateTime? observedAt,
   }) {
     final startUtc = sessionStart?.toUtc();
-    final endUtc = observedAt?.toUtc().add(
-      _sessionGuard.policy.maxSampleFutureSkew,
-    );
+    final endUtc = observedAt?.toUtc().add(_locationQuality.maxFutureSkew);
     return [
       for (final sample in samples)
         if ((startUtc == null ||
@@ -853,6 +853,16 @@ class SessionController extends Notifier<LiveSessionState> {
       return;
     }
     state = state.copyWith(permissionState: perm);
+    if (perm == LocationPermissionState.reducedAccuracy) {
+      state = state.copyWith(
+        isBusy: false,
+        errorMessage:
+            '산책 경로를 기록하려면 산보의 정확한 위치 권한을 허용해 주세요. '
+            '설정에서 정확한 위치를 켤 수 있어요.',
+        errorCode: SessionErrorCode.permission,
+      );
+      return;
+    }
     if (perm == LocationPermissionState.serviceDisabled) {
       state = state.copyWith(
         isBusy: false,
@@ -1129,25 +1139,27 @@ class SessionController extends Notifier<LiveSessionState> {
   void _onSample(LocationSample rawSample) {
     if (_endingSession) return;
     _diagnostics.recordCallback(_clock());
-    final sample = rawSample.normalizedMetadata();
     final sessionStart = state.session?.startedAt ?? _liveSessionStartedAt;
     final receiptNow = _clock().toUtc();
-    final sampleAt = sample.timestamp.toUtc();
+    final quality = _locationQuality.evaluate(
+      sample: rawSample,
+      observedAt: receiptNow,
+      sessionStart: sessionStart,
+      previousAccepted: _lastValidSample?.timestamp,
+    );
+    final sample = rawSample.normalizedMetadata();
     // Providers can deliver a cached fix from before the walk started or a
     // delayed fix from a provider buffer, or a clock-skewed fix far ahead of
     // the receipt time. Keep those raw rows for audit, but mark them out of
     // the live route before they can become an incremental anchor. Stop/
     // finalization applies the same boundary again so a process death cannot
     // resurrect the rejected fix.
-    final outsideLiveBoundary =
-        sessionStart != null &&
-        (sampleAt.isBefore(sessionStart.toUtc()) ||
-            sampleAt.isBefore(
-              receiptNow.subtract(_sessionGuard.policy.maxSampleAge),
-            ) ||
-            sampleAt.isAfter(
-              receiptNow.add(_sessionGuard.policy.maxSampleFutureSkew),
-            ));
+    final outsideLiveBoundary = switch (quality.rejection) {
+      LocationQualityRejection.beforeSession ||
+      LocationQualityRejection.staleTimestamp ||
+      LocationQualityRejection.futureTimestamp => true,
+      _ => false,
+    };
     final prev = _lastValidSample;
     // Guard against out-of-order fixes (clock adjust / provider reordering):
     // the filter sorts ascending, so an older-than-prev sample would otherwise
@@ -1159,7 +1171,7 @@ class SessionController extends Notifier<LiveSessionState> {
     // raw timestamp-sorted list during recovery must not silently reconnect a
     // fix that arrived out of order while the app was alive.
     final LocationSample storedSample;
-    if (outsideLiveBoundary || !ordered) {
+    if (!quality.accepted || outsideLiveBoundary || !ordered) {
       storedSample = sample.copyWith(isFilteredOut: true);
     } else {
       storedSample = sample;

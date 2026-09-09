@@ -70,6 +70,32 @@ void main() {
     },
   );
 
+  test('reduced accuracy never creates a walk session', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.reducedAccuracy,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+
+    expect(controller.state.session, isNull);
+    expect(controller.state.isTracking, isFalse);
+    expect(
+      controller.state.permissionState,
+      LocationPermissionState.reducedAccuracy,
+    );
+    expect(controller.state.errorMessage, contains('정확한 위치'));
+  });
+
   test(
     'notification permission waits until location permission is granted',
     () async {
