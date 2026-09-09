@@ -176,6 +176,42 @@ void main() {
     expect(find.textContaining('연결했어요'), findsOneWidget);
   });
 
+  testWidgets('daily panel opens Health Connect settings when supported', (
+    tester,
+  ) async {
+    final source = _SettingsActivitySource();
+    final days = _days();
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          activityDataSourceProvider.overrideWithValue(source),
+          dailyActivityProvider.overrideWith(
+            (ref) async => DailyActivitySnapshot(
+              days: days,
+              weekStart: days.first.date,
+              weekEnd: days.last.date,
+            ),
+          ),
+          dailyWeekEndProvider.overrideWith((ref) => days.last.date),
+          dailySelectedDayProvider.overrideWith((ref) => days.last.date),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(body: DailyActivityPanel()),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 1));
+
+    expect(find.text('Health Connect 설정 열기'), findsOneWidget);
+    await tester.tap(find.text('Health Connect 설정 열기'));
+    await tester.pumpAndSettle();
+
+    expect(source.settingsCalls, 1);
+    expect(source.requestCalls, 0);
+  });
+
   testWidgets('partial health coverage is not presented as a complete total', (
     tester,
   ) async {
@@ -219,6 +255,41 @@ void main() {
 final class _ConnectableActivitySource
     implements ActivityDataSource, ActivityDataSourceConnector {
   var requestCalls = 0;
+
+  @override
+  Future<ActivityAccessState> getAccessState() async =>
+      ActivityAccessState.denied;
+
+  @override
+  Future<ActivityAccessState> requestAccess() async {
+    requestCalls++;
+    return ActivityAccessState.connected;
+  }
+
+  @override
+  Future<List<DailyStepSnapshot>> readDailySteps({
+    required DateTime startDate,
+    required DateTime endDateExclusive,
+  }) async => const [];
+}
+
+final class _SettingsActivitySource
+    implements
+        ActivityDataSource,
+        ActivityDataSourceConnector,
+        ActivityDataSourceSettingsOpener,
+        ActivityDataSourceCacheInvalidator {
+  var settingsCalls = 0;
+  var requestCalls = 0;
+
+  @override
+  Future<bool> openSettings() async {
+    settingsCalls++;
+    return true;
+  }
+
+  @override
+  void invalidateCache() {}
 
   @override
   Future<ActivityAccessState> getAccessState() async =>

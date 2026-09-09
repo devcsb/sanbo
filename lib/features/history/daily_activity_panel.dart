@@ -21,6 +21,10 @@ class DailyActivityPanel extends ConsumerWidget {
         source is ActivityDataSourceConnector
         ? source as ActivityDataSourceConnector
         : null;
+    final ActivityDataSourceSettingsOpener? settingsOpener =
+        source is ActivityDataSourceSettingsOpener
+        ? source as ActivityDataSourceSettingsOpener
+        : null;
     return SmoothSwitcher(
       transitionKey: _activityTransitionKey(async),
       child: async.when(
@@ -54,6 +58,7 @@ class DailyActivityPanel extends ConsumerWidget {
         data: (snapshot) => _DailyActivityLoaded(
           snapshot: snapshot,
           connector: connector,
+          settingsOpener: settingsOpener,
           onConnect: connector == null
               ? null
               : () async {
@@ -90,6 +95,7 @@ class _DailyActivityLoaded extends StatelessWidget {
   const _DailyActivityLoaded({
     required this.snapshot,
     required this.connector,
+    required this.settingsOpener,
     required this.onConnect,
     required this.selectedDay,
     required this.onSelectDay,
@@ -98,6 +104,7 @@ class _DailyActivityLoaded extends StatelessWidget {
 
   final DailyActivitySnapshot snapshot;
   final ActivityDataSourceConnector? connector;
+  final ActivityDataSourceSettingsOpener? settingsOpener;
   final Future<ActivityAccessState> Function()? onConnect;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onSelectDay;
@@ -106,6 +113,7 @@ class _DailyActivityLoaded extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final opener = settingsOpener;
     final selected = localDateOnly(selectedDay);
     final selectedStats = snapshot.days.firstWhere(
       (day) => day.date == selected,
@@ -308,7 +316,10 @@ class _DailyActivityLoaded extends StatelessWidget {
                     ),
                     if (showConnectAction) ...[
                       const SizedBox(height: 8),
-                      _ActivityConnectButton(onConnect: onConnect!),
+                      _ActivityConnectButton(
+                        onConnect: onConnect!,
+                        onOpenSettings: opener?.openSettings,
+                      ),
                     ],
                   ],
                 ),
@@ -322,9 +333,10 @@ class _DailyActivityLoaded extends StatelessWidget {
 }
 
 class _ActivityConnectButton extends StatefulWidget {
-  const _ActivityConnectButton({required this.onConnect});
+  const _ActivityConnectButton({required this.onConnect, this.onOpenSettings});
 
   final Future<ActivityAccessState> Function() onConnect;
+  final Future<bool> Function()? onOpenSettings;
 
   @override
   State<_ActivityConnectButton> createState() => _ActivityConnectButtonState();
@@ -340,6 +352,18 @@ class _ActivityConnectButtonState extends State<_ActivityConnectButton> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (widget.onOpenSettings != null)
+          TextButton.icon(
+            onPressed: _busy ? null : _openSettings,
+            icon: _busy
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.settings_rounded),
+            label: Text(_busy ? '설정 여는 중…' : 'Health Connect 설정 열기'),
+          ),
         TextButton.icon(
           onPressed: _busy ? null : _connect,
           icon: _busy
@@ -360,6 +384,28 @@ class _ActivityConnectButtonState extends State<_ActivityConnectButton> {
           ),
       ],
     );
+  }
+
+  Future<void> _openSettings() async {
+    final opener = widget.onOpenSettings;
+    if (opener == null) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    bool opened;
+    try {
+      opened = await opener();
+    } catch (_) {
+      opened = false;
+    }
+    if (!mounted) return;
+    setState(() {
+      _busy = false;
+      _message = opened
+          ? 'Health Connect 설정에서 권한을 확인한 뒤 돌아와 주세요.'
+          : 'Health Connect 설정을 열지 못했어요. 앱 설치 상태를 확인한 뒤 다시 시도해 주세요.';
+    });
   }
 
   Future<void> _connect() async {

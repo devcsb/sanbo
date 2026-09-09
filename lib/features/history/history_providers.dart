@@ -101,6 +101,15 @@ final dailyActivityProvider = FutureProvider<DailyActivitySnapshot>((
   );
 });
 
+void refreshDailyActivityOnResume(WidgetRef ref) {
+  final source = ref.read(activityDataSourceProvider);
+  final cacheInvalidator = source is ActivityDataSourceCacheInvalidator
+      ? source as ActivityDataSourceCacheInvalidator
+      : null;
+  cacheInvalidator?.invalidateCache();
+  ref.invalidate(dailyActivityProvider);
+}
+
 /// Bump to refresh history list after stop/delete.
 final historyTickProvider = StateProvider<int>((ref) => 0);
 

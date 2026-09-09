@@ -175,6 +175,33 @@ void main() {
     expect(container.read(dailySelectedDayProvider), DateTime(2026, 8, 8));
     expect(container.read(dailyAutoWeekEndProvider), DateTime(2026, 8, 17));
   });
+
+  testWidgets('resume clears the activity cache and invalidates the provider', (
+    tester,
+  ) async {
+    late WidgetRef capturedRef;
+    final source = _InvalidatingActivitySource();
+    final container = ProviderContainer(
+      overrides: [activityDataSourceProvider.overrideWithValue(source)],
+    );
+    addTearDown(container.dispose);
+
+    await tester.pumpWidget(
+      UncontrolledProviderScope(
+        container: container,
+        child: Consumer(
+          builder: (context, ref, child) {
+            capturedRef = ref;
+            return const SizedBox();
+          },
+        ),
+      ),
+    );
+
+    refreshDailyActivityOnResume(capturedRef);
+
+    expect(source.invalidations, 1);
+  });
 }
 
 class _FakeActivitySource implements ActivityDataSource {
@@ -187,6 +214,20 @@ class _FakeActivitySource implements ActivityDataSource {
     required DateTime startDate,
     required DateTime endDateExclusive,
   }) async => rows;
+}
+
+final class _InvalidatingActivitySource
+    implements ActivityDataSource, ActivityDataSourceCacheInvalidator {
+  var invalidations = 0;
+
+  @override
+  void invalidateCache() => invalidations++;
+
+  @override
+  Future<List<DailyStepSnapshot>> readDailySteps({
+    required DateTime startDate,
+    required DateTime endDateExclusive,
+  }) async => const [];
 }
 
 Future<void> _completeSession(WalkRepository repo, DateTime startedAt) async {
