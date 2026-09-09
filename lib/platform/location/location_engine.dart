@@ -3,6 +3,7 @@ import '../../domain/models/tracking_mode.dart';
 
 enum LocationFailureKind {
   permission,
+  reducedAccuracy,
   serviceDisabled,
   notification,
   backgroundLocation,
@@ -48,6 +49,7 @@ enum LocationPermissionState {
   /// Foreground location is available, but iOS Always permission was denied.
   /// Tracking can continue while the app is visible.
   grantedForegroundOnly,
+  reducedAccuracy,
   denied,
   deniedForever,
   serviceDisabled,

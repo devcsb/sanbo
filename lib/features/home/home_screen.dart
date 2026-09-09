@@ -327,6 +327,8 @@ class HomeScreen extends ConsumerWidget {
       LocationPermissionState.granted => '',
       LocationPermissionState.grantedForegroundOnly =>
         '화면을 잠그고 기록하려면 설정에서 위치 권한을 항상 허용해 주세요',
+      LocationPermissionState.reducedAccuracy =>
+        '산책 경로를 기록하려면 설정에서 정확한 위치를 켜 주세요',
       LocationPermissionState.denied => '시작 시 위치 권한을 요청합니다',
       LocationPermissionState.deniedForever => '설정에서 위치 권한을 허용해 주세요',
       LocationPermissionState.serviceDisabled => '기기의 위치 서비스를 켜 주세요',

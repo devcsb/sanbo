@@ -1572,6 +1572,8 @@ class SessionController extends Notifier<LiveSessionState> {
   String _locationErrorMessage(Object e) {
     return switch (classifyLocationFailure(e)) {
       LocationFailureKind.permission => '위치 권한이 필요합니다. 허용 후 다시 시작해 주세요.',
+      LocationFailureKind.reducedAccuracy =>
+        '산책 경로를 기록하려면 산보의 정확한 위치 권한을 허용해 주세요.',
       LocationFailureKind.serviceDisabled =>
         '위치 서비스가 꺼져 있습니다. 기기 설정에서 위치를 켜 주세요.',
       LocationFailureKind.timeout =>
@@ -1587,6 +1589,7 @@ class SessionController extends Notifier<LiveSessionState> {
   SessionErrorCode _locationErrorCode(Object e) {
     return switch (classifyLocationFailure(e)) {
       LocationFailureKind.permission => SessionErrorCode.permission,
+      LocationFailureKind.reducedAccuracy => SessionErrorCode.permission,
       LocationFailureKind.serviceDisabled =>
         SessionErrorCode.locationServiceDisabled,
       LocationFailureKind.notification => SessionErrorCode.notification,

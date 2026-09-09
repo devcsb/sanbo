@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart' as ph;
 
 import '../../domain/models/location_sample.dart';
 import '../../domain/models/tracking_mode.dart';
+import '../../domain/services/location_quality_policy.dart';
 import 'location_engine.dart';
 import 'location_request_policy.dart';
 
@@ -35,6 +36,8 @@ class GeolocatorLocationEngine implements LocationEngine {
   bool _appForeground = true;
   Timer? _stallWatchdog;
   DateTime? _lastEmitAt;
+  DateTime? _streamArmedAt;
+  LocationSample? _lastAcceptedSample;
   int _streamGeneration = 0;
   int _emitCount = 0;
 
@@ -175,6 +178,25 @@ class GeolocatorLocationEngine implements LocationEngine {
   }) => isApplePlatform && permission == LocationPermissionState.granted;
 
   @visibleForTesting
+  static LocationPermissionState mapPermissionState({
+    required LocationPermission permission,
+    required LocationAccuracyStatus? accuracy,
+  }) {
+    final state = switch (permission) {
+      LocationPermission.always ||
+      LocationPermission.whileInUse => LocationPermissionState.granted,
+      LocationPermission.denied => LocationPermissionState.denied,
+      LocationPermission.deniedForever => LocationPermissionState.deniedForever,
+      LocationPermission.unableToDetermine => LocationPermissionState.unknown,
+    };
+    if (state == LocationPermissionState.granted &&
+        accuracy == LocationAccuracyStatus.reduced) {
+      return LocationPermissionState.reducedAccuracy;
+    }
+    return state;
+  }
+
+  @visibleForTesting
   static LocationPermissionState stateAfterAlwaysPermission({
     required LocationPermissionState foregroundPermission,
     required bool alwaysGranted,
@@ -198,6 +220,12 @@ class GeolocatorLocationEngine implements LocationEngine {
     required int currentGeneration,
     required int requestGeneration,
   }) => running && currentGeneration == requestGeneration;
+
+  @visibleForTesting
+  static DateTime? watchdogBaseline({
+    required DateTime? acceptedAt,
+    required DateTime? armedAt,
+  }) => acceptedAt ?? armedAt;
 
   @override
   Stream<LocationSample> get samples => _controller.stream;
@@ -273,7 +301,7 @@ class GeolocatorLocationEngine implements LocationEngine {
   Future<LocationPermissionState> checkPermission() async {
     final service = await Geolocator.isLocationServiceEnabled();
     if (!service) return LocationPermissionState.serviceDisabled;
-    return _mapPermission(await Geolocator.checkPermission());
+    return _mapPermissionWithAccuracy(await Geolocator.checkPermission());
   }
 
   Future<bool> _requestAlwaysLocationBestEffort() async {
@@ -319,7 +347,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     if (p == LocationPermission.denied) {
       p = await Geolocator.requestPermission();
     }
-    final mapped = _mapPermission(p);
+    final mapped = await _mapPermissionWithAccuracy(p);
     if (shouldRequestAlwaysLocation(
       isApplePlatform: Platform.isIOS,
       permission: mapped,
@@ -343,13 +371,20 @@ class GeolocatorLocationEngine implements LocationEngine {
   }
 
   LocationPermissionState _mapPermission(LocationPermission p) {
-    return switch (p) {
-      LocationPermission.always ||
-      LocationPermission.whileInUse => LocationPermissionState.granted,
-      LocationPermission.denied => LocationPermissionState.denied,
-      LocationPermission.deniedForever => LocationPermissionState.deniedForever,
-      LocationPermission.unableToDetermine => LocationPermissionState.unknown,
-    };
+    return mapPermissionState(permission: p, accuracy: null);
+  }
+
+  Future<LocationPermissionState> _mapPermissionWithAccuracy(
+    LocationPermission permission,
+  ) async {
+    final mapped = _mapPermission(permission);
+    if (mapped != LocationPermissionState.granted || !Platform.isAndroid) {
+      return mapped;
+    }
+    return mapPermissionState(
+      permission: permission,
+      accuracy: await Geolocator.getLocationAccuracy(),
+    );
   }
 
   LocationRequestProfile get _profile => locationRequestProfile(_mode);
@@ -372,12 +407,21 @@ class GeolocatorLocationEngine implements LocationEngine {
     _streamRecoveryInFlight = false;
     _recoveryPendingWhileBackground = false;
     _lastEmitAt = null;
+    _streamArmedAt = null;
+    _lastAcceptedSample = null;
     _emitCount = 0;
 
-    final perm = await Geolocator.checkPermission();
-    if (perm == LocationPermission.denied ||
-        perm == LocationPermission.deniedForever) {
-      const error = LocationEngineFailure(LocationFailureKind.permission);
+    final perm = await _mapPermissionWithAccuracy(
+      await Geolocator.checkPermission(),
+    );
+    if (perm == LocationPermissionState.denied ||
+        perm == LocationPermissionState.deniedForever ||
+        perm == LocationPermissionState.reducedAccuracy) {
+      final error = LocationEngineFailure(
+        perm == LocationPermissionState.reducedAccuracy
+            ? LocationFailureKind.reducedAccuracy
+            : LocationFailureKind.permission,
+      );
       _controller.addError(error, StackTrace.current);
       _running = false;
       throw error;
@@ -443,7 +487,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     // Measure silence from stream arming as well as from the latest fix. This
     // lets a provider that never emits its first fix enter the same recovery
     // path after the long fallback timeout.
-    _lastEmitAt = DateTime.now();
+    _streamArmedAt = DateTime.now();
 
     final LocationSettings locationSettings;
     if (Platform.isAndroid) {
@@ -629,7 +673,10 @@ class GeolocatorLocationEngine implements LocationEngine {
         running: _running,
         usingLocationManagerFallback: _usingLocationManagerFallback,
         recoveryInFlight: _streamRecoveryInFlight,
-        lastEmitAt: _lastEmitAt,
+        lastEmitAt: watchdogBaseline(
+          acceptedAt: _lastEmitAt,
+          armedAt: _streamArmedAt,
+        ),
         now: DateTime.now(),
         timeout: _stallTimeout,
         supportsLocationManagerFallback: Platform.isAndroid,
@@ -741,7 +788,29 @@ class GeolocatorLocationEngine implements LocationEngine {
         : null;
     final speed = pos.speed.isFinite && pos.speed >= 0 ? pos.speed : null;
     final altitude = pos.altitude.isFinite ? pos.altitude : null;
-    _lastEmitAt = DateTime.now();
+    final sample = LocationSample(
+      timestamp: ts,
+      latitude: pos.latitude,
+      longitude: pos.longitude,
+      accuracyM: accuracy,
+      speedMps: speed,
+      altitudeM: altitude,
+    );
+    final decision = !pos.accuracy.isFinite || pos.accuracy < 0
+        ? const LocationQualityDecision.rejected(
+            LocationQualityRejection.excessiveAccuracy,
+          )
+        : const LocationQualityPolicy().evaluate(
+            sample: sample,
+            observedAt: DateTime.now(),
+            previousAccepted: _lastAcceptedSample?.timestamp,
+          );
+    final emitted = sample.copyWith(isFilteredOut: !decision.accepted);
+    if (decision.accepted) {
+      _lastAcceptedSample = emitted;
+      _lastEmitAt = DateTime.now();
+      _streamArmedAt = null;
+    }
     _emitCount++;
     if (kDebugMode && _emitCount <= 3) {
       developer.log(
@@ -749,16 +818,7 @@ class GeolocatorLocationEngine implements LocationEngine {
         name: _logName,
       );
     }
-    _controller.add(
-      LocationSample(
-        timestamp: ts,
-        latitude: pos.latitude,
-        longitude: pos.longitude,
-        accuracyM: accuracy,
-        speedMps: speed,
-        altitudeM: altitude,
-      ),
-    );
+    _controller.add(emitted);
   }
 
   Future<void> _stopTrackingOnly() async {
@@ -767,6 +827,8 @@ class GeolocatorLocationEngine implements LocationEngine {
     _running = false;
     ++_streamGeneration;
     _lastEmitAt = null;
+    _streamArmedAt = null;
+    _lastAcceptedSample = null;
     await _sub?.cancel();
     _sub = null;
   }

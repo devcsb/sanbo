@@ -8,6 +8,52 @@ import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/location_request_policy.dart';
 
 void main() {
+  test('approximate Android permission maps to reducedAccuracy', () {
+    expect(
+      GeolocatorLocationEngine.mapPermissionState(
+        permission: LocationPermission.whileInUse,
+        accuracy: LocationAccuracyStatus.reduced,
+      ),
+      LocationPermissionState.reducedAccuracy,
+    );
+    expect(
+      GeolocatorLocationEngine.mapPermissionState(
+        permission: LocationPermission.whileInUse,
+        accuracy: LocationAccuracyStatus.precise,
+      ),
+      LocationPermissionState.granted,
+    );
+  });
+
+  test('denied permission is not changed by reduced accuracy', () {
+    expect(
+      GeolocatorLocationEngine.mapPermissionState(
+        permission: LocationPermission.denied,
+        accuracy: LocationAccuracyStatus.reduced,
+      ),
+      LocationPermissionState.denied,
+    );
+  });
+
+  test('watchdog baseline prefers an accepted fix over stream arm time', () {
+    final armed = DateTime(2026, 9, 9, 12);
+    final accepted = armed.add(const Duration(seconds: 4));
+    expect(
+      GeolocatorLocationEngine.watchdogBaseline(
+        acceptedAt: null,
+        armedAt: armed,
+      ),
+      armed,
+    );
+    expect(
+      GeolocatorLocationEngine.watchdogBaseline(
+        acceptedAt: accepted,
+        armedAt: armed,
+      ),
+      accepted,
+    );
+  });
+
   test('ended fallback stream reports termination during fused recovery', () {
     expect(
       GeolocatorLocationEngine.endedStreamAction(
