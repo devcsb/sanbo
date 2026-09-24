@@ -35,6 +35,16 @@ internal fun shouldReportSettingsOpened(
     intentStarted: Boolean,
 ): Boolean = sdkAvailable && intentStarted
 
+internal fun healthConnectSettingsAction(
+    sdkAction: String?,
+    isAndroid14OrLater: Boolean,
+): String = sdkAction?.trim()?.takeIf { it.isNotEmpty() }
+    ?: if (isAndroid14OrLater) {
+        "android.health.connect.action.HEALTH_HOME_SETTINGS"
+    } else {
+        "androidx.health.ACTION_HEALTH_CONNECT_SETTINGS"
+    }
+
 internal fun notificationKind(kind: String?): String? = kind?.takeIf { it == "highSpeed" }
 
 internal fun notificationKind(intent: Intent?): String? =
@@ -201,7 +211,12 @@ class MainActivity : FlutterFragmentActivity() {
                 }
                 HealthConnectIntentKind.SETTINGS_ACTION -> {
                     val settingsIntent = Intent(
-                        healthConnectSettingsAction(),
+                        healthConnectSettingsAction(
+                            sdkAction = sdkProvidedHealthConnectSettingsAction(),
+                            isAndroid14OrLater =
+                                Build.VERSION.SDK_INT >=
+                                    Build.VERSION_CODES.UPSIDE_DOWN_CAKE,
+                        ),
                     )
                     if (settingsIntent.resolveActivity(packageManager) == null) {
                         result.success(false)
@@ -221,12 +236,15 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    private fun healthConnectSettingsAction(): String =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            "android.health.connect.action.HEALTH_HOME_SETTINGS"
-        } else {
-            "androidx.health.ACTION_HEALTH_CONNECT_SETTINGS"
-        }
+    private fun sdkProvidedHealthConnectSettingsAction(): String? = runCatching {
+        // connect-client alpha02 publishes this Kotlin getter as a JVM static
+        // method but does not expose it to Kotlin source calls. Keep the SDK
+        // action as the source of truth while retaining the documented action
+        // fallback for older/provider builds.
+        HealthConnectClient::class.java
+            .getMethod("getHealthConnectSettingsAction")
+            .invoke(null) as? String
+    }.getOrNull()
 
     private fun deliverOrQueueTap(intent: Intent?) {
         val kind = notificationKind(intent) ?: return

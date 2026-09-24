@@ -13,6 +13,8 @@ class HealthConnectSettingsBridge {
       return false;
     } on MissingPluginException {
       return false;
+    } catch (_) {
+      return false;
     }
   }
 }

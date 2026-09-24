@@ -34,4 +34,22 @@ void main() {
       expect(await const HealthConnectSettingsBridge().openSettings(), isFalse);
     },
   );
+
+  test('bridge converts unexpected native exceptions into false', () async {
+    expect(
+      await HealthConnectSettingsBridge(
+        channel: _ThrowingMethodChannel(),
+      ).openSettings(),
+      isFalse,
+    );
+  });
+}
+
+class _ThrowingMethodChannel extends MethodChannel {
+  _ThrowingMethodChannel() : super('sanbo/health_connect');
+
+  @override
+  Future<T?> invokeMethod<T>(String method, [dynamic arguments]) {
+    throw StateError('channel unavailable');
+  }
 }
