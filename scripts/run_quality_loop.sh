@@ -64,6 +64,18 @@ esac
 
 case "$build_mode" in
   release|all)
+    expected_release_version="0.9.1+15"
+    release_evidence="docs/release/2026-09-24-android-release.md"
+    actual_release_version="$(sed -n 's/^version: //p' pubspec.yaml | head -1)"
+    if [[ "$actual_release_version" != "$expected_release_version" ]]; then
+      echo "release version mismatch: expected $expected_release_version" >&2
+      exit 1
+    fi
+    if [[ ! -s "$release_evidence" ]] ||
+      ! grep -Fq "$expected_release_version" "$release_evidence"; then
+      echo "release evidence is missing candidate metadata: $release_evidence" >&2
+      exit 1
+    fi
     if [[ -z "${SANBO_RELEASE_STORE_PASSWORD:-}" ]] &&
       command -v security >/dev/null 2>&1; then
       signing_password="$(security find-generic-password \
@@ -78,6 +90,12 @@ case "$build_mode" in
     # platform registrant and excludes dev-only integration_test plugins from
     # the release Java compilation.
     flutter build apk --release --split-per-abi --target lib/main.dart
+    step "Android release app bundle"
+    flutter build appbundle --release --target lib/main.dart
+    if [[ ! -s build/app/outputs/bundle/release/app-release.aab ]]; then
+      echo "release app bundle was not produced" >&2
+      exit 1
+    fi
     if ! command -v apkanalyzer >/dev/null 2>&1; then
       echo "required release tool unavailable: apkanalyzer" >&2
       exit 1
@@ -109,6 +127,16 @@ case "$build_mode" in
     grep -q 'com.baseflow.geolocator.GeolocatorLocationService' <<<"$manifest"
     grep -q 'foregroundServiceType="0x8"' <<<"$manifest"
 
+    step "Android release version and target SDK"
+    if [[ "$(apkanalyzer manifest version-name "$apk")" != "0.9.1" ]]; then
+      echo "release version name mismatch: $apk" >&2
+      exit 1
+    fi
+    if [[ "$(apkanalyzer manifest target-sdk "$apk")" != "36" ]]; then
+      echo "release target SDK mismatch: $apk" >&2
+      exit 1
+    fi
+
     step "Android release signing certificate"
     for signed_apk in build/app/outputs/flutter-apk/app-*-release.apk; do
       certs="$("$apksigner_bin" verify --print-certs "$signed_apk")"
@@ -119,6 +147,21 @@ case "$build_mode" in
         exit 1
       fi
     done
+
+    step "Android release checksums"
+    checksum_dir="build/app/outputs/release"
+    checksum_file="$checksum_dir/SHA256SUMS_v0.9.1.txt"
+    mkdir -p "$checksum_dir"
+    shasum -a 256 \
+      build/app/outputs/bundle/release/app-release.aab \
+      build/app/outputs/flutter-apk/app-arm64-v8a-release.apk \
+      build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk \
+      build/app/outputs/flutter-apk/app-x86_64-release.apk \
+      > "$checksum_file"
+    if [[ ! -s "$checksum_file" ]]; then
+      echo "release checksum file was not produced" >&2
+      exit 1
+    fi
     ;;
 esac
 

@@ -137,4 +137,3 @@
 - [ ] Step 2: Publish the selected target. GitHub Release requires authenticated `gh` or an equivalent configured remote; Google Play Internal Testing requires an authenticated Play Console upload path and app access.
 - [ ] Step 3: Record the published URL/version and distinguish uploaded artifacts from unavailable physical-device evidence.
 - [ ] Step 4: If deployment credentials are absent, stop at a verified signed artifact and report the exact external credential needed rather than claiming publication.
-
