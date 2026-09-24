@@ -6,6 +6,7 @@ import '../models/minute_window.dart';
 import '../models/route_exclusion.dart';
 import '../models/walk_session.dart';
 import '../pipeline/segment_merger.dart';
+import 'completed_walk_metrics.dart';
 import 'place_memory.dart';
 import 'walk_stats.dart';
 
@@ -23,8 +24,14 @@ class SessionExport {
     final dur = formatDurationCompact(
       Duration(seconds: session.durationS ?? 0),
     );
-    final kmh = ((session.avgSpeedMps ?? 0) * 3.6).toStringAsFixed(1);
-    final pace = pacePerKmLabel(session.avgSpeedMps);
+    final averageSpeedMps = completedAverageSpeedMps(
+      totalDistanceM: session.totalDistanceM,
+      movingTimeS: session.movingTimeS,
+    );
+    final kmh = averageSpeedMps == null
+        ? null
+        : (averageSpeedMps * 3.6).toStringAsFixed(1);
+    final pace = pacePerKmLabel(averageSpeedMps);
     final segments = SegmentMerger().merge(
       windows,
       sessionId: session.id,
@@ -36,7 +43,9 @@ class SessionExport {
       ..writeln('시작: $date')
       ..writeln('거리: $km km')
       ..writeln('시간: $dur')
-      ..writeln('평균 속도: $kmh km/h');
+      ..writeln(
+        kmh == null ? '평균 속도: 측정되지 않음' : '평균 속도: $kmh km/h',
+      );
     if (pace != null) buf.writeln('페이스: $pace');
     if (session.movingTimeS != null) {
       buf.writeln(

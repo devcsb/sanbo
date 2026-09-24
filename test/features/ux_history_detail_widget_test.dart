@@ -267,6 +267,48 @@ void main() {
     expect(find.text('소요 시간 10:00'), findsOneWidget);
   });
 
+  testWidgets(
+    'completed detail derives speed and pace from distance and moving time',
+    (tester) async {
+      late WalkRepository repo;
+      late String sessionId;
+      await tester.runAsync(() async {
+        repo = await openTestRepository();
+        final start = DateTime(2026, 8, 12, 9);
+        final session = await repo.startSession(startedAt: start);
+        sessionId = session.id;
+        await repo.completeSession(
+          sessionId: session.id,
+          endedAt: start.add(const Duration(minutes: 20)),
+          totalDistanceM: 1200,
+          durationS: 1200,
+          movingTimeS: 600,
+          stationaryTimeS: 600,
+          // Deliberately disagree with the canonical distance/time value.
+          avgSpeedMps: 0.5,
+          validSampleCount: 2,
+        );
+      });
+      addTearDown(() async {
+        await tester.runAsync(() => repo.close());
+      });
+
+      await tester.pumpWidget(detailApp(repo, sessionId));
+      await settle(tester);
+      await settle(tester);
+
+      expect(find.text('7.2 km/h'), findsOneWidget);
+      final pace = find.text('8:20 /km');
+      await tester.scrollUntilVisible(
+        pace,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(pace, findsOneWidget);
+      expect(find.text('1.8 km/h'), findsNothing);
+    },
+  );
+
   testWidgets('SessionDetailScreen delete dialog then go /history', (
     tester,
   ) async {

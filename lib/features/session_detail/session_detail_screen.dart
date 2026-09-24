@@ -19,6 +19,7 @@ import '../../domain/pipeline/route_partitioner.dart';
 import '../../domain/pipeline/segment_merger.dart';
 import '../../domain/services/place_memory.dart';
 import '../../domain/services/route_playback.dart';
+import '../../domain/services/completed_walk_metrics.dart';
 import '../../domain/services/session_export.dart';
 import '../../domain/services/walk_stats.dart';
 import '../../platform/place/place_lookup.dart';
@@ -253,7 +254,13 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
             final dateFmt = DateFormat('yyyy.MM.dd  HH:mm', 'ko');
             final km = (session.totalDistanceM ?? 0) / 1000.0;
             final dur = Duration(seconds: session.durationS ?? 0);
-            final kmh = (session.avgSpeedMps ?? 0) * 3.6;
+            final averageSpeedMps = completedAverageSpeedMps(
+              totalDistanceM: session.totalDistanceM,
+              movingTimeS: session.movingTimeS,
+            );
+            final kmh = averageSpeedMps == null
+                ? null
+                : averageSpeedMps * 3.6;
             final playbackPoints = _pointsForPlayback(data.route);
             final fragments = _fragmentCache;
             final segments = data.segments.isNotEmpty
@@ -353,7 +360,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                       MetricData(label: '시간', value: _fmt(dur)),
                       MetricData(
                         label: '평균 속도',
-                        value: '${kmh.toStringAsFixed(1)} km/h',
+                        value: kmh == null
+                            ? '측정되지 않음'
+                            : '${kmh.toStringAsFixed(1)} km/h',
                       ),
                     ],
                   ),
@@ -390,7 +399,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                     initialNotes: session.notes,
                     enabled: !commandBusy,
                   ),
-                  if (pacePerKmLabel(session.avgSpeedMps) != null) ...[
+                  if (pacePerKmLabel(averageSpeedMps) != null) ...[
                     const SizedBox(height: 16),
                     SoftPanel(
                       padding: const EdgeInsets.symmetric(
@@ -417,7 +426,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  pacePerKmLabel(session.avgSpeedMps)!,
+                                  pacePerKmLabel(averageSpeedMps)!,
                                   style: theme.textTheme.titleMedium?.copyWith(
                                     fontWeight: FontWeight.w700,
                                   ),

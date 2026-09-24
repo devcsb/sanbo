@@ -93,6 +93,22 @@ void main() {
       expect(text, contains('로컬 기록'));
     });
 
+    test('human summary derives completed pace from moving time', () {
+      final session = _session(
+        id: 'average-speed',
+        distance: 1200,
+        duration: 1200,
+        movingTime: 600,
+        avgSpeedMps: 0.5,
+      );
+
+      final text = const SessionExport().humanSummary(session: session);
+
+      expect(text, contains('평균 속도: 7.2 km/h'));
+      expect(text, contains('페이스: 8:20 /km'));
+      expect(text, isNot(contains('평균 속도: 1.8 km/h')));
+    });
+
     test('human summary includes a confirmed place memory', () {
       final session = _session(id: 'place', distance: 10, duration: 120);
       final start = DateTime(2026, 7, 18, 9);
@@ -206,6 +222,8 @@ WalkSession _session({
   required String id,
   required double distance,
   required int duration,
+  int? movingTime,
+  double? avgSpeedMps,
   SessionStatus status = SessionStatus.completed,
   String? notes,
 }) {
@@ -218,7 +236,8 @@ WalkSession _session({
     status: status,
     totalDistanceM: distance,
     durationS: duration,
-    avgSpeedMps: duration > 0 ? distance / duration : 0,
+    movingTimeS: movingTime ?? duration,
+    avgSpeedMps: avgSpeedMps ?? (duration > 0 ? distance / duration : 0),
     notes: notes,
   );
 }
