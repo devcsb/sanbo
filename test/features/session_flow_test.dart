@@ -1244,6 +1244,36 @@ void main() {
   );
 
   test(
+    'resume rechecks precise location before recording continues',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.granted,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      controller.setAppForeground(false);
+      engine.permission = LocationPermissionState.reducedAccuracy;
+
+      controller.setAppForeground(true);
+      await Future<void>.delayed(Duration.zero);
+
+      final state = container.read(sessionControllerProvider);
+      expect(state.permissionState, LocationPermissionState.reducedAccuracy);
+      expect(state.errorMessage, contains('정확한 위치'));
+    },
+  );
+
+  test(
     'stop waits for an in-flight checkpoint before finalizing samples',
     () async {
       ensureSqfliteFfi();

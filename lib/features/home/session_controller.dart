@@ -965,6 +965,9 @@ class SessionController extends Notifier<LiveSessionState> {
       // Arm the session boundary before engine.start(). Some providers emit
       // a cached first fix synchronously while start is still in flight.
       _liveSessionStartedAt = session.startedAt;
+      if (_engine is LocationSessionBoundary) {
+        (_engine as LocationSessionBoundary).setSessionStart(session.startedAt);
+      }
 
       await _engine.setMode(mode);
       if (!resuming) {
@@ -1653,7 +1656,9 @@ class SessionController extends Notifier<LiveSessionState> {
     // An idle scope may not have a location engine override (for example a
     // standalone HomeScreen widget test). Do not resolve or wake the native
     // adapter until a session is active or the engine has already been used.
-    if (_resolvedEngine != null || state.isTracking || state.isBusy) {
+    if (foreground && state.isTracking) {
+      unawaited(_resumeAfterPermissionCheck());
+    } else if (_resolvedEngine != null || state.isTracking || state.isBusy) {
       unawaited(_engine.setAppForeground(foreground));
     }
     if (!foreground) {
@@ -1914,6 +1919,31 @@ class SessionController extends Notifier<LiveSessionState> {
     } finally {
       await _cancelSessionGuard();
     }
+  }
+
+  Future<void> _resumeAfterPermissionCheck() async {
+    final sessionId = state.session?.id;
+    LocationPermissionState permission;
+    try {
+      permission = await _engine.checkPermission();
+    } catch (_) {
+      // A transient permission-channel failure must not prevent the existing
+      // provider lifecycle from resuming; the next fix still passes quality
+      // validation and the normal error path remains available.
+      await _engine.setAppForeground(true);
+      return;
+    }
+    if (!state.isTracking || state.session?.id != sessionId) return;
+    final reduced = permission == LocationPermissionState.reducedAccuracy;
+    state = state.copyWith(
+      permissionState: permission,
+      errorMessage: reduced
+          ? '산책 경로를 기록하려면 산보의 정확한 위치 권한을 허용해 주세요. 설정에서 정확한 위치를 켤 수 있어요.'
+          : null,
+      errorCode: reduced ? SessionErrorCode.permission : null,
+      clearError: !reduced,
+    );
+    await _engine.setAppForeground(true);
   }
 
   Future<void> discardActive() async {

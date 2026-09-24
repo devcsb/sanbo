@@ -78,3 +78,8 @@ abstract class LocationEngine {
   Future<void> stop();
   Future<void> dispose() async {}
 }
+
+/// Optional adapter capability for provider-side session-boundary validation.
+abstract interface class LocationSessionBoundary {
+  void setSessionStart(DateTime? sessionStart);
+}

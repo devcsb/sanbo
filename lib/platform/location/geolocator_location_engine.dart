@@ -21,7 +21,8 @@ enum LocationStreamEndAction { ignore, recover, report }
 /// - Broadcast stream without a listener drops seed / first fixes
 /// - Samsung Fused Location can hang; we fall back to LocationManager
 /// - Silent catch of permission/stream errors left the UI stuck at 0 samples
-class GeolocatorLocationEngine implements LocationEngine {
+class GeolocatorLocationEngine
+    implements LocationEngine, LocationSessionBoundary {
   GeolocatorLocationEngine() {
     _controller = StreamController<LocationSample>.broadcast();
   }
@@ -37,6 +38,7 @@ class GeolocatorLocationEngine implements LocationEngine {
   Timer? _stallWatchdog;
   DateTime? _lastEmitAt;
   DateTime? _streamArmedAt;
+  DateTime? _sessionStartAt;
   LocationSample? _lastAcceptedSample;
   int _streamGeneration = 0;
   int _emitCount = 0;
@@ -222,6 +224,21 @@ class GeolocatorLocationEngine implements LocationEngine {
   }) => running && currentGeneration == requestGeneration;
 
   @visibleForTesting
+  static LocationQualityDecision evaluateSampleQuality({
+    required LocationSample sample,
+    required DateTime observedAt,
+    DateTime? sessionStart,
+    DateTime? previousAccepted,
+  }) {
+    return const LocationQualityPolicy().evaluate(
+      sample: sample,
+      observedAt: observedAt,
+      sessionStart: sessionStart,
+      previousAccepted: previousAccepted,
+    );
+  }
+
+  @visibleForTesting
   static DateTime? watchdogBaseline({
     required DateTime? acceptedAt,
     required DateTime? armedAt,
@@ -232,6 +249,11 @@ class GeolocatorLocationEngine implements LocationEngine {
 
   @override
   TrackingMode get mode => _mode;
+
+  @override
+  void setSessionStart(DateTime? sessionStart) {
+    _sessionStartAt = sessionStart?.toUtc();
+  }
 
   @override
   Future<void> setMode(TrackingMode mode) async {
@@ -796,19 +818,21 @@ class GeolocatorLocationEngine implements LocationEngine {
       speedMps: speed,
       altitudeM: altitude,
     );
+    final observedAt = DateTime.now();
     final decision = !pos.accuracy.isFinite || pos.accuracy < 0
         ? const LocationQualityDecision.rejected(
             LocationQualityRejection.excessiveAccuracy,
           )
-        : const LocationQualityPolicy().evaluate(
+        : evaluateSampleQuality(
             sample: sample,
-            observedAt: DateTime.now(),
+            observedAt: observedAt,
+            sessionStart: _sessionStartAt,
             previousAccepted: _lastAcceptedSample?.timestamp,
           );
     final emitted = sample.copyWith(isFilteredOut: !decision.accepted);
     if (decision.accepted) {
       _lastAcceptedSample = emitted;
-      _lastEmitAt = DateTime.now();
+      _lastEmitAt = observedAt;
       _streamArmedAt = null;
     }
     _emitCount++;
@@ -828,6 +852,7 @@ class GeolocatorLocationEngine implements LocationEngine {
     ++_streamGeneration;
     _lastEmitAt = null;
     _streamArmedAt = null;
+    _sessionStartAt = null;
     _lastAcceptedSample = null;
     await _sub?.cancel();
     _sub = null;

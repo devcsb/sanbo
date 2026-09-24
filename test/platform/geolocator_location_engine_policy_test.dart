@@ -2,12 +2,29 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
+import 'package:sanbo/domain/services/location_quality_policy.dart';
 import 'package:sanbo/platform/location/geolocator_location_engine.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/location_request_policy.dart';
 
 void main() {
+  test('engine quality boundary rejects cached fixes before session start', () {
+    final sessionStart = DateTime.utc(2026, 9, 24, 10);
+    final decision = GeolocatorLocationEngine.evaluateSampleQuality(
+      sample: LocationSample(
+        timestamp: sessionStart.subtract(const Duration(minutes: 1)),
+        latitude: 37.5,
+        longitude: 127,
+      ),
+      observedAt: sessionStart,
+      sessionStart: sessionStart,
+    );
+
+    expect(decision.rejection, LocationQualityRejection.beforeSession);
+  });
+
   test('approximate Android permission maps to reducedAccuracy', () {
     expect(
       GeolocatorLocationEngine.mapPermissionState(
