@@ -244,12 +244,26 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
 
 `SessionGuard`의 observedAt 수신 시각은 최대 과거 30초와 미래 5초만 허용한다. `WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 분 기록 전체 교체, 세션 집계 갱신, 제외 레코드 삭제 마지막 순서로 쓴다. 같은 SQLite transaction은 원본과 파생 상태를 함께 rollback한다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
 
+완료 시 자동 제외 정책은 라이브 고속 경고와 분리한다. `AutomaticRouteExclusionPolicy`는 필터가 통과한 파생 `MinuteWindow.maxSpeedMps >= 10 / 3.6`(시속 10km/h 이상)을 고속 후보로 만들고, `SegmentMerger` 결과의 `ActivityLabel.vehicle` 확정 구간도 후보로 만든다. 단, 사용자가 차량이 아닌 활동으로 확정한 분은 고속 후보에서 제외해 빠른 걷기를 덮어쓰지 않는다. 후보는 세션 범위에 clamp하고 기존 제외와 겹치지 않게 한 뒤 맞닿거나 겹치는 범위를 합친다. 속도 후보의 `RouteExclusionReason`은 `highSpeed`, 차량 라벨 후보는 `vehicle`이며, 겹친 후보는 `highSpeed`를 우선한다. `finalizeSession`과 완료 세션의 사용자 라벨 변경은 같은 SQLite transaction에서 자동 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신을 수행한다. 원시 GPS 샘플과 사용자 메타데이터는 보존하고 상세 화면의 복원 경로는 일반 수동 제외와 동일하게 사용한다. 이 정책은 라이브 세션을 속도만으로 자동 종료하지 않는다.
+
 알림 tap에서 warm tap은 즉시 `/`로 이동한다. cold tap은 복구가 끝난 뒤 active session이 있을 때만 경고를 표시한다. 종료됐거나 없는 세션은 tap을 버린다. native와 Dart의 pending buffer는 하나만 저장하고 한 번만 전달한다.
 
 정확한 공개 표면은 아래와 같다. 아래 선언은 완전한 독립 라이브러리가 아니라 실제 Dart 소스의 public type, field, getter, method 선언을 계약으로 옮긴 것이다.
 
 ```dart
-enum RouteExclusionReason { vehicle }
+enum RouteExclusionReason { vehicle, highSpeed }
+
+class AutomaticRouteExclusionPolicy {
+  const AutomaticRouteExclusionPolicy({double speedThresholdMps = 10 / 3.6});
+  final double speedThresholdMps;
+  List<AutomaticRouteExclusionCandidate> detect({
+    required List<MinuteWindow> windows,
+    required List<ActivitySegment> segments,
+    required DateTime sessionStart,
+    required DateTime sessionEnd,
+    Iterable<RouteExclusion> existingExclusions = const [],
+  });
+}
 
 class RouteExclusion {
   factory RouteExclusion({

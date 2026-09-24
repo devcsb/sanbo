@@ -60,11 +60,13 @@ Future<CompletedRouteFixture> seedCompletedTwoMinuteWalk(
     longitude: 127,
     name: '출발 장소',
   );
+  // Keep two distinct, non-vehicle segments for route-edit tests. Vehicle
+  // fixtures opt into the production automatic-exclusion behavior below.
   await repo.updateWindowUserLabel(
     sessionId: session.id,
     windowStart: persisted.last.windowStart,
-    userLabel: ActivityLabel.vehicle,
-    note: '차량',
+    userLabel: ActivityLabel.strollSlow,
+    note: '일반 이동',
     confirmed: true,
   );
   final windows = await repo.getWindows(session.id);
@@ -81,8 +83,60 @@ Future<CompletedRouteFixture> seedCompletedTwoMinuteWalk(
   );
 }
 
-Future<CompletedRouteFixture> seedCompletedVehicleWalk(WalkRepository repo) =>
-    seedCompletedTwoMinuteWalk(repo);
+Future<CompletedRouteFixture> seedCompletedVehicleWalk(
+  WalkRepository repo,
+) async {
+  final fixture = await seedCompletedTwoMinuteWalk(repo);
+  // Keep this legacy fixture unexcluded so UI tests can exercise the explicit
+  // route-edit confirmation dialog. Production label updates go through the
+  // repository API and apply the automatic exclusion policy.
+  final vehicleWindow = fixture.windows.last;
+  await repo.replaceWindows(fixture.session.id, [
+    ...fixture.windows.take(fixture.windows.length - 1),
+    MinuteWindow(
+      windowStart: vehicleWindow.windowStart,
+      durationS: vehicleWindow.durationS,
+      partial: vehicleWindow.partial,
+      sampleCount: vehicleWindow.sampleCount,
+      rawSampleCount: vehicleWindow.rawSampleCount,
+      distanceM: vehicleWindow.distanceM,
+      avgSpeedMps: vehicleWindow.avgSpeedMps,
+      maxSpeedMps: vehicleWindow.maxSpeedMps,
+      stationaryRatio: vehicleWindow.stationaryRatio,
+      quality: vehicleWindow.quality,
+      centroidLat: vehicleWindow.centroidLat,
+      centroidLon: vehicleWindow.centroidLon,
+      startLat: vehicleWindow.startLat,
+      startLon: vehicleWindow.startLon,
+      endLat: vehicleWindow.endLat,
+      endLon: vehicleWindow.endLon,
+      gapReason: vehicleWindow.gapReason,
+      hypothesisLabel: vehicleWindow.hypothesisLabel,
+      hypothesisConfidence: vehicleWindow.hypothesisConfidence,
+      evidence: vehicleWindow.evidence,
+      userLabel: ActivityLabel.vehicle,
+      userNote: '차량',
+      userConfirmed: true,
+      userExclusionId: vehicleWindow.userExclusionId,
+      placeId: vehicleWindow.placeId,
+      placeName: vehicleWindow.placeName,
+      placeAddress: vehicleWindow.placeAddress,
+    ),
+  ]);
+  final session = await repo.getSession(fixture.session.id);
+  final windows = await repo.getWindows(fixture.session.id);
+  return (
+    session: session ?? fixture.session,
+    samples: await repo.getSamples(fixture.session.id),
+    windows: windows,
+    segments: SessionPipeline().segmentMerger.merge(
+      windows,
+      sessionId: fixture.session.id,
+      sessionStart: (session ?? fixture.session).startedAt,
+      sessionEnd: (session ?? fixture.session).endedAt,
+    ),
+  );
+}
 
 Future<String> snapshotRouteEditTables(String path) async {
   ensureSqfliteFfi();

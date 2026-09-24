@@ -1,6 +1,6 @@
 import 'walk_session.dart';
 
-enum RouteExclusionReason { vehicle }
+enum RouteExclusionReason { vehicle, highSpeed }
 
 class RouteExclusion {
   factory RouteExclusion({

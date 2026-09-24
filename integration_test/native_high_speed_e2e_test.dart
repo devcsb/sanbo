@@ -9,7 +9,6 @@ import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/models/session_warning.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
-import 'package:sanbo/domain/pipeline/segment_merger.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/features/intro/intro_providers.dart';
 import 'package:sanbo/platform/location/geolocator_location_engine.dart';
@@ -103,6 +102,7 @@ void main() {
       expect(state.isTracking, isTrue, reason: state.errorMessage);
       expect(state.validSampleCount, greaterThanOrEqualTo(5));
       expect(state.liveDistanceM, greaterThan(300));
+      final beforeStopDistance = state.liveDistanceM;
       expect(state.activeWarning?.kind, SessionWarningKind.highSpeed);
       // Foreground high-speed warnings stay in-app and deliberately suppress
       // a system notification. Background publication is covered by Android
@@ -116,40 +116,29 @@ void main() {
       trackingStarted = false;
       expect(ended, isNotNull);
       expect(ended!.status, SessionStatus.completed);
-      expect(ended.totalDistanceM, greaterThan(300));
+      // Completion applies the 10 km/h cleanup policy to trusted route
+      // windows, so the stored walking total is intentionally reduced while
+      // raw samples remain available for a reversible restore.
+      expect(ended.totalDistanceM, lessThan(beforeStopDistance));
       expect((await repo.listCompleted()), hasLength(1));
 
-      final windows = await repo.getWindows(ended.id);
-      final segments = SegmentMerger().merge(
-        windows,
-        sessionId: ended.id,
-        sessionStart: ended.startedAt,
-        sessionEnd: ended.endedAt,
-      );
-      final candidate = segments.firstWhere(
-        (segment) => segment.durationS > 0 && segment.distanceM > 0,
-      );
-      final beforeExclusion = (await repo.getSession(ended.id))!;
-      final exclusion = await repo.excludeRouteSegment(
-        sessionId: ended.id,
-        segment: candidate,
-        reason: RouteExclusionReason.vehicle,
-      );
-      final afterExclusion = (await repo.getSession(ended.id))!;
+      final exclusions = await repo.getRouteExclusions(ended.id);
+      expect(exclusions, isNotEmpty);
       expect(
-        afterExclusion.totalDistanceM,
-        lessThan(beforeExclusion.totalDistanceM ?? double.infinity),
+        exclusions.every(
+          (item) => item.reason == RouteExclusionReason.highSpeed,
+        ),
+        isTrue,
       );
-
-      await repo.restoreRouteExclusion(
-        sessionId: ended.id,
-        exclusionId: exclusion.id,
-      );
+      expect(await repo.getSamples(ended.id), isNotEmpty);
+      for (final exclusion in exclusions) {
+        await repo.restoreRouteExclusion(
+          sessionId: ended.id,
+          exclusionId: exclusion.id,
+        );
+      }
       final restored = (await repo.getSession(ended.id))!;
-      expect(
-        restored.totalDistanceM,
-        closeTo(beforeExclusion.totalDistanceM ?? 0, 1e-6),
-      );
+      expect(restored.totalDistanceM, greaterThan(300));
     },
   );
 }

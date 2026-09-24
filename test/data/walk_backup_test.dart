@@ -7,6 +7,7 @@ import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
+import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/services/app_backup.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
@@ -398,6 +399,29 @@ void main() {
         )).every((window) => window.userExclusionId == null),
         isTrue,
       );
+    },
+  );
+
+  test(
+    'backup v2 preserves the automatic high-speed exclusion reason',
+    () async {
+      final source = await openTestRepository();
+      final target = await openTestRepository();
+      addTearDown(source.close);
+      addTearDown(target.close);
+      final fixture = await seedCompletedTwoMinuteWalk(source);
+      final exclusion = await source.excludeRouteSegment(
+        sessionId: fixture.session.id,
+        segment: fixture.segments.last,
+        reason: RouteExclusionReason.highSpeed,
+      );
+
+      await target.importBackupJson(await source.createBackupJson());
+
+      final restored = await target.getRouteExclusions(fixture.session.id);
+      expect(restored, hasLength(1));
+      expect(restored.single.id, exclusion.id);
+      expect(restored.single.reason, RouteExclusionReason.highSpeed);
     },
   );
 

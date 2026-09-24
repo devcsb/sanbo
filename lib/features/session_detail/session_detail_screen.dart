@@ -271,6 +271,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                     sessionStart: session.startedAt,
                     sessionEnd: session.endedAt,
                   );
+            final hasAutomaticHighSpeedExclusion = data.exclusions.any(
+              (exclusion) => exclusion.reason == RouteExclusionReason.highSpeed,
+            );
             final playbackIndex = playbackPoints.isEmpty
                 ? 0
                 : _playbackIndex < 0
@@ -305,6 +308,29 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                     title: dateFmt.format(session.startedAt),
                     description: '경로와 활동 흐름을 차분히 돌아보세요.',
                   ),
+                  if (hasAutomaticHighSpeedExclusion) ...[
+                    const SizedBox(height: 16),
+                    SoftPanel(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(
+                            Icons.auto_awesome_outlined,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              '시속 10km 이상으로 감지된 구간은 산책에서 자동 제외했어요.',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   const SectionLabel('산책 경로'),
                   KeyedSubtree(

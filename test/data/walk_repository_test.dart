@@ -5,6 +5,7 @@ import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
+import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/pipeline/segment_merger.dart';
 import 'package:sanbo/domain/pipeline/geo.dart';
@@ -36,6 +37,270 @@ void main() {
     await repo.insertSamples(session.id, [sample]);
 
     expect(await repo.getSamples(session.id), hasLength(1));
+  });
+
+  test(
+    'finalization automatically excludes route minutes at 10 km/h',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime.utc(2026, 9, 1, 9);
+      final session = await repo.startSession(startedAt: start);
+      const degreesPerMeter = 1 / 111320.0;
+      final samples = [
+        for (var second = 0; second <= 120; second += 30)
+          LocationSample(
+            timestamp: start.add(Duration(seconds: second)),
+            latitude: 37.5 + second * 3 * degreesPerMeter,
+            longitude: 127,
+            accuracyM: 5,
+          ),
+      ];
+      final pipeline = SessionPipeline();
+      final result = pipeline.process(
+        session: session,
+        rawSamples: samples,
+        endedAt: start.add(const Duration(minutes: 2)),
+      );
+
+      await repo.finalizeSession(
+        session: session,
+        samples: result.filteredSamples,
+        windows: result.windows,
+        endedAt: start.add(const Duration(minutes: 2)),
+        totalDistanceM: result.metrics.totalDistanceM,
+        durationS: result.metrics.durationS,
+        movingTimeS: result.metrics.movingTimeS,
+        stationaryTimeS: result.metrics.stationaryTimeS,
+        avgSpeedMps: result.metrics.avgSpeedMps,
+        validSampleCount: result.metrics.validSampleCount,
+        medianAccuracyM: result.metrics.medianAccuracyM,
+      );
+
+      final exclusions = await repo.getRouteExclusions(session.id);
+      expect(exclusions, hasLength(1));
+      expect(exclusions.single.reason, RouteExclusionReason.highSpeed);
+      expect(exclusions.single.startAt, start);
+      expect(exclusions.single.endAt, start.add(const Duration(minutes: 2)));
+      expect((await repo.getSession(session.id))!.totalDistanceM, 0);
+      expect(
+        (await repo.getWindows(
+          session.id,
+        )).every((window) => window.userExclusionId == exclusions.single.id),
+        isTrue,
+      );
+      expect(await repo.getSamples(session.id), hasLength(samples.length));
+
+      await repo.restoreRouteExclusion(
+        sessionId: session.id,
+        exclusionId: exclusions.single.id,
+      );
+      final restored = await repo.getSession(session.id);
+      expect(await repo.getRouteExclusions(session.id), isEmpty);
+      expect(restored!.durationS, result.metrics.durationS);
+      expect(
+        restored.totalDistanceM,
+        closeTo(result.metrics.totalDistanceM, 0.001),
+      );
+      expect(
+        (await repo.getWindows(
+          session.id,
+        )).every((window) => window.userExclusionId == null),
+        isTrue,
+      );
+      expect(await repo.getSamples(session.id), hasLength(samples.length));
+    },
+  );
+
+  test(
+    'restoring an automatic exclusion then confirming walking keeps it included',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime.utc(2026, 9, 1, 9, 30);
+      final session = await repo.startSession(startedAt: start);
+      const degreesPerMeter = 1 / 111320.0;
+      final samples = [
+        for (var second = 0; second <= 60; second += 20)
+          LocationSample(
+            timestamp: start.add(Duration(seconds: second)),
+            latitude: 37.5 + second * 3 * degreesPerMeter,
+            longitude: 127,
+            accuracyM: 5,
+          ),
+      ];
+      final pipeline = SessionPipeline();
+      final result = pipeline.process(
+        session: session,
+        rawSamples: samples,
+        endedAt: start.add(const Duration(minutes: 1)),
+      );
+      await repo.finalizeSession(
+        session: session,
+        samples: result.filteredSamples,
+        windows: result.windows,
+        endedAt: start.add(const Duration(minutes: 1)),
+        totalDistanceM: result.metrics.totalDistanceM,
+        durationS: result.metrics.durationS,
+        movingTimeS: result.metrics.movingTimeS,
+        stationaryTimeS: result.metrics.stationaryTimeS,
+        avgSpeedMps: result.metrics.avgSpeedMps,
+        validSampleCount: result.metrics.validSampleCount,
+      );
+
+      final exclusion = (await repo.getRouteExclusions(session.id)).single;
+      final beforeSamples = _sampleSnapshot(await repo.getSamples(session.id));
+      await repo.restoreRouteExclusion(
+        sessionId: session.id,
+        exclusionId: exclusion.id,
+      );
+
+      final restoredWindow = (await repo.getWindows(session.id)).single;
+      await repo.updateWindowUserLabel(
+        sessionId: session.id,
+        windowStart: restoredWindow.windowStart,
+        userLabel: ActivityLabel.walkBrisk,
+      );
+
+      expect(await repo.getRouteExclusions(session.id), isEmpty);
+      expect(
+        (await repo.getSession(session.id))!.totalDistanceM,
+        closeTo(result.metrics.totalDistanceM, 0.001),
+      );
+      expect(_sampleSnapshot(await repo.getSamples(session.id)), beforeSamples);
+    },
+  );
+
+  test(
+    'changing a completed segment to vehicle automatically excludes it',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final start = DateTime.utc(2026, 9, 1, 10);
+      final session = await repo.startSession(startedAt: start);
+      final samples = [
+        for (var second = 0; second <= 60; second += 30)
+          LocationSample(
+            timestamp: start.add(Duration(seconds: second)),
+            latitude: 37.5 + second * 0.8 / 111320.0,
+            longitude: 127,
+            accuracyM: 5,
+          ),
+      ];
+      final pipeline = SessionPipeline();
+      final result = pipeline.process(
+        session: session,
+        rawSamples: samples,
+        endedAt: start.add(const Duration(minutes: 1)),
+      );
+      await repo.finalizeSession(
+        session: session,
+        samples: result.filteredSamples,
+        windows: result.windows,
+        endedAt: start.add(const Duration(minutes: 1)),
+        totalDistanceM: result.metrics.totalDistanceM,
+        durationS: result.metrics.durationS,
+        movingTimeS: result.metrics.movingTimeS,
+        stationaryTimeS: result.metrics.stationaryTimeS,
+        avgSpeedMps: result.metrics.avgSpeedMps,
+        validSampleCount: result.metrics.validSampleCount,
+        medianAccuracyM: result.metrics.medianAccuracyM,
+      );
+      final window = (await repo.getWindows(session.id)).single;
+
+      await repo.updateWindowUserLabel(
+        sessionId: session.id,
+        windowStart: window.windowStart,
+        userLabel: ActivityLabel.vehicle,
+      );
+
+      final exclusions = await repo.getRouteExclusions(session.id);
+      expect(exclusions, hasLength(1));
+      expect(exclusions.single.reason, RouteExclusionReason.vehicle);
+      expect(
+        (await repo.getWindows(session.id)).single.userExclusionId,
+        exclusions.single.id,
+      );
+      expect((await repo.getSession(session.id))!.totalDistanceM, 0);
+      expect(await repo.getSamples(session.id), hasLength(samples.length));
+    },
+  );
+
+  test(
+    'bulk vehicle label updates automatically exclude the whole segment',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final fixture = await seedCompletedTwoMinuteWalk(repo);
+      final beforeSamples = _sampleSnapshot(
+        await repo.getSamples(fixture.session.id),
+      );
+
+      await repo.updateWindowsUserLabel(
+        sessionId: fixture.session.id,
+        windowStarts: fixture.windows
+            .map((window) => window.windowStart)
+            .toList(),
+        userLabel: ActivityLabel.vehicle,
+      );
+
+      final exclusions = await repo.getRouteExclusions(fixture.session.id);
+      expect(exclusions, hasLength(1));
+      expect(exclusions.single.reason, RouteExclusionReason.vehicle);
+      expect(
+        (await repo.getWindows(
+          fixture.session.id,
+        )).every((window) => window.userExclusionId == exclusions.single.id),
+        isTrue,
+      );
+      expect((await repo.getSession(fixture.session.id))!.totalDistanceM, 0);
+      expect(
+        _sampleSnapshot(await repo.getSamples(fixture.session.id)),
+        beforeSamples,
+      );
+    },
+  );
+
+  test('completeSession also applies automatic speed exclusions', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final start = DateTime.utc(2026, 9, 1, 11);
+    final session = await repo.startSession(startedAt: start);
+    const degreesPerMeter = 1 / 111320.0;
+    final samples = [
+      for (var second = 0; second <= 60; second += 20)
+        LocationSample(
+          timestamp: start.add(Duration(seconds: second)),
+          latitude: 37.5 + second * 3 * degreesPerMeter,
+          longitude: 127,
+          accuracyM: 5,
+        ),
+    ];
+    final pipeline = SessionPipeline();
+    final result = pipeline.process(
+      session: session,
+      rawSamples: samples,
+      endedAt: start.add(const Duration(minutes: 1)),
+    );
+    await repo.insertSamples(session.id, result.filteredSamples);
+    await repo.replaceWindows(session.id, result.windows);
+
+    final completed = await repo.completeSession(
+      sessionId: session.id,
+      endedAt: start.add(const Duration(minutes: 1)),
+      totalDistanceM: result.metrics.totalDistanceM,
+      durationS: result.metrics.durationS,
+      movingTimeS: result.metrics.movingTimeS,
+      stationaryTimeS: result.metrics.stationaryTimeS,
+      avgSpeedMps: result.metrics.avgSpeedMps,
+      validSampleCount: result.metrics.validSampleCount,
+    );
+
+    expect(completed.totalDistanceM, 0);
+    expect(
+      (await repo.getRouteExclusions(session.id)).single.reason,
+      RouteExclusionReason.highSpeed,
+    );
   });
 
   test('new sessions persist recoverable duration deadlines', () async {
@@ -550,7 +815,7 @@ void main() {
       await repo.updateWindowUserLabel(
         sessionId: session.id,
         windowStart: result.windows.first.windowStart,
-        userLabel: ActivityLabel.vehicle,
+        userLabel: ActivityLabel.strollSlow,
       );
       final windows = await repo.getWindows(session.id);
       final segment = pipeline.segmentMerger
@@ -744,7 +1009,7 @@ void main() {
     await repo.updateWindowUserLabel(
       sessionId: session.id,
       windowStart: start.add(const Duration(minutes: 1)),
-      userLabel: ActivityLabel.vehicle,
+      userLabel: ActivityLabel.strollSlow,
     );
     final windows = await repo.getWindows(session.id);
     expect(windows.first.distanceM, 0);
@@ -1348,7 +1613,10 @@ ORDER BY started_at ASC
       longitude: 126.978,
     );
     expect(nearby?.id, place.id);
-    expect((await repo.listPlaces()).map((item) => item.id), contains(place.id));
+    expect(
+      (await repo.listPlaces()).map((item) => item.id),
+      contains(place.id),
+    );
 
     await repo.deletePlace(place.id);
     final unlinked = await repo.getWindows(session.id);

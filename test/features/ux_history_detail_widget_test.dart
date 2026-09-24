@@ -8,6 +8,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
+import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/route_exclusion.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/pipeline/segment_merger.dart';
@@ -563,6 +564,70 @@ void main() {
       );
     },
   );
+
+  testWidgets('automatic high-speed exclusion explains the filtered route', (
+    tester,
+  ) async {
+    late WalkRepository repo;
+    late String sessionId;
+    await tester.runAsync(() async {
+      repo = await openTestRepository();
+      final start = DateTime.utc(2026, 9, 1, 9);
+      final session = await repo.startSession(startedAt: start);
+      const degreesPerMeter = 1 / 111320.0;
+      final samples = [
+        for (var second = 0; second <= 120; second += 30)
+          LocationSample(
+            timestamp: start.add(Duration(seconds: second)),
+            latitude: 37.5 + second * 3 * degreesPerMeter,
+            longitude: 127,
+            accuracyM: 5,
+          ),
+      ];
+      final pipeline = SessionPipeline();
+      final result = pipeline.process(
+        session: session,
+        rawSamples: samples,
+        endedAt: start.add(const Duration(minutes: 2)),
+      );
+      await repo.finalizeSession(
+        session: session,
+        samples: result.filteredSamples,
+        windows: result.windows,
+        endedAt: start.add(const Duration(minutes: 2)),
+        totalDistanceM: result.metrics.totalDistanceM,
+        durationS: result.metrics.durationS,
+        movingTimeS: result.metrics.movingTimeS,
+        stationaryTimeS: result.metrics.stationaryTimeS,
+        avgSpeedMps: result.metrics.avgSpeedMps,
+        validSampleCount: result.metrics.validSampleCount,
+        medianAccuracyM: result.metrics.medianAccuracyM,
+      );
+      sessionId = session.id;
+    });
+    addTearDown(() => tester.runAsync(repo.close));
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(detailApp(repo, sessionId));
+    await settle(tester);
+    await settle(tester);
+
+    expect(find.text('시속 10km 이상으로 감지된 구간은 산책에서 자동 제외했어요.'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('산책에서 제외됨'),
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    expect(find.text('산책에서 제외됨'), findsWidgets);
+  });
 
   testWidgets('a non-vehicle segment still offers manual exclusion', (
     tester,

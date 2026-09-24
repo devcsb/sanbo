@@ -16,6 +16,7 @@ import '../domain/pipeline/geo.dart';
 import '../domain/pipeline/segment_merger.dart';
 import '../domain/pipeline/session_rollup.dart';
 import '../domain/services/app_backup.dart';
+import '../domain/services/automatic_route_exclusion.dart';
 import '../domain/services/daily_walk_stats.dart';
 import '../domain/services/local_calendar.dart' as calendar;
 import '../domain/services/session_deadline.dart';
@@ -31,6 +32,7 @@ class WalkRepository {
   final Database _db;
   final _uuid = const Uuid();
   final _pipeline = SessionPipeline();
+  static const _automaticExclusionPolicy = AutomaticRouteExclusionPolicy();
   var _completedTimestampsCanonical = false;
 
   static Future<WalkRepository> open({String? path}) async {
@@ -427,6 +429,37 @@ WHERE status = ?
       validSampleCount: validSampleCount,
       medianAccuracyM: medianAccuracyM,
     );
+    final automaticExclusions = _materializeAutomaticExclusions(
+      session: ended,
+      windows: windows,
+      segments: SegmentMerger().merge(
+        windows,
+        sessionId: session.id,
+        sessionStart: session.startedAt,
+        sessionEnd: endedAt,
+      ),
+    );
+    final recalculation = automaticExclusions.isEmpty
+        ? null
+        : _pipeline.recalculateCompleted(
+            session: ended,
+            storedSamples: samples,
+            exclusions: automaticExclusions,
+            previousWindows: windows,
+          );
+    final persistedWindows = recalculation?.windows ?? windows;
+    final persistedMetrics = recalculation?.metrics;
+    final persistedSession = persistedMetrics == null
+        ? ended
+        : ended.copyWith(
+            totalDistanceM: persistedMetrics.totalDistanceM,
+            durationS: persistedMetrics.durationS,
+            movingTimeS: persistedMetrics.movingTimeS,
+            stationaryTimeS: persistedMetrics.stationaryTimeS,
+            avgSpeedMps: persistedMetrics.avgSpeedMps,
+            validSampleCount: persistedMetrics.validSampleCount,
+            medianAccuracyM: persistedMetrics.medianAccuracyM,
+          );
     await _db.transaction((txn) async {
       await txn.delete(
         'location_samples',
@@ -443,20 +476,24 @@ WHERE status = ?
       }
       await sampleBatch.commit(noResult: true);
 
+      for (final exclusion in automaticExclusions) {
+        await txn.insert('route_exclusions', _exclusionToRow(exclusion));
+      }
+
       await txn.delete(
         'minute_windows',
         where: 'session_id = ?',
         whereArgs: [session.id],
       );
       final windowBatch = txn.batch();
-      for (final w in windows) {
+      for (final w in persistedWindows) {
         windowBatch.insert('minute_windows', _windowToRow(session.id, w));
       }
       await windowBatch.commit(noResult: true);
 
       final updated = await txn.update(
         'sessions',
-        _sessionToRow(ended),
+        _sessionToRow(persistedSession),
         where: 'id = ?',
         whereArgs: [session.id],
       );
@@ -464,7 +501,7 @@ WHERE status = ?
         throw StateError('산책 완료 상태를 저장하지 못했습니다');
       }
     });
-    return ended;
+    return persistedSession;
   }
 
   /// Replace all samples for a session (after filter flags are known).
@@ -896,8 +933,9 @@ WHERE w.session_id = ?
       if (updated != 1) {
         throw StateError('산책 완료 상태를 저장하지 못했습니다');
       }
+      await _applyAutomaticExclusionsIn(txn, sessionId);
     });
-    return ended;
+    return (await getSession(sessionId)) ?? ended;
   }
 
   Future<void> updateWindowUserLabel({
@@ -916,6 +954,7 @@ WHERE w.session_id = ?
         note: note,
         confirmed: confirmed,
       );
+      await _applyAutomaticExclusionsIn(txn, sessionId);
     });
   }
 
@@ -1005,7 +1044,84 @@ WHERE w.session_id = ?
           throw StateError('시간 구간을 찾을 수 없습니다');
         }
       }
+      await _applyAutomaticExclusionsIn(txn, sessionId);
     });
+  }
+
+  List<RouteExclusion> _materializeAutomaticExclusions({
+    required WalkSession session,
+    required List<MinuteWindow> windows,
+    required List<ActivitySegment> segments,
+    Iterable<RouteExclusion> existingExclusions = const [],
+  }) {
+    final candidates = _automaticExclusionPolicy.detect(
+      windows: windows,
+      segments: segments,
+      sessionStart: session.startedAt,
+      sessionEnd: session.endedAt ?? session.startedAt,
+      existingExclusions: existingExclusions,
+    );
+    final createdAt = DateTime.now();
+    return [
+      for (final candidate in candidates)
+        RouteExclusion(
+          id: _uuid.v4(),
+          sessionId: session.id,
+          startAt: candidate.startAt,
+          endAt: candidate.endAt,
+          reason: candidate.reason,
+          createdAt: createdAt,
+        ),
+    ];
+  }
+
+  Future<void> _applyAutomaticExclusionsIn(
+    DatabaseExecutor executor,
+    String sessionId,
+  ) async {
+    final sessionRows = await executor.query(
+      'sessions',
+      where: 'id = ?',
+      whereArgs: [sessionId],
+      limit: 1,
+    );
+    if (sessionRows.isEmpty) return;
+    final session = _sessionFromRow(sessionRows.single);
+    if (session.status != SessionStatus.completed || session.endedAt == null) {
+      return;
+    }
+
+    final snapshot = await _loadRouteEditSnapshot(executor, sessionId);
+    final segments = SegmentMerger().merge(
+      snapshot.windows,
+      sessionId: session.id,
+      sessionStart: session.startedAt,
+      sessionEnd: session.endedAt,
+    );
+    final automatic = _materializeAutomaticExclusions(
+      session: session,
+      windows: snapshot.windows,
+      segments: segments,
+      existingExclusions: snapshot.exclusions,
+    );
+    if (automatic.isEmpty) return;
+
+    final result = _pipeline.recalculateCompleted(
+      session: session,
+      storedSamples: snapshot.samples,
+      exclusions: [...snapshot.exclusions, ...automatic],
+      previousWindows: snapshot.windows,
+    );
+    for (final exclusion in automatic) {
+      await executor.insert('route_exclusions', _exclusionToRow(exclusion));
+    }
+    await _replaceWindowsIn(
+      executor,
+      sessionId,
+      result.windows,
+      expectedExistingCount: snapshot.windows.length,
+    );
+    await _updateRollupIn(executor, session, result.metrics);
   }
 
   /// Find a previously user-confirmed place close enough to reuse.
