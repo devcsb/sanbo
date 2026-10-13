@@ -4,6 +4,7 @@
 |---|---|
 | 문서 ID | TRD-SANBO-MAINT-2026-10 |
 | 작성일 | 2026-10-13 |
+| 보강일 | 2026-10-14, 시간 보존과 과거 부분 제외 처리 경계 |
 | 상태 | 사용자 검토용 설계. 제품 코드 변경 전 |
 | 기준 | `v0.9.1`, SQLite v6, 전체 백업 v2, 세션 export v2 |
 | 관련 문서 | [PRD](PRD_MAINTENANCE_2026-10.md), [1차 설계](superpowers/specs/2026-10-13-measurement-consistency-and-backup-design.md), [근거](superpowers/verification/2026-10-13-maintenance-audit.md) |
@@ -155,6 +156,29 @@ provider speed 0, 정확도 결측, 도심 신호를 함께 평가한다. 단순
 여부를 확인하고, 재계산 시 사용자 라벨/메모/장소/제외 정보를 보존하는 transaction이
 필요하다. 자동 제외가 과거 사용자 수정 기록에 다시 적용되지 않게 한다.
 
+내부 관측 시간은 microseconds로 합산하고 표시/정수 저장 시 한 번만 변환한다.
+이동과 정지 시간을 각자 반올림하면 29.5초+30.5초가 30초+31초로 늘어난다.
+정수 시간을 보존해야 하는 기존 필드에는 전체 관측 정수 예산 안에서 잔여 초를
+배분하는 규칙이 필요하다. 두 부분 분이 각각 최소1초인 기존 계약과 실제1초
+총시간은 동시에 정수 합계로 일치할 수 없다. 기존 행을 임의로0초로 만들지 않고
+정확한 관측 시간 필드를 별도로 전달해 평균/합계는 그 값에서 계산한다. 필드와
+schema/backup migration은 후속 측정 설계에서 함께 확정한다.
+
+### 3.4 과거 부분 제외, MR-15
+
+백업 v2는 분 안의 부분/복수 제외를 허용한다. 현재 aggregator는 하나의 제외가
+분과 겹치면 그 분의 모든 거리와 시간을 excluded row로 바꾸지만 rollup은
+실제 범위만 뺀다. 20초 제외 fixture에서 session은35m/40초, minute row는0m와
+60초 제외가 된다. 기존 테스트의 대표 exclusion ID 확인만으로 일관성을 증명할
+수 없다.
+
+새로 만드는 분 단위 제외 계약은 유지하되, 과거 부분 제외는 실제 포함 선분과
+관측 시간을 집계한다. 표시용 범위는 원래 start/end를 쓰고 단일 분 대표 ID가
+전체 제외를 뜻한다고 해석하지 않는다. 하나의 분에 복수 ID가 있으면 각각을
+사용자가 취소할 수 있어야 한다. 호환을 위해 분 전체로 자동 확장하거나 과거
+원본/제외 행을 삭제하지 않는다. 자세한 표시 모델과 이행은 후속 측정 설계에
+포함한다.
+
 ## 4. 스토어와 배포 경계, MR-07, MR-12~13
 
 - 원격 main은 이미 공개한 v0.9.1의 ancestor다. 자동 force-push를 쓰지 않는다.
@@ -186,11 +210,12 @@ provider speed 0, 정확도 결측, 도심 신호를 함께 평가한다. 단순
 | MR-07 | release gate + Git refs | main/tag/CI SHA, AAB/각 APK versionCode, cert, checksum, 실제 게시 조회 |
 | MR-08 | 후속 측정용 route reducer | 정지/느림/코너/빈번한 callback과 실기기 거리 오차 |
 | MR-09 | 후속 자동 제외 정책 | 단일 spike, 지속 고속, 낮은 품질, 사용자 라벨, 제외 취소 |
-| MR-10 | 후속 window/segment time contract | 이동 10초+60초 가중, 정지/결측 보존, 반올림 시간 보존 |
+| MR-10 | 후속 window/segment time contract | 이동 10초+60초 가중, 정지/결측 보존, 29.5초+30.5초 반올림과 분 경계1초 기록 |
 | MR-11 | 후속 상세 지표와 copy | 평균 분모, GPS 공백, 추정 오차 표시와 export 일치 |
 | MR-12 | Android rationale/usage alias | 두 OS 진입점, 동일 정책 본문, 일반 launch 유지 |
 | MR-13 | 물리 기기 QA | Galaxy/Pixel/iPhone 야외/화면 잠금/배터리 matrix |
 | MR-14 | 후속 날짜 목록/CTA 접근성 | 선택 날짜 가시성, 큰 글자, 실제 VoiceOver/TalkBack focus |
+| MR-15 | 후속 부분 제외 집계와 표시 | backup v2 부분/복수 제외, 20초 제외 시35m/40초 일치, 개별 복원과 사용자 메타데이터 유지 |
 
 1차 종료 게이트는 새 회귀 테스트, analyzer, 전체 Flutter 테스트, Android/iOS native
 테스트, Android debug/release 빌드, 문서 검증, `git diff --check`다. 모바일

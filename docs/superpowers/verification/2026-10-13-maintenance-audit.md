@@ -180,3 +180,35 @@ Android accuracy는 추정 반경이고 provider speed는 GNSS Doppler로 좌표
 
 작업 중 product dependency, DB, 기존 태그, 외부 release는 변경하지 않았다.
 현재 작성한 PRD/TRD/설계는 사용자 검토 전 제안이다.
+
+## 8. 2026-10-14 추가 경계 검토
+
+계속 작업 시 authoritative state를 다시 확인했다. 브랜치는 clean한 `9c370d2`,
+원격 main은 여전히 `b9fb762`, 최신 공개 release는 `v0.9.1`이었다. 기존 전체
+품질 gate를 반복하지 않고 새로운 경계 probe만 실행했다. 설계 승인 응답은
+없었으므로 제품 코드 및 구현 계획은 변경하지 않았다.
+
+별도 `/tmp` Dart 프로그램으로 현재 SessionPipeline의 process/recalculateCompleted를
+호출했다. 좌표는 앞서 사용한 적도 위도 변환, 정확도5m, 시작 UTC는
+2026-10-14T00:00:00Z, session zone은 Asia/Seoul이다.
+
+| probe | 입력 | 결과 |
+|---|---|---|
+| 개별 시간 반올림 | 0초0m, 29.5초29.5m, 60초29.5m | 총60초, 이동30초, 정지31초, 합계61초 |
+| 분 경계 부분 시간 | 00:00:59.5부터1초 동안2m 이동 | 총1초, minute.durationS는1초/1초, 거리 합계는2m로 일치 |
+| 과거 부분 제외 | 5초마다5m씩1분 이동, 10~30초만 제외 | 실제 제외20초, 세션 총시간40초/거리35m, 분 행 거리0m/제외60초 |
+
+첫 반례의 원인은 SessionRollup이 movingSeconds와 stationarySeconds를 별도로
+round하는 것이다. 두 번째는 WindowAggregator가 양수 부분 분을 각각 올림하는
+기존 정수 계약에서 생긴다. 정확한 관측 시간과 표시용 최소 정수 시간의 계약을
+분리하지 않으면 모든 부분 분을 양수로 유지하면서 합계도 보존할 수 없다.
+
+세 번째는 부분 제외가 분과 겹친다는 이유만으로 _excludedWindow를 반환하는
+데서 생긴다. SessionRollup과 RoutePartitioner는 실제 제외 범위를 사용하는 반면,
+타임라인은 그 분 전체를0거리/제외로 보여준다. backup v2 import는 부분/복수
+제외를 지원하고 관련 테스트는 대표 ID 보존을 검사하므로 실제 지원하는 경계다.
+새 분 단위 제외 사용자 흐름 전체의 오류라고 일반화하지 않고 과거 백업 호환
+문제로 분류한다.
+
+MR-10에 반올림 시간 보존을 보강하고 MR-15에 부분 제외 범위와 통계/표시 일치를
+추가했다. 후속 측정 설계 범위이며 현재 1차 설계의 승인 상태를 바꾸지 않는다.
