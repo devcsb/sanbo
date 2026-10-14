@@ -9,7 +9,8 @@
 |------|------|
 | [PRD_MAINTENANCE_2026-10.md](./PRD_MAINTENANCE_2026-10.md) | 2026년 10월 배포 대조, 측정 신뢰성, 백업, 상태 안내 개선 요구 |
 | [TRD_MAINTENANCE_2026-10.md](./TRD_MAINTENANCE_2026-10.md) | 위 요구의 구현 경계, 단계 구분과 검증 기준 |
-| [1차 유지보수 설계](./superpowers/specs/2026-10-13-measurement-consistency-and-backup-design.md) | 사용자 검토용 백업과 측정 표시 일관성 설계 |
+| [1차 유지보수 설계](./superpowers/specs/2026-10-13-measurement-consistency-and-backup-design.md) | 2026-10-14 승인된 백업과 측정 표시 일관성 설계 |
+| [1차 유지보수 구현 계획](./superpowers/plans/2026-10-14-maintenance-stage1.md) | 측정 표시, 모바일 백업, 기존 설치 업데이트와 릴리즈 검증 순서. 사용자 계획 검토 전 |
 | [유지보수 검토 근거](./superpowers/verification/2026-10-13-maintenance-audit.md) | 공개 릴리즈 체크섬, 439개 테스트와 실제 오류 재현 결과 |
 | [PRD.md](./PRD.md) | 제품 요구, 시나리오, FR/NFR, MVP, 재검증 |
 | [PRD_ARCHITECTURE_UX_BATTERY_V0.9.md](./PRD_ARCHITECTURE_UX_BATTERY_V0.9.md) | 아키텍처·배터리·회상 UX 기준선, 벤치마크 근거, 실기기 검증 계획 |
