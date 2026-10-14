@@ -5,7 +5,7 @@
 | 문서 ID | TRD-SANBO-MAINT-2026-10 |
 | 작성일 | 2026-10-13 |
 | 보강일 | 2026-10-14, 시간 보존과 과거 부분 제외 처리 경계 |
-| 상태 | 1차 설계 사용자 승인, 구현 계획 검토 전. 후속 측정 설계는 제안 단계 |
+| 상태 | 1차 설계와 구현 계획 승인, 후보 구현/검증 진행. 후속 측정과 저장 설계는 제안 단계 |
 | 기준 | `v0.9.1`, SQLite v6, 전체 백업 v2, 세션 export v2 |
 | 관련 문서 | [PRD](PRD_MAINTENANCE_2026-10.md), [1차 설계](superpowers/specs/2026-10-13-measurement-consistency-and-backup-design.md), [근거](superpowers/verification/2026-10-13-maintenance-audit.md) |
 | 구현 계획 | [1차 통합 계획](superpowers/plans/2026-10-14-maintenance-stage1.md), 측정 표시 5개 작업과 모바일 백업 3개 작업, 릴리즈 통합 2개 작업 |
@@ -32,6 +32,13 @@ Geolocator -> LocationQualityPolicy -> SessionController incremental filter
 관리하지 않는 데서 생긴다. JSON export는 이미 존재하는 완료 평균 helper를
 쓰지 않는다. 작은 변위와 노이즈 문제는 1.5m의 선분별 하한 및 고속 단일 최고값
 정책에서 생기며, 1차 버그 수정과 별도로 다룬다.
+
+추가 반례 M-18은 `_isPersistableSample`이 잘못된 좌표 행을 버리면서 경로 단절도
+버리는 데서 생긴다. 저장을 시도한 0초0m/10초10m/20초위도91 중 앞의 두 행만
+남고, 복구 후30초30m/40초40m를 받으면40m로 집계한다. 동일 원본을 필터/분할하면
+10m+10m=20m다. 기존 SQL/백업의 유효 좌표 계약을 유지하면서 별도 단절 이벤트를
+보존할 설계가 필요하다. 유효하지 않은 좌표를 저장하거나 유효 좌표를 만들어 넣는
+수정으로 대체하지 않는다. MR-16과 계산 버전/백업 호환 설계에서 다룬다.
 
 ## 2. 1차 경계와 구현 설계
 

@@ -40,6 +40,8 @@ iOS Health Connect 설정 버튼을 숨깁니다. 모바일 백업은 파일 경
   malformed tail을 시험했습니다. malformed 경계를 process death 이후 보존할
   방법은 별도 저장 설계가 필요합니다. 1차에서 schema와 원본 좌표 계약을 바꾸지
   않았으며 이 한계를 완료된 해결로 주장하지 않습니다.
+  별도 probe에서 위도91 행을 저장 목록에서 버린 뒤 복구하면40m, 동일 원본을
+  바로 필터/분할하면20m임을 확인했습니다. PRD M-18/MR-16으로 추적합니다.
 - Flutter test의 real timer, offscreen/merged Semantics를 분리해 실제 widget
   callback의 시각을 검사했습니다. 실제 VoiceOver 포커스/발화는 별도 검증입니다.
 - 여러 파일 변경의 교차 검토, 실제 picker 왕복, 기존 설치 업데이트와 게시 확인이
