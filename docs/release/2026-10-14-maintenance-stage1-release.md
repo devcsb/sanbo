@@ -69,7 +69,7 @@ bundletool validate는 exit 0입니다. Google Play 접수 검증으로 일반�
 
 원격 main을 기존 공개 v0.9.1 커밋 `1368d45`로 non-force fast-forward했습니다.
 이후 CI는 [run 38501773934](https://github.com/devcsb/sanbo/actions/runs/38501773934)에서
-진행 중이며 성공으로 기록하지 않습니다. 신규 후보와 기존 게시 상태는 별개입니다.
+에서 커밋 `1368d45`의 CI가 성공했습니다. 신규 후보의 마지막 PR head CI와는 별개입니다.
 
 iOS 파일 왕복은 전용 iOS 26.5 simulator에서 취소 단계까지 실행했습니다. Mac 잠금으로
 CUA 조작을 할 수 없어 12분 뒤 timeout됐습니다. 실제 저장/취소/파일 재읽기 결과는
@@ -79,7 +79,7 @@ CUA 조작을 할 수 없어 12분 뒤 timeout됐습니다. 실제 저장/취소
 ## 초안 PR와 릴리즈
 
 [PR #1](https://github.com/devcsb/sanbo/pull/1)은 draft입니다.
-[0.9.2 초안 릴리즈](https://github.com/devcsb/sanbo/releases/tag/untagged-18727f0cbdefd278ba10)에도
+[0.9.2 초안 릴리즈](https://github.com/devcsb/sanbo/releases)에도
 검증한4개 산출물과 checksum만 올립니다. draft는 공개 게시 증거가 아닙니다.
 처음 준비한 c027b41/478개 후보에서 저자 검토의 늦은 좌표 문제를 수정했고,
 새 ddede22/479개 산출물로 교체합니다. 최종 CI head와 실제 기기 수용 게이트가
