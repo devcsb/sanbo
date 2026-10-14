@@ -1,12 +1,12 @@
 # 1차 유지보수 구현과 검증 기록
 
-제품 build SHA는 `c027b4195bbae2aa96766bc976f35b7f5ebca0cb`입니다. 이후 문서 commit과 binary build SHA를 구분합니다.
+제품 build SHA는 `ddede226e62532c4613707a92818d1fc7c615929`입니다. 이후 문서 commit과 binary build SHA를 구분합니다.
 [통합 계획](../plans/2026-10-14-maintenance-stage1.md),
 [릴리즈 증적](../../release/2026-10-14-maintenance-stage1-release.md)을 함께 봅니다.
 
 | 검사 | 결과 |
 |---|---|
-| 전체 품질 loop `--all-apk` | PASS, Flutter 478개, analyzer, debug/release/AAB, manifest, cert, hash, clean-tree |
+| 전체 품질 loop `--all-apk` | PASS, Flutter 479개, analyzer, debug/release/AAB, manifest, cert, hash, clean-tree |
 | 전체 native gate | PASS, Android JUnit 16개, iOS 26.5 XCTest 11개 |
 | APK 버전/서명 | 세 ABI의 versionCode 각각 증가, 기존 인증서 일치 |
 | AAB manifest/서명 | 0.9.2+16, SDK36, JAR 검증과 인증서 일치, bundletool validate exit0 |
@@ -53,3 +53,21 @@ iOS Health Connect 설정 버튼을 숨깁니다. 모바일 백업은 파일 경
 `integration-quality.log`, `integration-native.log`, `release-artifacts.json`,
 `native-summary.json`과 각 task의 RED/GREEN 로그를 남겼습니다.
 GitHub 문서의 PASS만으로 재실행 증거를 대신하지 않습니다.
+
+## 저자 검토에서 추가로 수정한 반례
+
+10초5m 위치를 받은 뒤5초2m 좌표가 늦게 도착하면 기존 증분 경계가 다음
+30초20m 선분까지 옮겨져 live5m/완료15m가 됐습니다. 새 회귀가5m로 실패하는
+것을 확인하고 거절된 늦은 좌표에 한해 공통 partitioner로 재계산했습니다.
+live/완료 모두15m이며 관련57개 테스트와 전체479개, 새 APK/AAB gate를
+통과했습니다. 최종 제품 build는 `ddede226e62532c4613707a92818d1fc7c615929`입니다.
+
+정상 순서 callback은 O(1)을 유지합니다. 늦은 좌표는5시간 상한의 buffer에서
+O(n log n) 재계산하며, 자주 발생하는 provider에는 후속 indexed reducer가
+필요합니다. Native 소스/의존성은 직전16/11개 gate 소스와 diff가 없습니다.
+
+저자 검토로 구현/취소/오류/stream close/경로와 최신성/시간대/export 경계를
+읽고 확인했습니다. 새로 확인한 늦은 좌표 불일치는 수정했습니다. 실제 picker,
+설치 데이터 보존과 독립 PR 검토는 미완료이므로 merge/publication 준비 완료로
+판정하지 않습니다. M-18과 측정 정책, 실제 스크린리더/물리 GPS는 후속 요구로
+유지합니다. 테스트와 문서로 그 항목을 완료한 것으로 대체하지 않습니다.

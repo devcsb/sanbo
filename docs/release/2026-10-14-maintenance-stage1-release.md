@@ -7,7 +7,7 @@
 | 대상 | Android 우선, minSdk 26, targetSdk 36 |
 | 공개 게시 | 미실행, 후보 준비 중 |
 | Google Play | 게시 여부 미확인, 신규 게시 미실행 |
-| build SHA | `c027b4195bbae2aa96766bc976f35b7f5ebca0cb` |
+| build SHA | `ddede226e62532c4613707a92818d1fc7c615929` |
 | 신규 태그 / PR CI | 준비 전, 현재 검증된 build와 구분 |
 | 기존 설치 업데이트 | 미실행 |
 | 실제 시스템 파일 왕복 | iOS 시도 후 UI 조작 불가로 timeout, Android 미실행 |
@@ -25,7 +25,7 @@
 - Android native unit tests 통과, 신규 파일 경계와 stream 테스트 5개 포함.
 - iPhone 17 Pro, iOS 26.5 simulator XCTest 11개 통과.
 - 실제 Flutter 백업 어댑터, 설정, codec 관련 26개 테스트 통과.
-- `c027b41`에서 전체 Flutter 478개, analyzer, Android debug/release APK와 AAB, 서명/체크섬/작업 트리 검사 통과.
+- `ddede22`에서 전체 Flutter 479개, analyzer, Android debug/release APK와 AAB, 서명/체크섬/작업 트리 검사 통과.
 - 같은 제품 소스의 최종 native gate에서 Android JUnit 16개와 iOS XCTest 11개 통과.
 
 각 묶음에 겹치는 기존 테스트가 있어 개수를 합산하지 않습니다. 과거 439개 baseline
@@ -53,10 +53,10 @@ ABI별 versionCode는 기본 16과 다르므로 같은 ABI의 v0.9.1보다 증�
 
 | 파일 | SHA-256 |
 |---|---|
-| `app-armeabi-v7a-release.apk` | `b10b71df2dcadbc28f26e20d3e5d03553ba52b1cccad0df08200bba3c5c87ba9` |
-| `app-arm64-v8a-release.apk` | `711b36398de490dab4ba948b27229b7749fef11c335f79cee9c90806a16c0b7f` |
-| `app-x86_64-release.apk` | `bfe72e47654ec5204713edb9e9a6a37d719bb6b0ae861cc429714f9b94668f34` |
-| `app-release.aab` | `cca3abfc22c4008f53989b0b7c61291e382b51767155da542274762fac345236` |
+| `app-armeabi-v7a-release.apk` | `c0b362ac43f0d38dfe47cdad2e05bf51147f0b98c48d3cc57c27e56f91b2bdb4` |
+| `app-arm64-v8a-release.apk` | `b53c2f8dc3546f154438934dbc2f795ce34dc95baefe7b060b4a9d1428b174ea` |
+| `app-x86_64-release.apk` | `88e8d8fe9b749da0bdeded1dc2afd559169ebcfda8fb95f5e5578a263a05b83e` |
+| `app-release.aab` | `8c8a5737edc543ed0b7a08a3ee792b9c92076f6a3411501e8f732b87f1846426` |
 
 APK versionCode는 armeabi-v7a 1015→1016, arm64-v8a 2015→2016,
 x86_64 4015→4016입니다. AAB는 16, 모든 targetSdk는 36이며 기존 인증서와
@@ -75,3 +75,12 @@ iOS 파일 왕복은 전용 iOS 26.5 simulator에서 취소 단계까지 실행�
 CUA 조작을 할 수 없어 12분 뒤 timeout됐습니다. 실제 저장/취소/파일 재읽기 결과는
 미검증입니다. Android 시스템 picker, 기존 설치의 기록 보존과 실제 VoiceOver/TalkBack도
 검증 대기입니다. 공개 게시 전 수용 기준을 충족해야 합니다.
+
+## 초안 PR와 릴리즈
+
+[PR #1](https://github.com/devcsb/sanbo/pull/1)은 draft입니다.
+[0.9.2 초안 릴리즈](https://github.com/devcsb/sanbo/releases/tag/untagged-18727f0cbdefd278ba10)에도
+검증한4개 산출물과 checksum만 올립니다. draft는 공개 게시 증거가 아닙니다.
+처음 준비한 c027b41/478개 후보에서 저자 검토의 늦은 좌표 문제를 수정했고,
+새 ddede22/479개 산출물로 교체합니다. 최종 CI head와 실제 기기 수용 게이트가
+남아 있습니다.
