@@ -105,7 +105,7 @@ void main() {
 
   test('body stream exception is sanitized before image loading', () async {
     final client = CartoTileClient(
-      MockClient.streaming((_, __) async {
+      MockClient.streaming((_, _) async {
         return http.StreamedResponse(
           Stream<List<int>>.error(
             http.ClientException('body failed: $uri', uri),
@@ -123,7 +123,7 @@ void main() {
   ) async {
     final pending = Completer<http.StreamedResponse>();
     final client = CartoTileClient(
-      MockClient.streaming((_, __) => pending.future),
+      MockClient.streaming((_, _) => pending.future),
     );
     addTearDown(client.close);
     final assertion = expectLater(

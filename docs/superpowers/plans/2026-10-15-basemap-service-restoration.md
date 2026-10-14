@@ -52,10 +52,10 @@
 **Interfaces**
 - `const cartoBaseTileUrlTemplate`은 기존 인증 없는 URL 문자열이다.
 - `String? cartoTileUrlTemplate(String key)`는 trim 후 빈 값이면 null, 아니면 base URL 뒤에 URL-encoded key query를 붙인다. `{s}/{z}/{x}/{y}` placeholder를 인코딩하지 않는다.
-- `CartoTileClient extends http.BaseClient`는 `CartoTileClient(http.Client delegate)`로 생성하고 delegate를 소유한다. `send(http.BaseRequest)`는 buffered StreamedResponse를 반환하고 `close()`는 delegate를 닫는다.
+- `CartoTileClient extends http.BaseClient`는 `CartoTileClient(http.Client delegate, {VoidCallback? onAuthenticationNotice})`로 생성하고 delegate를 소유한다. `send(http.BaseRequest)`는 buffered StreamedResponse를 반환하고 `close()`는 delegate를 닫는다. 확인된 HTTP200 안내는 callback으로 알리며 공급자 안내 이미지는 보존한다.
 - `CartoBasemapUnavailable implements Exception`의 toString은 `배경 지도 요청 실패`다. 원래 예외/URL/key를 포함하지 않는다.
 
-- [ ] Step1: URL과 실제 HTTP 경계 테스트를 추가한다. 실제 키 대신 다음 고정 문자열을 사용한다.
+- [x] Step1: URL과 실제 HTTP 경계 테스트를 추가한다. 실제 키 대신 다음 고정 문자열을 사용한다.
 
 ```dart
 test('key is encoded without changing tile placeholders', () {
@@ -65,24 +65,24 @@ test('key is encoded without changing tile placeholders', () {
   expect(url, endsWith('?key=a%26b%3Fx%3D%2B'));
 });
 
-test('HTTP200 authentication notice is unavailable', () async {
+test('HTTP200 authentication notice remains visible and reports status', () async {
   final notice = File('test/fixtures/carto-api-key-required.png').readAsBytesSync();
+  var reported = 0;
   final client = CartoTileClient(MockClient((_) async => http.Response.bytes(
     notice, 200, headers: {'etag': '"wm-da89c20e77c1-light"'},
-  )));
+  )), onAuthenticationNotice: () => reported++);
   addTearDown(client.close);
-  expect(
-    client.get(Uri.parse('https://a.basemaps.cartocdn.com/test?key=audit-test-key')),
-    throwsA(isA<CartoBasemapUnavailable>()),
-  );
+  final response = await client.get(Uri.parse('https://a.basemaps.cartocdn.com/test?key=audit-test-key'));
+  expect(response.bodyBytes, notice);
+  expect(reported, 1);
 });
 ```
 
 imports는 dart:io, flutter_test, 기존 http/http.dart 및 http/testing.dart와 새 helper다.
 fixture는 이미 저장한 `.superpowers/sdd/2026-10-14-maintenance-stage1/carto-invalid-key-response.bin`을 복사하고 PNG signature/크기/실제 안내 이미지를 대조한다.
 
-- [ ] Step2: `flutter test --no-pub test/shared/carto_basemap_test.dart`의 새 symbol 부재 RED를 확인한다.
-- [ ] Step3: URL과 전용 client를 구현한다. 기존 `http.Response.fromStream`으로 body를 한 번 모아 stream 오류도 이 경계에서 변환한다. 이후 renderer에는 같은 bytes를 전달하며 이미지 decode를 중복 수행하지 않는다.
+- [x] Step2: `flutter test --no-pub test/shared/carto_basemap_test.dart`의 새 symbol 부재 RED를 확인한다.
+- [x] Step3: URL과 전용 client를 구현한다. 기존 `http.Response.fromStream`으로 body를 한 번 모아 stream 오류도 이 경계에서 변환한다. 이후 renderer에는 같은 bytes를 전달하며 이미지 decode를 중복 수행하지 않는다.
 
 ```dart
 String? cartoTileUrlTemplate(String key) {
@@ -99,9 +99,11 @@ Future<http.StreamedResponse> send(http.BaseRequest request) async {
       final stream = await _delegate.send(request);
       return http.Response.fromStream(stream);
     })().timeout(const Duration(seconds: 15));
-    if (response.statusCode < 200 || response.statusCode >= 300 ||
-        response.headers['etag'] == '"wm-da89c20e77c1-light"') {
+    if (response.statusCode < 200 || response.statusCode >= 300) {
       throw const CartoBasemapUnavailable();
+    }
+    if (response.headers['etag'] == '"wm-da89c20e77c1-light"') {
+      onAuthenticationNotice?.call();
     }
     return http.StreamedResponse(
       Stream.value(response.bodyBytes), response.statusCode,
@@ -115,8 +117,8 @@ Future<http.StreamedResponse> send(http.BaseRequest request) async {
 
 15초는 단일 tile의 전체 요청/읽기 상한이며 route/GPS 시간 계약과 무관하다. 현재 안내 ETag를 인식하는 이유와 공급자 응답 변경 시 실제 지도 게이트로 다시 확인할 필요를 주석으로 남긴다. 응답 body를 잠깐 모으는 이유도 stream 오류가 원본 URL을 노출하지 않도록 경계를 닫기 위해서다.
 
-- [ ] Step4: 정상 PNG200은 bytes/headers가 보존되고, 401/403/429/500, URL을 포함한 transport 오류, body stream 실패와 15초 초과에서 상수 오류가 되는 테스트를 더한다. 시간 상한은 fake_async에 새 의존하지 않고 Flutter test의 fake clock/timer를 사용한다. close 호출도 기록한다.
-- [ ] Step5: 해당 focused test를 통과시키고 위 파일만 `fix: CARTO 인증 요청과 지도 오류 경계 추가`로 커밋한다.
+- [x] Step4: 정상 PNG200은 bytes/headers가 보존되고, 401/403/429/500, URL을 포함한 transport 오류, body stream 실패와 15초 초과에서 상수 오류가 되는 테스트를 더한다. 시간 상한은 fake_async에 새 의존하지 않고 Flutter test의 fake clock/timer를 사용한다. close 호출도 기록한다.
+- [x] Step5: 해당 focused test를 통과시키고 위 파일만 `fix: CARTO 인증 요청과 지도 오류 경계 추가`로 커밋한다.
 
 ### Task 2: RouteMap의 배경 실패 표시와 수명
 
@@ -128,9 +130,9 @@ Future<http.StreamedResponse> send(http.BaseRequest request) async {
 - 기존 RouteMap named parameter와 const 사용을 유지한다.
 - `String basemapKey = const String.fromEnvironment('CARTO_BASEMAP_KEY')`, `http.Client Function()? tileHttpClientFactory`를 optional named parameter로 추가한다. factory는 테스트에서 실제 HTTP 경계를 주입하기 위한 것이며 production은 기존 http.Client를 만든다.
 - `RouteMap.tileUrlTemplate`은 기존 public base URL을 유지한다. 실제 TileLayer URL만 Task1 helper로 구성한다.
-- RouteMap은 StatefulWidget으로 바꾸며 `_tileProvider`, `_basemapFailed`, `_failureScheduled`, `_basemapGeneration`만 배경 상태로 갖는다. geometry와 playback의 계산/캐시는 기존 그대로다.
+- RouteMap은 StatefulWidget으로 바꾸며 provider와 실패/안내 상태, 예약 여부와 configuration generation만 배경 상태로 갖는다. geometry와 playback의 계산/캐시는 기존 그대로다. 공급자의 HTTP200 안내 타일은 지우지 않고 앱 안내와 함께 표시한다.
 
-- [ ] Step1: 키 없는 지도에서 HTTP 요청0, 실패 안내, 원래 polyline/selection/replay marker를 검증하는 새 test를 쓴다. 기존 offlinePreview 세 test는 같은 결과를 유지하며 의도적 offlinePreview에는 실패 안내를 덧붙이지 않는다.
+- [x] Step1: 키 없는 지도에서 HTTP 요청0, 실패 안내, 원래 polyline/selection/replay marker를 검증하는 새 test를 쓴다. 기존 offlinePreview 세 test는 같은 결과를 유지하며 의도적 offlinePreview에는 실패 안내를 덧붙이지 않는다.
 
 ```dart
 var requests = 0;
@@ -150,8 +152,8 @@ expect(find.byType(PolylineLayer), findsOneWidget);
 expect(find.text('배경 지도를 불러올 수 없어요. 산책 경로와 기록은 그대로 볼 수 있어요.'), findsOneWidget);
 ```
 
-- [ ] Step2: `flutter test --no-pub test/widget/route_map_test.dart`의 새 parameter/기능 부재 RED를 확인한다.
-- [ ] Step3: State가 같은 설정의 NetworkTileProvider를 재사용한다. `CartoTileClient`를 전달하고 decoder 오류까지 기존 TileLayer.errorTileCallback에서 잡는다. Client가 상수 오류로 바꾸므로 flutter_map7의 debugPrint가 원래 URL을 출력하지 않게 한다. `silenceExceptions:true`는 callback을 없애므로 사용하지 않는다.
+- [x] Step2: `flutter test --no-pub test/widget/route_map_test.dart`의 새 parameter/기능 부재 RED를 확인한다.
+- [x] Step3: State가 같은 설정의 NetworkTileProvider를 재사용한다. `CartoTileClient`를 전달하고 decoder 오류까지 기존 TileLayer.errorTileCallback에서 잡는다. Client가 상수 오류로 바꾸므로 flutter_map7의 debugPrint가 원래 URL을 출력하지 않게 한다. `silenceExceptions:true`는 callback을 없애므로 사용하지 않는다.
 
 ```dart
 final generation = _basemapGeneration;
@@ -159,7 +161,8 @@ TileLayer(
   key: ValueKey<int>(generation),
   urlTemplate: cartoTileUrlTemplate(widget.basemapKey),
   tileProvider: _tileProvider ??= NetworkTileProvider(
-    httpClient: CartoTileClient((widget.tileHttpClientFactory ?? http.Client)()),
+    httpClient: CartoTileClient((widget.tileHttpClientFactory ?? http.Client)(),
+      onAuthenticationNotice: () => _onAuthenticationNotice(generation)),
   ),
   userAgentPackageName: 'com.sanbo.sanbo',
   maxZoom: 19,
@@ -168,9 +171,9 @@ TileLayer(
 )
 ```
 
-키 누락/offline/실패 시 ColoredMapBackground를 사용하고 기존 geometry layer는 모두 유지한다. 실패 안내는 맵 바깥 Stack의 위쪽 Positioned/IgnorePointer에 theme surface 배경과 작은 글자로 표시한다. 320dp/2배 글자에서 세로 공간을 넘으면 짧은 상태와 본문을 분리하는 대신 기존 전체 문구를 wrap하고 지도 height의 상한 안에서 읽을 수 있게 한다. 재생 버튼/slider를 덮지 않는다.
+키 누락/offline/HTTP·네트워크·codec 실패 시 ColoredMapBackground를 사용하고 기존 geometry layer는 모두 유지한다. 공급자의 HTTP200 안내 이미지는 그대로 보존한다. 앱의 실패 안내는 맵 아래의 별도 theme surface 영역에 같은 문구로 표시해 공급자 notice/경로/marker를 덮지 않는다. 320dp/2배 글자에서도 wrap하고 재생 버튼/slider를 덮지 않는다. 지도 geometry의 기존 height는 그대로다.
 
-- [ ] Step4: error callback에서는 현재 generation, mounted, failed/scheduled를 확인하고 addPostFrameCallback에서 한 번만 실패 상태로 전환한다. TileLayer가 제거될 때 기존 provider.dispose가 client를 닫는다. State가 이 client를 다시 사용하지 않는다. 키/offline/factory가 바뀌면 generation을 증가시키고 provider/실패 상태를 초기화한다. 키 문자열을 Widget Key나 오류 텍스트에 넣지 않는다.
+- [x] Step4: error callback에서는 현재 generation, mounted, failed/scheduled를 확인하고 addPostFrameCallback에서 한 번만 실패 상태로 전환한다. TileLayer가 제거될 때 기존 provider.dispose가 client를 닫는다. State가 이 client를 다시 사용하지 않는다. 키/offline/factory가 바뀌면 generation을 증가시키고 provider/실패 상태를 초기화한다. 키 문자열을 Widget Key나 오류 텍스트에 넣지 않는다.
 
 ```dart
 void _onBasemapError(int generation) {
@@ -184,9 +187,9 @@ void _onBasemapError(int generation) {
 }
 ```
 
-- [ ] Step5: MockClient의 실제403/안내200/SocketException/body stream/잘못된 PNG로 안내와 geometry 보존을 검사한다. debugPrint와 FlutterError를 test 범위에서 캡처하고 `audit-test-key` 및 keyed URL이 출력되지 않는지 확인한 뒤 원래 handler를 복원한다. PNG codec 오류가 별도로 원래 URL을 보고하면 해당 출력 경계를 수정하며 원본 키가 있는 오류를 허용하지 않는다.
-- [ ] Step6: Completer로 늦은 응답을 제어해 화면 종료 후/설정 변경 후의 callback을 검사한다. 같은 위젯을 progress/currentPoint만 바꿔 재생해도 factory 호출1이고 실패 후 반복 요청하지 않음을 확인한다. key 변경 시 새 client가 생성되고 old client는 완료 후 닫히는 것을 검사한다. 밝음/어두움, 320dp/2배 글자와 semantics의 실패 문구/marker를 검사한다.
-- [ ] Step7: 위 focused tests와 기존 geometry/playback test를 한 번 통과시키고 해당 파일을 `fix: 지도 로딩 실패에도 산책 경로와 재생 유지`로 커밋한다.
+- [x] Step5: MockClient의 실제403/안내200/SocketException/body stream/잘못된 PNG로 안내와 geometry 보존을 검사한다. debugPrint와 FlutterError를 test 범위에서 캡처하고 `audit-test-key` 및 keyed URL이 출력되지 않는지 확인한 뒤 원래 handler를 복원한다. PNG codec 오류가 별도로 원래 URL을 보고하면 해당 출력 경계를 수정하며 원본 키가 있는 오류를 허용하지 않는다.
+- [x] Step6: Completer로 늦은 응답을 제어해 화면 종료 후/설정 변경 후의 callback을 검사한다. 같은 위젯을 progress/currentPoint만 바꿔 재생해도 factory 호출1이고 실패 후 반복 요청하지 않음을 확인한다. key 변경 시 새 client가 생성되고 old client는 완료 후 닫히는 것을 검사한다. 밝음/어두움, 320dp/2배 글자와 semantics의 실패 문구/marker를 검사한다.
+- [x] Step7: 위 focused tests와 기존 geometry/playback test를 한 번 통과시키고 해당 파일을 `fix: 지도 로딩 실패에도 산책 경로와 재생 유지`로 커밋한다.
 
 ### Task 3: 비공개 키 전달과 새 후보 검증
 
@@ -252,6 +255,8 @@ debug APK는 키가 있을 때만 같은 define 파일을 쓰고, 기본 CI에�
 - [x] 작성된 지도 복구 설계 사용자 승인, 2026-10-15
 - [x] 기존 직접 구현 방식 유지, 재위임 없음
 - [x] 확인한 invalid-key200/ETag와 flutter_map7 로그 경로를 계획에 반영
-- [ ] 작성된 이 구현 계획의 사용자 검토
+- [x] 작성된 이 구현 계획의 사용자 검토, 2026-10-15 직접 구현 승인
 - [ ] 실제 전용 basemap 키 준비
 - [ ] 세 작업 구현/검증과 새 후보, 독립 검토/공개 확인
+
+2026-10-15 실행 판정: 새로 확인한 [CARTO 공식 안내](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)는 공급자 notice를 숨기지 않도록 요구한다. 따라서 확인된 HTTP200 안내 PNG는 client가 성공 bytes로 보존하며 별도 상태 callback으로 앱 안내를 표시하도록 Task1/2를 구체화했다. 기존 공급자를 바꾸거나 유료 사용을 추가하는 범위 변경은 아니다.

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../domain/services/route_playback.dart';
+import 'carto_basemap.dart';
+import 'carto_tile_provider.dart';
 
 class RouteMapGeometry {
   const RouteMapGeometry({
@@ -40,7 +43,7 @@ class RouteMapGeometry {
 }
 
 /// OSM basemap (Carto) + session path.
-class RouteMap extends StatelessWidget {
+class RouteMap extends StatefulWidget {
   const RouteMap({
     super.key,
     required this.fragments,
@@ -51,6 +54,8 @@ class RouteMap extends StatelessWidget {
     this.progress,
     this.highlightedFragments = const [],
     this.currentPoint,
+    this.basemapKey = const String.fromEnvironment('CARTO_BASEMAP_KEY'),
+    this.tileHttpClientFactory,
   });
 
   final List<List<({double lat, double lon})>> fragments;
@@ -73,13 +78,66 @@ class RouteMap extends StatelessWidget {
   /// Current fix shown while scrubbing or replaying the route.
   final ({double lat, double lon})? currentPoint;
 
-  static const tileUrlTemplate =
-      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png';
+  final String basemapKey;
+
+  /// A new client for each map configuration; its TileLayer owns its lifetime.
+  final http.Client Function()? tileHttpClientFactory;
+
+  static const tileUrlTemplate = cartoBaseTileUrlTemplate;
 
   static const attribution = '© OpenStreetMap · © CARTO';
 
   @override
+  State<RouteMap> createState() => _RouteMapState();
+}
+
+class _RouteMapState extends State<RouteMap> {
+  CartoTileProvider? _tileProvider;
+  bool _basemapUnavailable = false;
+  bool _statusScheduled = false;
+  int _basemapGeneration = 0;
+
+  @override
+  void didUpdateWidget(covariant RouteMap oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.basemapKey.trim() != widget.basemapKey.trim() ||
+        oldWidget.offlinePreview != widget.offlinePreview ||
+        oldWidget.tileHttpClientFactory != widget.tileHttpClientFactory) {
+      _basemapGeneration++;
+      // The replaced TileLayer disposes its provider after its requests finish.
+      _tileProvider = null;
+      _basemapUnavailable = false;
+      _statusScheduled = false;
+    }
+  }
+
+  void _onBasemapUnavailable(int generation) {
+    if (!mounted ||
+        generation != _basemapGeneration ||
+        _basemapUnavailable ||
+        _statusScheduled) {
+      return;
+    }
+    _statusScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || generation != _basemapGeneration) return;
+      setState(() => _basemapUnavailable = true);
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final fragments = widget.fragments;
+    final geometry = widget.geometry;
+    final highlightedGeometry = widget.highlightedGeometry;
+    final highlightedFragments = widget.highlightedFragments;
+    final currentPoint = widget.currentPoint;
+    final progress = widget.progress;
+    final offlinePreview = widget.offlinePreview;
+    final tileUrl = cartoTileUrlTemplate(widget.basemapKey);
+    final generation = _basemapGeneration;
+    final showUnavailable =
+        !offlinePreview && (tileUrl == null || _basemapUnavailable);
     final theme = Theme.of(context);
     final staticGeometry =
         geometry ?? RouteMapGeometry.fromFragments(fragments);
@@ -96,7 +154,7 @@ class RouteMap extends StatelessWidget {
         highlightedStaticGeometry?.points ?? const <LatLng>[];
     final currentLatLng = currentPoint == null
         ? null
-        : LatLng(currentPoint!.lat, currentPoint!.lon);
+        : LatLng(currentPoint.lat, currentPoint.lon);
     final center = staticGeometry.center;
     final progressVisibility = progress?.visibleFragments(
       fragmentLengths: [
@@ -110,260 +168,289 @@ class RouteMap extends StatelessWidget {
       label: latLngs.isEmpty
           ? '산책 경로 지도, 경로 기록 없음'
           : '산책 경로 지도, 위치 기록 ${latLngs.length}개',
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-          border: Border.all(color: SanboSurfaces.of(context).panelBorder),
-          boxShadow: SanboSurfaces.of(context).panelShadow,
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
-          child: SizedBox(
-            height: height,
-            child: Stack(
-              children: [
-                FlutterMap(
-                  options: MapOptions(
-                    initialCenter: center,
-                    initialZoom: latLngs.length < 2 ? 13 : 15,
-                    initialCameraFit: latLngs.length >= 2
-                        ? CameraFit.coordinates(
-                            coordinates: latLngs,
-                            padding: const EdgeInsets.all(36),
-                            maxZoom: 17,
-                          )
-                        : null,
-                    // Inline glance-preview inside a scrolling page: no drag, or
-                    // a vertical swipe starting on the map pans the map instead of
-                    // scrolling to the timeline below (scroll dead-zone).
-                    interactionOptions: const InteractionOptions(
-                      flags: InteractiveFlag.pinchZoom,
-                    ),
-                  ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          DecoratedBox(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              border: Border.all(color: SanboSurfaces.of(context).panelBorder),
+              boxShadow: SanboSurfaces.of(context).panelShadow,
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppTheme.radiusMedium),
+              child: SizedBox(
+                height: widget.height,
+                child: Stack(
                   children: [
-                    if (!offlinePreview)
-                      TileLayer(
-                        urlTemplate: tileUrlTemplate,
-                        userAgentPackageName: 'com.sanbo.sanbo',
-                        maxZoom: 19,
-                        subdomains: const ['a', 'b', 'c', 'd'],
-                      )
-                    else
-                      const ColoredMapBackground(),
-                    if (latLngFragments.any((fragment) => fragment.length >= 2))
-                      PolylineLayer(
-                        polylines: [
-                          for (final fragment in latLngFragments)
-                            if (fragment.length >= 2)
-                              Polyline(
-                                points: fragment,
-                                color: progress == null
-                                    ? theme.colorScheme.primary
-                                    : theme.colorScheme.outlineVariant,
-                                strokeWidth: 3.5,
-                              ),
-                          if (progressVisibility != null)
-                            for (
-                              var index = 0;
-                              index < progressVisibility.fragmentCount;
-                              index++
-                            )
-                              if (progressVisibility.isCompleted(index) ||
-                                  index ==
-                                      progressVisibility.activeFragmentIndex)
-                                if ((progressVisibility.isCompleted(index)
-                                        ? latLngFragments[index].length
-                                        : progressVisibility
-                                              .activePointCount) >=
-                                    2)
-                                  Polyline(
-                                    // Reuse completed immutable fragments. A
-                                    // prefix is materialized only for the
-                                    // active fragment and only while partial.
-                                    points:
-                                        progressVisibility.isCompleted(index) ||
-                                            progressVisibility
-                                                    .activePointCount >=
-                                                latLngFragments[index].length
-                                        ? latLngFragments[index]
-                                        : latLngFragments[index]
-                                              .take(
-                                                progressVisibility
-                                                    .activePointCount,
-                                              )
-                                              .toList(growable: false),
-                                    color: theme.colorScheme.primary,
-                                    strokeWidth: 4,
-                                  ),
-                          for (final fragment in highlightedLatLngFragments)
-                            if (fragment.length >= 2)
-                              Polyline(
-                                points: fragment,
-                                color: theme.colorScheme.tertiary,
-                                strokeWidth: 6,
-                              ),
-                        ],
+                    FlutterMap(
+                      options: MapOptions(
+                        initialCenter: center,
+                        initialZoom: latLngs.length < 2 ? 13 : 15,
+                        initialCameraFit: latLngs.length >= 2
+                            ? CameraFit.coordinates(
+                                coordinates: latLngs,
+                                padding: const EdgeInsets.all(36),
+                                maxZoom: 17,
+                              )
+                            : null,
+                        // Inline glance-preview inside a scrolling page: no drag, or
+                        // a vertical swipe starting on the map pans the map instead of
+                        // scrolling to the timeline below (scroll dead-zone).
+                        interactionOptions: const InteractionOptions(
+                          flags: InteractiveFlag.pinchZoom,
+                        ),
                       ),
-                    if (latLngs.isNotEmpty || currentLatLng != null)
-                      MarkerLayer(
-                        markers: [
-                          if (latLngs.isNotEmpty)
-                            Marker(
-                              point: latLngs.first,
-                              width: 22,
-                              height: 22,
-                              child: Semantics(
-                                label: '시작 지점',
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.primary,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: theme.colorScheme.surface,
-                                      width: 2,
-                                    ),
+                      children: [
+                        const ColoredMapBackground(),
+                        if (!offlinePreview && tileUrl != null)
+                          TileLayer(
+                            key: ValueKey<int>(generation),
+                            urlTemplate: tileUrl,
+                            tileProvider: _tileProvider ??= CartoTileProvider(
+                              widget.tileHttpClientFactory?.call() ??
+                                  http.Client(),
+                              onUnavailable: () =>
+                                  _onBasemapUnavailable(generation),
+                            ),
+                            errorTileCallback: (_, _, _) =>
+                                _onBasemapUnavailable(generation),
+                            userAgentPackageName: 'com.sanbo.sanbo',
+                            maxZoom: 19,
+                            subdomains: const ['a', 'b', 'c', 'd'],
+                          ),
+                        if (latLngFragments.any(
+                          (fragment) => fragment.length >= 2,
+                        ))
+                          PolylineLayer(
+                            polylines: [
+                              for (final fragment in latLngFragments)
+                                if (fragment.length >= 2)
+                                  Polyline(
+                                    points: fragment,
+                                    color: progress == null
+                                        ? theme.colorScheme.primary
+                                        : theme.colorScheme.outlineVariant,
+                                    strokeWidth: 3.5,
                                   ),
-                                ),
-                              ),
-                            ),
-                          if (latLngs.length > 1)
-                            Marker(
-                              point: latLngs.last,
-                              width: 26,
-                              height: 26,
-                              child: Semantics(
-                                label: '종료 지점',
-                                child: Icon(
-                                  Icons.location_on_rounded,
-                                  size: 26,
-                                  color: theme.colorScheme.tertiary,
-                                ),
-                              ),
-                            ),
-                          if (highlightedLatLngs.isNotEmpty)
-                            Marker(
-                              point:
-                                  highlightedLatLngs[highlightedLatLngs
-                                          .length ~/
-                                      2],
-                              width: 38,
-                              height: 38,
-                              child: Semantics(
-                                label: '선택한 활동 구간',
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.tertiary
-                                        .withValues(alpha: 0.18),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: theme.colorScheme.tertiary,
-                                      width: 2,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          if (currentLatLng != null)
-                            Marker(
-                              point: currentLatLng,
-                              width: 30,
-                              height: 30,
-                              child: Semantics(
-                                label: '재생 위치',
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    color: theme.colorScheme.surface,
-                                    shape: BoxShape.circle,
-                                    border: Border.all(
-                                      color: theme.colorScheme.primary,
-                                      width: 3,
-                                    ),
-                                    boxShadow: const [
-                                      BoxShadow(
-                                        blurRadius: 6,
-                                        color: Color(0x40000000),
+                              if (progressVisibility != null)
+                                for (
+                                  var index = 0;
+                                  index < progressVisibility.fragmentCount;
+                                  index++
+                                )
+                                  if (progressVisibility.isCompleted(index) ||
+                                      index ==
+                                          progressVisibility
+                                              .activeFragmentIndex)
+                                    if ((progressVisibility.isCompleted(index)
+                                            ? latLngFragments[index].length
+                                            : progressVisibility
+                                                  .activePointCount) >=
+                                        2)
+                                      Polyline(
+                                        // Reuse completed immutable fragments. A
+                                        // prefix is materialized only for the
+                                        // active fragment and only while partial.
+                                        points:
+                                            progressVisibility.isCompleted(
+                                                  index,
+                                                ) ||
+                                                progressVisibility
+                                                        .activePointCount >=
+                                                    latLngFragments[index]
+                                                        .length
+                                            ? latLngFragments[index]
+                                            : latLngFragments[index]
+                                                  .take(
+                                                    progressVisibility
+                                                        .activePointCount,
+                                                  )
+                                                  .toList(growable: false),
+                                        color: theme.colorScheme.primary,
+                                        strokeWidth: 4,
                                       ),
-                                    ],
+                              for (final fragment in highlightedLatLngFragments)
+                                if (fragment.length >= 2)
+                                  Polyline(
+                                    points: fragment,
+                                    color: theme.colorScheme.tertiary,
+                                    strokeWidth: 6,
                                   ),
-                                  child: Center(
+                            ],
+                          ),
+                        if (latLngs.isNotEmpty || currentLatLng != null)
+                          MarkerLayer(
+                            markers: [
+                              if (latLngs.isNotEmpty)
+                                Marker(
+                                  point: latLngs.first,
+                                  width: 22,
+                                  height: 22,
+                                  child: Semantics(
+                                    label: '시작 지점',
                                     child: Container(
-                                      width: 10,
-                                      height: 10,
                                       decoration: BoxDecoration(
                                         color: theme.colorScheme.primary,
                                         shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: theme.colorScheme.surface,
+                                          width: 2,
+                                        ),
                                       ),
                                     ),
                                   ),
                                 ),
+                              if (latLngs.length > 1)
+                                Marker(
+                                  point: latLngs.last,
+                                  width: 26,
+                                  height: 26,
+                                  child: Semantics(
+                                    label: '종료 지점',
+                                    child: Icon(
+                                      Icons.location_on_rounded,
+                                      size: 26,
+                                      color: theme.colorScheme.tertiary,
+                                    ),
+                                  ),
+                                ),
+                              if (highlightedLatLngs.isNotEmpty)
+                                Marker(
+                                  point:
+                                      highlightedLatLngs[highlightedLatLngs
+                                              .length ~/
+                                          2],
+                                  width: 38,
+                                  height: 38,
+                                  child: Semantics(
+                                    label: '선택한 활동 구간',
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.tertiary
+                                            .withValues(alpha: 0.18),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: theme.colorScheme.tertiary,
+                                          width: 2,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              if (currentLatLng != null)
+                                Marker(
+                                  point: currentLatLng,
+                                  width: 30,
+                                  height: 30,
+                                  child: Semantics(
+                                    label: '재생 위치',
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: theme.colorScheme.surface,
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: theme.colorScheme.primary,
+                                          width: 3,
+                                        ),
+                                        boxShadow: const [
+                                          BoxShadow(
+                                            blurRadius: 6,
+                                            color: Color(0x40000000),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Center(
+                                        child: Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: BoxDecoration(
+                                            color: theme.colorScheme.primary,
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                      ],
+                    ),
+                    if (latLngs.isEmpty)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: Center(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: theme.colorScheme.surfaceContainerHigh
+                                    .withValues(alpha: 0.96),
+                                borderRadius: BorderRadius.circular(
+                                  AppTheme.radiusSmall,
+                                ),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 10,
+                                ),
+                                child: Text(
+                                  '경로 포인트가 없어요',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurface,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ),
-                        ],
+                          ),
+                        ),
                       ),
-                  ],
-                ),
-                if (latLngs.isEmpty)
-                  Positioned.fill(
-                    child: IgnorePointer(
-                      child: Center(
+                    Positioned(
+                      left: 10,
+                      bottom: 8,
+                      child: IgnorePointer(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainerHigh
-                                .withValues(alpha: 0.96),
+                            color: theme.colorScheme.surfaceContainer
+                                .withValues(alpha: 0.94),
                             borderRadius: BorderRadius.circular(
                               AppTheme.radiusSmall,
                             ),
                           ),
                           child: Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 10,
+                              horizontal: 8,
+                              vertical: 4,
                             ),
                             child: Text(
-                              '경로 포인트가 없어요',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurface,
-                                fontWeight: FontWeight.w600,
+                              RouteMap.attribution,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant,
+                                fontSize: 10,
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                Positioned(
-                  left: 10,
-                  bottom: 8,
-                  child: IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: theme.colorScheme.surfaceContainer.withValues(
-                          alpha: 0.94,
-                        ),
-                        borderRadius: BorderRadius.circular(
-                          AppTheme.radiusSmall,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        child: Text(
-                          attribution,
-                          style: theme.textTheme.labelSmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontSize: 10,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
-        ),
+          if (showUnavailable)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+              child: Text(
+                '배경 지도를 불러올 수 없어요. 산책 경로와 기록은 그대로 볼 수 있어요.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
