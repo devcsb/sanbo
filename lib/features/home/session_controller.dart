@@ -367,6 +367,7 @@ class SessionController extends Notifier<LiveSessionState> {
   void _recomputeLiveMetricsFromBuffer({
     DateTime? sessionStart,
     DateTime? observedAt,
+    bool liveReconciliation = false,
   }) {
     final bounded = _liveSamplesWithinBoundary(
       _sessionSamples,
@@ -381,12 +382,19 @@ class SessionController extends Notifier<LiveSessionState> {
     final valid = route.includedSamples;
     _lastValidSample = valid.isEmpty ? null : valid.last;
     _lastUsableFixAt = _lastValidSample?.timestamp.toUtc();
-    _hasLiveSpeedEvidence = false;
+    final latestFragment = route.fragments.isEmpty
+        ? const <LocationSample>[]
+        : route.fragments.last.samples;
+    final providerSpeed = _lastValidSample?.speedMps;
+    _hasLiveSpeedEvidence =
+        liveReconciliation &&
+        (latestFragment.length >= 2 ||
+            (providerSpeed != null &&
+                providerSpeed.isFinite &&
+                providerSpeed >= 0));
     _validSampleCount = valid.length;
     _liveRouteInterrupted = filtered.isNotEmpty && filtered.last.isFilteredOut;
-    _liveSpeedMps = _liveSpeedFromSamples(
-      route.fragments.isEmpty ? const [] : route.fragments.last.samples,
-    );
+    _liveSpeedMps = _liveSpeedFromSamples(latestFragment);
     _lastAccuracyM = bounded.isEmpty ? null : bounded.last.accuracyM;
     _liveDistanceM = route.segments
         .where((s) => s.distanceM >= _minLiveSegmentDistanceM)
@@ -1295,6 +1303,15 @@ class SessionController extends Notifier<LiveSessionState> {
       _liveSpeedMps = 0;
     }
     _lastAccuracyM = sample.accuracyM ?? _lastAccuracyM;
+    if (!ordered) {
+      // Rare late fixes cut a past fragment in the five-hour bounded buffer.
+      // Reconcile here; an indexed reducer can replace this scan if frequent.
+      _recomputeLiveMetricsFromBuffer(
+        sessionStart: sessionStart,
+        observedAt: receiptNow,
+        liveReconciliation: true,
+      );
+    }
 
     // A raw provider row is not proof that a usable fix arrived. Keep the
     // first-fix watchdog armed after cached, malformed, or filtered samples so

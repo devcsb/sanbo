@@ -256,6 +256,46 @@ class _RetryableFailureRepository extends WalkRepository {
 }
 
 void main() {
+  test(
+    'late rejected fix reconciles the same chronological route as completion',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final t = DateTime.utc(2026, 10, 14);
+      var now = t;
+      final scope = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(scope.dispose);
+      final c = scope.read(sessionControllerProvider.notifier);
+      await c.start();
+      LocationSample p(int sec, double m) => LocationSample(
+        timestamp: t.add(Duration(seconds: sec)),
+        latitude: m / 111194.92664455874,
+        longitude: 0,
+        accuracyM: 5,
+      );
+      c.debugIngestSamples([p(0, 0)]);
+      now = t.add(const Duration(seconds: 10));
+      c.debugIngestSamples([p(10, 5)]);
+      now = t.add(const Duration(seconds: 15));
+      c.debugIngestSamples([p(5, 2)]);
+      now = t.add(const Duration(seconds: 30));
+      c.debugIngestSamples([p(30, 20)]);
+      final live = c.state.liveDistanceM;
+      final completed = await c.stop();
+      expect(live, closeTo(15, 0.01));
+      expect(completed!.totalDistanceM, closeTo(15, 0.01));
+    },
+  );
   test('terminal stream failure hides the previous current speed', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
