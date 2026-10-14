@@ -255,6 +255,135 @@ class _RetryableFailureRepository extends WalkRepository {
 }
 
 void main() {
+  test('recovery preserves filtered route boundaries', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final t = DateTime.utc(2026, 10, 14);
+    final session = await repo.startSession(startedAt: t);
+    LocationSample p(int seconds, double meters, {bool filtered = false}) =>
+        LocationSample(
+          timestamp: t.add(Duration(seconds: seconds)),
+          latitude: meters / 111194.92664455874,
+          longitude: 0,
+          accuracyM: filtered ? 200 : 5,
+          isFilteredOut: filtered,
+        );
+    final samples = [p(0, 0), p(10, 10), p(20, 20, filtered: true), p(30, 30)];
+    await repo.insertSamples(session.id, samples);
+    var now = t.add(const Duration(seconds: 30));
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+    expect(controller.state.liveDistanceM, closeTo(10, 0.01));
+    await controller.resumeRecoveredSession();
+    now = t.add(const Duration(seconds: 40));
+    controller.debugIngestSamples([p(40, 40)]);
+    expect(controller.state.liveDistanceM, closeTo(20, 0.01));
+    final completed = await controller.stop();
+    expect(completed!.totalDistanceM, closeTo(20, 0.01));
+  });
+
+  for (final kind in ['soft accuracy', 'malformed', 'jump']) {
+    test('recovery tail boundary survives $kind', () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final t = DateTime.utc(2026, 10, 14);
+      final session = await repo.startSession(startedAt: t);
+      LocationSample p(int sec, double meters, {double accuracy = 5}) =>
+          LocationSample(
+            timestamp: t.add(Duration(seconds: sec)),
+            latitude: meters / 111194.92664455874,
+            longitude: 0,
+            accuracyM: accuracy,
+          );
+      final tail = switch (kind) {
+        'soft accuracy' => p(20, 20, accuracy: 200),
+        'malformed' => p(20, 91 * 111194.92664455874),
+        _ => p(20, 1010),
+      };
+      await repo.insertSamples(session.id, [
+        p(0, 0),
+        p(10, 10),
+        if (kind != 'malformed') tail,
+      ]);
+      var now = t.add(const Duration(seconds: 20));
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.restoreIfNeeded();
+      await controller.resumeRecoveredSession();
+      if (kind == 'malformed') controller.debugIngestSamples([tail]);
+      now = t.add(const Duration(seconds: 30));
+      controller.debugIngestSamples([p(30, kind == 'jump' ? 1020 : 30)]);
+      expect(controller.state.liveDistanceM, closeTo(10, 0.01));
+      now = t.add(const Duration(seconds: 40));
+      controller.debugIngestSamples([p(40, kind == 'jump' ? 1030 : 40)]);
+      expect(controller.state.liveDistanceM, closeTo(20, 0.01));
+      expect((await controller.stop())!.totalDistanceM, closeTo(20, 0.01));
+    });
+  }
+
+  test('recovery does not bridge a filtered tail', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final t = DateTime.utc(2026, 10, 14);
+    final session = await repo.startSession(startedAt: t);
+    LocationSample p(int seconds, double meters, {bool filtered = false}) =>
+        LocationSample(
+          timestamp: t.add(Duration(seconds: seconds)),
+          latitude: meters / 111194.92664455874,
+          longitude: 0,
+          accuracyM: filtered ? 200 : 5,
+          isFilteredOut: filtered,
+        );
+    await repo.insertSamples(session.id, [
+      p(0, 0),
+      p(10, 10),
+      p(20, 20, filtered: true),
+    ]);
+    var now = t.add(const Duration(seconds: 20));
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.restoreIfNeeded();
+    await controller.resumeRecoveredSession();
+    now = t.add(const Duration(seconds: 30));
+    controller.debugIngestSamples([p(30, 30)]);
+    expect(controller.state.liveDistanceM, closeTo(10, 0.01));
+    now = t.add(const Duration(seconds: 40));
+    controller.debugIngestSamples([p(40, 40)]);
+    expect(controller.state.liveDistanceM, closeTo(20, 0.01));
+    final completed = await controller.stop();
+    expect(completed!.totalDistanceM, closeTo(20, 0.01));
+  });
+
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
@@ -1243,35 +1372,32 @@ void main() {
     },
   );
 
-  test(
-    'resume rechecks precise location before recording continues',
-    () async {
-      final repo = await openTestRepository();
-      addTearDown(repo.close);
-      final engine = SyntheticLocationEngine(
-        permission: LocationPermissionState.granted,
-      );
-      final container = ProviderContainer(
-        overrides: [
-          walkRepositoryProvider.overrideWithValue(repo),
-          locationEngineProvider.overrideWithValue(engine),
-        ],
-      );
-      addTearDown(container.dispose);
+  test('resume rechecks precise location before recording continues', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = SyntheticLocationEngine(
+      permission: LocationPermissionState.granted,
+    );
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+      ],
+    );
+    addTearDown(container.dispose);
 
-      final controller = container.read(sessionControllerProvider.notifier);
-      await controller.start();
-      controller.setAppForeground(false);
-      engine.permission = LocationPermissionState.reducedAccuracy;
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    controller.setAppForeground(false);
+    engine.permission = LocationPermissionState.reducedAccuracy;
 
-      controller.setAppForeground(true);
-      await Future<void>.delayed(Duration.zero);
+    controller.setAppForeground(true);
+    await Future<void>.delayed(Duration.zero);
 
-      final state = container.read(sessionControllerProvider);
-      expect(state.permissionState, LocationPermissionState.reducedAccuracy);
-      expect(state.errorMessage, contains('정확한 위치'));
-    },
-  );
+    final state = container.read(sessionControllerProvider);
+    expect(state.permissionState, LocationPermissionState.reducedAccuracy);
+    expect(state.errorMessage, contains('정확한 위치'));
+  });
 
   test(
     'stop waits for an in-flight checkpoint before finalizing samples',
@@ -1391,47 +1517,49 @@ void main() {
     expect(state.errorMessage, isNotNull);
   });
 
-  test('foreground-only location permission still starts with settings guidance',
-      () async {
-    final repo = await openTestRepository();
-    addTearDown(repo.close);
-    final engine = SyntheticLocationEngine(
-      permission: LocationPermissionState.grantedForegroundOnly,
-    );
-    final container = ProviderContainer(
-      overrides: [
-        walkRepositoryProvider.overrideWithValue(repo),
-        locationEngineProvider.overrideWithValue(engine),
-      ],
-    );
-    addTearDown(container.dispose);
+  test(
+    'foreground-only location permission still starts with settings guidance',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      final engine = SyntheticLocationEngine(
+        permission: LocationPermissionState.grantedForegroundOnly,
+      );
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(engine),
+        ],
+      );
+      addTearDown(container.dispose);
 
-    final controller = container.read(sessionControllerProvider.notifier);
-    await controller.start();
-    var state = container.read(sessionControllerProvider);
-    expect(state.isTracking, isTrue);
-    expect(
-      state.permissionState,
-      LocationPermissionState.grantedForegroundOnly,
-    );
-    expect(state.errorMessage, contains('항상 허용'));
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      var state = container.read(sessionControllerProvider);
+      expect(state.isTracking, isTrue);
+      expect(
+        state.permissionState,
+        LocationPermissionState.grantedForegroundOnly,
+      );
+      expect(state.errorMessage, contains('항상 허용'));
 
-    controller.debugIngestSamples([
-      LocationSample(
-        timestamp: state.session!.startedAt,
-        latitude: 37.5665,
-        longitude: 126.978,
-        accuracyM: 6,
-      ),
-    ]);
-    state = container.read(sessionControllerProvider);
-    expect(state.errorMessage, contains('항상 허용'));
-    controller.clearError();
-    expect(
-      container.read(sessionControllerProvider).errorMessage,
-      contains('항상 허용'),
-    );
-  });
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: state.session!.startedAt,
+          latitude: 37.5665,
+          longitude: 126.978,
+          accuracyM: 6,
+        ),
+      ]);
+      state = container.read(sessionControllerProvider);
+      expect(state.errorMessage, contains('항상 허용'));
+      controller.clearError();
+      expect(
+        container.read(sessionControllerProvider).errorMessage,
+        contains('항상 허용'),
+      );
+    },
+  );
 
   test('unknown permission state does not create an active walk', () async {
     final repo = await openTestRepository();

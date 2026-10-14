@@ -12,6 +12,7 @@ import '../../domain/models/session_error_code.dart';
 import '../../domain/models/tracking_mode.dart';
 import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/geo.dart';
+import '../../domain/pipeline/route_partitioner.dart';
 import '../../domain/pipeline/sample_filter.dart';
 import '../../domain/services/session_deadline.dart';
 import '../../domain/services/session_guard.dart';
@@ -196,6 +197,7 @@ class SessionController extends Notifier<LiveSessionState> {
   LocationSample? _lastJumpRejectedSample;
   double _liveDistanceM = 0;
   double _liveSpeedMps = 0;
+  bool _liveRouteInterrupted = false;
   double? _lastAccuracyM;
   int _validSampleCount = 0;
 
@@ -358,12 +360,29 @@ class SessionController extends Notifier<LiveSessionState> {
       observedAt: observedAt,
     );
     final filtered = _liveFilter.apply(bounded);
-    final valid = filtered.where((s) => !s.isFilteredOut).toList();
+    final route = RoutePartitioner.partition(
+      samples: filtered,
+      exclusions: const [],
+    );
+    final valid = route.includedSamples;
     _lastValidSample = valid.isEmpty ? null : valid.last;
     _validSampleCount = valid.length;
-    _liveSpeedMps = _liveSpeedFromSamples(valid);
+    _liveRouteInterrupted = filtered.isNotEmpty && filtered.last.isFilteredOut;
+    _liveSpeedMps = _liveSpeedFromSamples(
+      route.fragments.isEmpty ? const [] : route.fragments.last.samples,
+    );
     _lastAccuracyM = bounded.isEmpty ? null : bounded.last.accuracyM;
-    _liveDistanceM = _trustedLiveDistance(valid);
+    _liveDistanceM = route.segments
+        .where((s) => s.distanceM >= _minLiveSegmentDistanceM)
+        .fold(0.0, (sum, s) => sum + s.distanceM);
+    // Keep the raw tail for the filter's two-fix jump confirmation. An already
+    // filtered copy cannot confirm a new fragment after a cached anchor.
+    _lastJumpRejectedSample =
+        _liveRouteInterrupted &&
+            bounded.isNotEmpty &&
+            !bounded.last.isFilteredOut
+        ? bounded.last
+        : null;
   }
 
   List<LocationSample> _liveSamplesWithinBoundary(
@@ -380,32 +399,6 @@ class SessionController extends Notifier<LiveSessionState> {
             (endUtc == null || !sample.timestamp.toUtc().isAfter(endUtc)))
           sample,
     ];
-  }
-
-  double _trustedLiveDistance(List<LocationSample> valid) {
-    var total = 0.0;
-    for (var i = 1; i < valid.length; i++) {
-      final previous = valid[i - 1];
-      final current = valid[i];
-      final dt = current.timestamp.difference(previous.timestamp);
-      if (dt <= Duration.zero || dt > _maxObservedLiveGap) continue;
-      final distance = haversineMeters(
-        lat1: previous.latitude,
-        lon1: previous.longitude,
-        lat2: current.latitude,
-        lon2: current.longitude,
-      );
-      // A recovered trace can contain a valid new anchor after a filtered
-      // jump. Do not bridge that stale-anchor displacement into live totals.
-      final speed =
-          distance / (dt.inMicroseconds / Duration.microsecondsPerSecond);
-      if (distance >= _minLiveSegmentDistanceM &&
-          speed.isFinite &&
-          speed <= _liveFilter.config.maxJumpSpeedMps) {
-        total += distance;
-      }
-    }
-    return total;
   }
 
   double _liveSpeedFromSamples(List<LocationSample> valid) {
@@ -443,6 +436,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _liveRouteInterrupted = false;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -950,6 +944,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _liveRouteInterrupted = false;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -1197,7 +1192,7 @@ class SessionController extends Notifier<LiveSessionState> {
     var acceptedByIncrementalFilter = false;
     if (ordered && !marked.isFilteredOut) {
       acceptedByIncrementalFilter = true;
-      if (prev != null && !startsNewFragment) {
+      if (prev != null && !startsNewFragment && !_liveRouteInterrupted) {
         final dtUs = marked.timestamp.difference(prev.timestamp).inMicroseconds;
         if (dtUs > 0) {
           final d = haversineMeters(
@@ -1223,6 +1218,7 @@ class SessionController extends Notifier<LiveSessionState> {
     } else {
       _sessionGuard.interruptHighSpeedContinuity();
     }
+    _liveRouteInterrupted = !acceptedByIncrementalFilter;
     if (outsideLiveBoundary || !ordered || !marked.isFilteredOut) {
       _lastJumpRejectedSample = null;
     } else {
@@ -1799,6 +1795,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _liveRouteInterrupted = false;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -1840,6 +1837,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _liveRouteInterrupted = false;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -1861,6 +1859,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _sessionSamples.clear();
         _pendingPersist.clear();
         _lastValidSample = null;
+        _liveRouteInterrupted = false;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -1891,6 +1890,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _sessionSamples.clear();
       _pendingPersist.clear();
       _lastValidSample = null;
+      _liveRouteInterrupted = false;
       _lastJumpRejectedSample = null;
       _liveDistanceM = 0;
       _liveSpeedMps = 0;
@@ -1971,6 +1971,7 @@ class SessionController extends Notifier<LiveSessionState> {
       _sessionSamples.clear();
       _pendingPersist.clear();
       _lastValidSample = null;
+      _liveRouteInterrupted = false;
       _lastJumpRejectedSample = null;
       _liveDistanceM = 0;
       _liveSpeedMps = 0;
