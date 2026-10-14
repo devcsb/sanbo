@@ -22,6 +22,11 @@
 `ddede22` APK/AAB는 지도 수정 전 후보이며 새 코드로 다시 서명한 후보가 아닙니다.
 키를 준비한 뒤 실제 Android/iOS 지도와 새 서명 빌드를 확인해야 게시할 수 있습니다.
 
+지도 변경 소스 `8d56049`의 키 없는 전체 gate는 Flutter516개, analyzer와 debug
+APK까지 통과했습니다. release 빌드는 키 누락 시 조기에 실패합니다. 실제 화면의
+auto-GPU ANR과 SwiftShader 재실행 조건은 [검증 기록](../superpowers/verification/2026-10-14-maintenance-stage1.md)에
+구분해 남겼습니다. 이전 signed gate를 새 지도 release 검증으로 대신하지 않습니다.
+
 ## 1차 서명 후보 검증
 
 - 복구 거리와 필터 경계 관련 52개 테스트 통과.
@@ -115,6 +120,10 @@ Activity 회전/실제 TalkBack이나 물리 기기 검증을 완료한 것으�
 처음 준비한 c027b41/478개 후보에서 저자 검토의 늦은 좌표 문제를 수정했고,
 새 ddede22/479개 산출물로 교체했습니다. 지도 변경을 포함한 새 build SHA와 후보, 최종 CI와 독립 검토, 실제 지도 및
 물리 기기 수용 게이트가 남아 있습니다.
+
+키 없는 실제 Android 화면, 합성 invalid-key의 공급자 안내 보존, Wi-Fi/data를 끈
+상태의 회색 배경/실패 문구/marker/재생 UI도 확인했습니다. 테스트 기기의 네트워크를
+원복하고 종료했습니다. 정상 키/iOS 지도/새 signed 후보 검증으로 대신하지 않습니다.
 
 ## 비공개 지도 키 준비와 빌드
 

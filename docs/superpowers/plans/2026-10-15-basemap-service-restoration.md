@@ -35,6 +35,7 @@
 | 파일 | 책임 |
 |---|---|
 | `lib/shared/widgets/carto_basemap.dart` 신규 | CARTO URL 구성, 응답 경계와 오류의 안전한 변환 |
+| `lib/shared/widgets/carto_tile_provider.dart` 신규 | SDK 진단에 키가 든 URL을 넘기지 않는 tile/image provider, 실패 cache 정리 |
 | `lib/shared/widgets/route_map.dart` | 지도 배경 실패 상태와 provider 수명. 기존 geometry/rendering 유지 |
 | `test/shared/carto_basemap_test.dart` 신규 | 실제 Client 경계의 URL/status/stream/안내 타일 검증 |
 | `test/widget/route_map_test.dart` | 실패/늦은 응답/geometry/로그/작은 화면 회귀 |
@@ -191,6 +192,12 @@ void _onBasemapError(int generation) {
 - [x] Step6: Completer로 늦은 응답을 제어해 화면 종료 후/설정 변경 후의 callback을 검사한다. 같은 위젯을 progress/currentPoint만 바꿔 재생해도 factory 호출1이고 실패 후 반복 요청하지 않음을 확인한다. key 변경 시 새 client가 생성되고 old client는 완료 후 닫히는 것을 검사한다. 밝음/어두움, 320dp/2배 글자와 semantics의 실패 문구/marker를 검사한다.
 - [x] Step7: 위 focused tests와 기존 geometry/playback test를 한 번 통과시키고 해당 파일을 `fix: 지도 로딩 실패에도 산책 경로와 재생 유지`로 커밋한다.
 
+실행 중 확인한 SDK 진단 경로는 상수 HTTP 오류에도 keyed URL을 출력했습니다.
+계획의 조건부 오류 경계 수정에 따라 renderer/cache를 유지하는 전용
+`CartoTileProvider`/ImageProvider를 추가했습니다. 실패는 SDK 투명 이미지로 처리하고
+실패/서비스 안내 cache만 제거합니다. 위 NetworkTileProvider 예시는 이 경계 수정으로
+대체됐으며 회귀와 실행 판정을 ledger/검증 문서에 남겼습니다.
+
 ### Task 3: 비공개 키 전달과 새 후보 검증
 
 **Files**
@@ -260,3 +267,9 @@ debug APK는 키가 있을 때만 같은 define 파일을 쓰고, 기본 CI에�
 - [ ] 세 작업 구현/검증과 새 후보, 독립 검토/공개 확인
 
 2026-10-15 실행 판정: 새로 확인한 [CARTO 공식 안내](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)는 공급자 notice를 숨기지 않도록 요구한다. 따라서 확인된 HTTP200 안내 PNG는 client가 성공 bytes로 보존하며 별도 상태 callback으로 앱 안내를 표시하도록 Task1/2를 구체화했다. 기존 공급자를 바꾸거나 유료 사용을 추가하는 범위 변경은 아니다.
+
+2026-10-15 구현 상태: Task1 HTTP11개, Task2 widget16개, Task3 config13개와
+metadata1개 focused 검증을 통과했습니다. 제품 소스 `8d56049`의 키 없는 전체
+Flutter516개/analyzer/debug APK와 tree audit도 통과했습니다. 실제 Android에서
+키 없음/합성 invalid key/네트워크 단절과 marker/재생 UI를 확인했습니다. 정상 키와
+iOS 지도, 새 signed APK/AAB/asset 교체, 독립 PR 검토/공개 확인은 남아 있습니다.

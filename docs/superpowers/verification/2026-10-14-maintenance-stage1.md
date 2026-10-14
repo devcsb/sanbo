@@ -135,3 +135,48 @@ HTTP200/image/png/2049bytes가 반환됐으나 파일을 직접 열어 정상 �
 닫힌 화면 callback/재생 rebuild/화면 재열기 회귀를 구현했다. 공급자 notice는
 보존하고 앱 안내는 지도 아래 표시한다. 실제 키 미준비로 정상 지도/새 서명 후보는
 미검증이다. 기존 `ddede22` 후보에 지도 수정이 포함됐다고 주장하지 않는다.
+
+## 지도 변경 소스의 새 검증
+
+지도 소스와 키 전달 설정을 포함한 `8d560499bf4884528fcb265f7c99d6ef9067f872`에서
+키 없이 `QUALITY_BASE_REF=v0.9.1 bash scripts/run_quality_loop.sh --debug-apk`를
+실행했습니다. Flutter516개, analyzer, Android debug APK, 문서/whitespace와
+generated-file audit가 통과했고 exit0입니다. APK SHA-256은
+`598ed70bc40e9828593383503029e57b38fe010b58c0fd1e7398eba192b546a6`입니다.
+이 값은 keyless debug build이며 기존 signed candidate와 구분합니다.
+
+새 디버그 APK의 첫 API34 auto-GPU 실행은 ANR로 실패했습니다. main은
+`FlutterJNI.nativeSurfaceCreated`를 기다렸고 raster는 에뮬레이터 GLES의
+`qemu_pipe_read/glLinkProgram`에서 대기했습니다. 앱의 지도 진입 전이었습니다.
+같은 APK와 데이터를 보존한 채 전용 AVD만 SwiftShader로 다시 시작하자
+COLD launch statusok/3117ms로 실행됐습니다. 원본 dropbox stack과 첫 실패를
+보존했습니다. 제품 코드로 ANR을 고쳤거나 물리 기기 성능을 측정했다고 주장하지
+않으며, 이후 에뮬레이터 화면 검증은 이 소프트웨어 렌더러 조건으로 구분합니다.
+
+전용 키가 없어 새 release APK/AAB, Android/iOS 정상 도로·지명 확인과 draft
+asset 교체는 실행하지 않았습니다. 이 남은 게이트 없이 M-19를 해결 완료로
+표시하지 않습니다. 검토는 저자가 수행했으며 독립 PR 검토는 사용자 검토 전입니다.
+
+키 없는 debug APK를 같은 전용 API34 AVD에서 실제 실행하고 Settings의 시스템
+picker로 앞서 보존한 합성 산책을 가져왔습니다. 상세 화면은 위치14개/시작점/종료점/
+재생 위치, 지도 아래 실패 문구, 재생 버튼/시각 변화/접근성 시각을 유지했습니다.
+시작 직후 AVD의 기본 위치와 주입 경로가 서로 멀어 전체 bounds가 넓은 합성 기록이며,
+선분 수와 분할 보존은 widget/geometry 회귀로 별도 확인했습니다. 정상 도로/지명이
+표시된 결과가 아닙니다. 증거는 `android-keyless-session-detail.*`과
+`android-keyless-playback-running.*`입니다.
+
+최종 UI 검증은 전용 AVD SwiftShader와 Flutter 런타임 QA 플래그
+`enable-software-rendering=true`, `enable-impeller=false`를 함께 썼습니다.
+첫 단일 software 플래그 시도는 Impeller와 양립하지 않는다는 엔진 assertion으로
+종료됐고 두 플래그를 함께 적용해 실행했습니다. 이 플래그는 검증 기기에만 주었으며
+제품 Manifest/renderer 설정과 서명 후보를 변경하지 않았습니다.
+
+같은 소스의 별도 debug build에 실제 자격 증명이 아닌 고정 invalid key를 넣었습니다.
+실제 CARTO 안내 PNG가 표시됐고 이를 가리거나 지우지 않으면서 지도 아래 앱 안내와
+marker/재생을 유지했습니다. 현재 앱 프로세스 logcat을 검사해 test key와
+`?key=` URL이 없음을 확인했습니다. Android 전용 기기의 Wi-Fi/data를 끄고 화면을
+다시 열었을 때 이전 안내 타일을 성공 cache로 재사용하지 않고 회색 배경/실패 문구/
+marker/재생 UI를 유지했습니다. 네트워크 설정은 초기값으로 모두 원복했습니다.
+증거는 `android-invalid-key-settled.*`, `android-offline-detail.*`와
+`android-invalid-build-check.json`입니다. 종료 후 두 전용 AVD를 중지했으며 데이터는
+보존했습니다. 실제 정상 키와 iOS 지도 UI, 새 signed map candidate는 여전히 남아 있습니다.
