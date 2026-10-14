@@ -157,11 +157,11 @@ apksigner/apkanalyzer가 PATH에 없으면 실행 중 확인한 Android SDK 도�
 `java -jar "$bundletool_jar" dump manifest --bundle=build/app/outputs/bundle/release/app-release.aab --module=base`
 형식으로 같은 명령을 실행한다. trace에는 실제 사용한 도구 경로를 남긴다.
 
-- [ ] Step 4: 두 하위 계획의 focused native/device 시나리오와 실제 백업 왕복을 끝낸다.
+- [x] Step 4: 두 하위 계획의 focused native/device 시나리오와 실제 백업 왕복을 끝낸다.
 기존 native location/notification smoke는 새 native registration과 lifecycle 회귀를
 확인할 때 실행한다. host용 FFI helper를 실제 기기 DB factory로 사용하지 않는다.
 
-- [ ] Step 5: 전용 Android emulator에 보존한 v0.9.1 signed APK를 설치해 짧은 산책 기록을
+- [x] Step 5: 전용 Android emulator에 보존한 v0.9.1 signed APK를 설치해 짧은 산책 기록을
 실제 UI/provider로 하나 만든다. native backup이 없는 구버전이므로 백업 성공을 전제하지
 않는다. 기록 시간/거리/라벨/장소를 캡처한 뒤 같은 ABI의 새 APK를 `adb install -r`로
 업데이트한다. 삭제 설치/`pm clear` 없이 기록이 남고 MR-01 저장/가져오기와 상세/재생이
@@ -213,11 +213,11 @@ Google Play/스토어 게시나 물리 기기 테스트를 실행하지 않았�
 ## 후속 범위와 전체 목표
 
 2026-10-14 실제 iOS 파일 왕복과 location/notification smoke는 통과했다.
-Android CUA 접근이 없어 대체 UI 자동화에 필요한 명시 요청을 기다린다.
-기존 APK 설치는 끝났으나 산책 생성/업데이트와 Android 파일 왕복은 미완료다.
+2026-10-15 ADB UI 자동화 승인 후 Android 실제 파일 왕복과 구버전 산책 생성/
+업데이트도 통과했다. 구체적 수치와 소스 SHA는 검증/릴리즈 증적에 남겼다.
 실제 지도에 API 키 안내만 표시되는 M-19/MR-17을 추가로 확인해 공개 게시를
-차단했다. [지도 복구 설계 초안](../specs/2026-10-14-basemap-service-restoration-design.md)은
-별도 검토 전이며 승인된 MR-01~07에 몰래 포함하지 않는다.
+차단했다. [지도 복구 설계](../specs/2026-10-14-basemap-service-restoration-design.md)와
+구현 계획을 추가로 승인받아 구현 중이다. 실제 키/정상 지도와 새 후보 검증은 남아 있다.
 
 사용자가 선택한 지속 고속+GPS 품질 기반 자동 제외를 다음 측정 설계의 제품 기준으로
 사용한다. 새 거리 reducer, 작은 변위/정지 노이즈, 병합 속도 분모, 시간 보존, 부분 제외와

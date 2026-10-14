@@ -9,13 +9,20 @@
 | Google Play | 게시 여부 미확인, 신규 게시 미실행 |
 | build SHA | `ddede226e62532c4613707a92818d1fc7c615929` |
 | 신규 태그 / PR CI | PR#1 draft. CI는 PR 현재 head에서 별도 확인 |
-| 기존 설치 업데이트 | Android 전용 API34 emulator에 기존 APK 설치. UI 검증 대기 |
-| 실제 시스템 파일 왕복 | iOS 재시도 PASS, Android UI 검증 대기 |
+| 기존 설치 업데이트 | PASS, API34 emulator에서 v0.9.1→ddede22, 데이터 보존 |
+| 실제 시스템 파일 왕복 | Android/iOS 실제 picker 저장/취소/복원/동일 이름 보존 PASS |
 
 물리 Android 기기 검증: 미실행. `adb devices` 조회에서 연결된 기기가 없었습니다.
 물리 iPhone 검증도 미실행입니다. 아래 simulator/unit 결과는 물리 기기 증거가 아닙니다.
 
-## 현재 검증
+## 현재 소스와 서명 후보의 구분
+
+2026-10-15 지도 설계와 구현 계획을 승인받아 인증 URL, 오류 처리와 경로 보존,
+비공개 빌드 설정을 구현했습니다. 실제 전용 키는 아직 준비되지 않았습니다. 아래
+`ddede22` APK/AAB는 지도 수정 전 후보이며 새 코드로 다시 서명한 후보가 아닙니다.
+키를 준비한 뒤 실제 Android/iOS 지도와 새 서명 빌드를 확인해야 게시할 수 있습니다.
+
+## 1차 서명 후보 검증
 
 - 복구 거리와 필터 경계 관련 52개 테스트 통과.
 - 현재 속도와 Home/복구 관련 68개 테스트 통과.
@@ -49,8 +56,8 @@
 새 APK와 AAB의 실제 인증서, manifest, 버전과 hash를 빌드 후 조회했습니다.
 ABI별 versionCode는 기본 16과 다르므로 같은 ABI의 v0.9.1보다 증가했는지 비교했습니다.
 
-게시 전 Android 시스템 picker 왕복, lifecycle과 기존 설치 데이터 보존, 추가 지도
-오류 복구, PR 교차 검토와 최종 CI를 확인합니다. 미검증 항목을 완료로 바꾸지 않습니다.
+Android 시스템 picker와 기존 설치 데이터 보존은 아래와 같이 통과했습니다.
+게시 전 실제 지도 복구, 새 서명 후보, PR 교차 검토와 최종 CI를 확인합니다. 미검증 항목을 완료로 바꾸지 않습니다.
 
 ## 확인한 산출물
 
@@ -78,19 +85,27 @@ bundletool validate는 exit 0입니다. Google Play 접수 검증으로 일반�
 [run38505847746](https://github.com/devcsb/sanbo/actions/runs/38505847746)는 Flutter와
 native 두 job 모두 성공했습니다. 이후 문서 commit의 CI 상태는 PR 현재 head에서
 다시 구분하며, 기존 성공을 새 head의 성공으로 대신하지 않습니다. 제품 build
-`ddede22` 이후 제품 소스/의존성 diff는 없습니다.
+해당 CI head까지는 `ddede22`와 제품 소스/의존성 diff가 없었습니다.
+현재 검토 브랜치에는 지도 제품 소스가 추가됐으며 이전 빌드와 구분합니다.
 
 iOS 파일 왕복은 첫 시도에 Mac 잠금으로 timeout됐으나, 같은 소스로 재시도해
 시스템 저장/취소/복원과 동일 이름 두 파일 각각의 재읽기가 통과했습니다.
-Android는 기존 signed APK 설치까지 확인했습니다. CUA가 emulator 앱을 인식하지
-못해 대체 UI 자동화에 필요한 명시 요청을 기다립니다. 시스템 picker와 구버전
-기록의 업데이트 보존, 실제 VoiceOver/TalkBack은 검증 대기입니다.
+2026-10-15 사용자가 ADB UI 자동화를 승인한 뒤 전용 API34 emulator 두 개로
+검증했습니다. 실제 시스템 picker 취소/저장/복원/동일 이름 두 파일 보존 E2E는
+1개, 1분15초, exit0입니다. 별도 구버전 설치에는 실제 UI/provider로 산책을 만들고
+`adb install -r`로 arm64 versionCode2015→2016을 적용했습니다. 거리122.203m,
+전체342초, 유효14개/원본15개, 메모/확정 라벨/저장 장소가 보존됐습니다.
+새 Settings에서8298bytes 백업을 저장하고 JSON 내용을 대조했으며 재가져오기는
+`산책 0개를 가져왔어요 · 중복 1개 건너뜀`을 표시했습니다. 저장창 대기 중 프로세스를
+종료하고 남아 있던 OS 저장창을 취소한 뒤 COLD 재시작과 재저장도 확인했습니다.
+Activity 회전/실제 TalkBack이나 물리 기기 검증을 완료한 것으로 일반화하지 않습니다.
 
 실제 상세 화면과 기존 CARTO URL의 HTTP200 PNG에 `API KEY REQUIRED`가
 표시됐습니다. [현재 공급자 계약](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)과
 키 없는 앱 요청이 맞지 않는 M-19/MR-17로 추적하고 신규 공개 게시를 차단합니다.
-[지도 복구 설계 초안](../superpowers/specs/2026-10-14-basemap-service-restoration-design.md)은
-검토 전이며 1차 build에는 지도 수정이 없습니다.
+[지도 복구 설계](../superpowers/specs/2026-10-14-basemap-service-restoration-design.md)와
+[구현 계획](../superpowers/plans/2026-10-15-basemap-service-restoration.md)을 승인받았습니다.
+코드/회귀 검증은 진행했지만 실제 키로 도로와 지명을 확인하기 전까지 M-19는 열려 있습니다.
 
 ## 초안 PR와 릴리즈
 
@@ -98,5 +113,44 @@ Android는 기존 signed APK 설치까지 확인했습니다. CUA가 emulator �
 [0.9.2 초안 릴리즈](https://github.com/devcsb/sanbo/releases)에도
 검증한4개 산출물과 checksum을 올리고 원격 asset digest를 대조했습니다. draft는 공개 게시 증거가 아닙니다.
 처음 준비한 c027b41/478개 후보에서 저자 검토의 늦은 좌표 문제를 수정했고,
-새 ddede22/479개 산출물로 교체했습니다. 최종 CI head와 실제 기기 수용 게이트, 지도 복구가
-남아 있습니다.
+새 ddede22/479개 산출물로 교체했습니다. 지도 변경을 포함한 새 build SHA와 후보, 최종 CI와 독립 검토, 실제 지도 및
+물리 기기 수용 게이트가 남아 있습니다.
+
+## 비공개 지도 키 준비와 빌드
+
+기존 지도는 OSM 데이터를 CARTO가 제공하는 구조입니다. OSM 데이터 사용과
+CARTO 타일 요청 인증은 별개입니다. [CARTO 공식 FAQ](https://docs.carto.com/faqs/carto-basemaps)에
+따르면 무료 키를 별도로 발급할 수 있고 월 비상업500만/상업100만 타일 요청까지
+무료입니다. 상업 무료 한도 초과 플랜은 월500달러부터입니다. 사용 유형과 약관 동의는
+사용자가 정합니다. 계정/결제/유료 플랜 신청은 진행하지 않았습니다.
+
+키를 Git이나 대화에 복사하지 않고 사용자 소유 로컬 파일
+`~/.config/sanbo/carto-basemap.json`에 `{"CARTO_BASEMAP_KEY":"발급한 값"}`으로
+보관합니다. 파일 권한은0600으로 둡니다. 경로/준비 여부만 알려주면 됩니다.
+이 키는 앱에 포함되는 공개 클라이언트용 키이며 서버 비밀 키와 다릅니다.
+발급 시 앱/서명 제한을 선택했다면 그 설정도 별도로 확인해야 합니다.
+
+로컬 파일에서 환경으로만 전달하는 실행 예시는 다음과 같습니다. 값은 argv와
+로그에 출력하지 않습니다. 기존 비공개 파일을 빌드 스크립트가 수정하지 않습니다.
+
+```bash
+python3 - <<'PYKEY'
+import json, os
+from pathlib import Path
+key_file = Path.home() / '.config/sanbo/carto-basemap.json'
+try:
+    key = json.loads(key_file.read_text())['CARTO_BASEMAP_KEY'].strip()
+    if not key:
+        raise ValueError()
+except (OSError, ValueError, KeyError, AttributeError):
+    raise SystemExit('CARTO build configuration is not ready') from None
+os.environ['CARTO_BASEMAP_KEY'] = key
+os.environ['QUALITY_BASE_REF'] = 'v0.9.1'
+os.execvpe('bash', ['bash', 'scripts/run_quality_loop.sh', '--all-apk'], os.environ)
+PYKEY
+```
+
+release/all은 키가 없으면 Git/Flutter gate 전에 중단합니다. debug/no-build는 키 없이
+실행할 수 있습니다. 키가 있는 빌드는 새 private 임시 디렉터리의0600 JSON을
+`--dart-define-from-file`로 전달하고 성공/실패 후 해당 파일과 디렉터리만 정리합니다.
+이전 서명 후보를 키 없는 지도 수정 후보로 재표시하거나 다시 올리지 않습니다.

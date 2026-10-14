@@ -1,6 +1,7 @@
 # 1차 유지보수 구현과 검증 기록
 
-제품 build SHA는 `ddede226e62532c4613707a92818d1fc7c615929`입니다. 이후 문서 commit과 binary build SHA를 구분합니다.
+기존 서명 후보 build SHA는 `ddede226e62532c4613707a92818d1fc7c615929`입니다.
+2026-10-15 지도 복구 제품 변경은 이 후보에 포함되지 않으며 새 빌드 검증을 구분합니다.
 [통합 계획](../plans/2026-10-14-maintenance-stage1.md),
 [릴리즈 증적](../../release/2026-10-14-maintenance-stage1-release.md)을 함께 봅니다.
 
@@ -14,7 +15,7 @@
 | 실제 iOS picker 왕복 | 재시도 PASS, 취소/저장/복원/중복 이름 보존과 두 파일 재읽기 |
 | iOS 실제 위치/알림 채널 smoke | PASS, 전용 simulator의 native provider와 notification cancel 호출 2개 |
 | 실제 Home 표시 | iOS 밝은/어두운 테마에서 측정 대기, 유효0, stale 문구와 Semantics 확인 |
-| 실제 Android picker / 설치 업데이트 | 전용 API34 emulator에 기존 APK 설치. CUA가 앱을 인식하지 못해 UI 검증 대기 |
+| 실제 Android picker / 설치 업데이트 | PASS, API34 실제 파일 왕복 E2E1개와 구버전→ddede22 데이터 보존 |
 | 실제 배경 지도 | FAIL, HTTP200 PNG에 API 키 안내. M-19/MR-17으로 신규 공개 게시 차단 |
 | 실제 스크린리더 / 물리 GPS·배터리 | 미실행 |
 | 신규 공개 게시 / Play | 미실행 |
@@ -47,7 +48,7 @@ iOS Health Connect 설정 버튼을 숨깁니다. 모바일 백업은 파일 경
   바로 필터/분할하면20m임을 확인했습니다. PRD M-18/MR-16으로 추적합니다.
 - Flutter test의 real timer, offscreen/merged Semantics를 분리해 실제 widget
   callback의 시각을 검사했습니다. 실제 VoiceOver 포커스/발화는 별도 검증입니다.
-- 여러 파일 변경의 교차 검토, Android picker 왕복, 기존 설치 업데이트와 지도 복구/게시 확인이
+- 여러 파일 변경의 독립 교차 검토와 실제 지도 복구/게시 확인이
   끝나기 전에는 이 계획과 전체 목표를 완료로 표시하지 않습니다.
 
 ## 로컬 실행 로그
@@ -70,8 +71,8 @@ O(n log n) 재계산하며, 자주 발생하는 provider에는 후속 indexed re
 필요합니다. Native 소스/의존성은 직전16/11개 gate 소스와 diff가 없습니다.
 
 저자 검토로 구현/취소/오류/stream close/경로와 최신성/시간대/export 경계를
-읽고 확인했습니다. 새로 확인한 늦은 좌표 불일치는 수정했습니다. Android picker,
-설치 데이터 보존과 독립 PR 검토, 추가 발견한 지도 오류는 미완료이므로 merge/publication 준비 완료로
+읽고 확인했습니다. 새로 확인한 늦은 좌표 불일치는 수정했습니다. Android picker와
+설치 보존은 아래 추가 검증을 통과했지만 독립 PR 검토와 실제 지도 확인이 남아 merge/publication 준비 완료로
 판정하지 않습니다. M-18과 측정 정책, 실제 스크린리더/물리 GPS는 후속 요구로
 유지합니다. 테스트와 문서로 그 항목을 완료한 것으로 대체하지 않습니다.
 
@@ -114,13 +115,23 @@ stale 상태에서는 `현재 속도 측정 중단`으로 바뀌고 이전 숫�
 v0.9.1 signed APK를 설치했고 `adb install` 결과는 Success였다. 기존 다른
 프로젝트 AVD나 사용자 기기의 데이터를 지우지 않았다. CUA는 실행 중인
 `qemu-system-aarch64` 이름과 실제 binary 경로를 모두 `Invalid app`으로
-거절했다. 다른 UI 자동화 사용에 필요한 사용자 명시 요청을 기다리고 있으며
-구버전 산책 생성/업데이트와 Android picker가 통과했다고 주장하지 않는다.
+거절했다. 2026-10-15 사용자가 대체 ADB UI 자동화를 승인해 검증을 재개했다.
+별도 `sanbo_backup_e2e_20261015`/API34의 실제 native 백업 E2E1개가1분15초에
+통과했다. 취소/저장/복원/중복 ID 건너뛰기와 동일 이름 두 파일 내용 보존을 확인했다.
+구버전 설치에서는 실제 UI/provider 산책을 만든 뒤 삭제 없이 signed `ddede22`로
+업데이트했다. 122.203m/342초/유효14개와 원본15개, 메모/확정 라벨/장소가
+유지됐고 실제 Settings 백업8298bytes와 재가져오기 중복1개 건너뛰기를 확인했다.
+로그 `android-signed-upgrade.log`, 실제 파일의 구조/수치 대조 결과
+`android-upgraded-backup-check.json`, UI 캡처 `android-new-*`에 남겼다.
+저장창 중 프로세스 종료, OS 저장창 취소, COLD 재시작 뒤 저장 성공도 확인했다.
+Activity configuration 회전/스크린리더/물리 GPS 검증을 뜻하지 않는다.
 
 실제 iOS 상세 지도는 `API KEY REQUIRED` 이미지였다. 기존 CARTO endpoint에
 HTTP200/image/png/2049bytes가 반환됐으나 파일을 직접 열어 정상 지도가 아님을
 확인했다. [공식 CARTO 계약](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)도
 2026-09-25부터 키 없는 raster 제공을 중단했다고 설명한다. PRD M-19/MR-17과
-[추가 설계 초안](../specs/2026-10-14-basemap-service-restoration-design.md)에
-기록하고 신규 공개 게시를 막는다. 승인된 1차 코드에 지도 수정이 포함됐다고
-주장하지 않는다.
+[추가 설계](../specs/2026-10-14-basemap-service-restoration-design.md)와 구현 계획을
+2026-10-15 승인받았다. 인증/키 미설정/HTTP200 notice/네트워크/codec 실패와
+닫힌 화면 callback/재생 rebuild/화면 재열기 회귀를 구현했다. 공급자 notice는
+보존하고 앱 안내는 지도 아래 표시한다. 실제 키 미준비로 정상 지도/새 서명 후보는
+미검증이다. 기존 `ddede22` 후보에 지도 수정이 포함됐다고 주장하지 않는다.

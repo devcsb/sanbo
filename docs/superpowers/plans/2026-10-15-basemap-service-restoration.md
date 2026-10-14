@@ -8,7 +8,7 @@
 
 **Tech Stack:** Flutter3.47.1/Dart3.13.1, flutter_map7.0.2, 기존 http1.2.2 이상, Python3 stdlib, Bash, Android/iOS.
 
-**Spec:** [배경 지도 복구 설계](../specs/2026-10-14-basemap-service-restoration-design.md). 사용자 승인 2026-10-15, 이 세션 직접 실행 방식을 유지한다. 이 작성된 구현 계획의 검토 전에는 제품 코드를 변경하지 않는다.
+**Spec:** [배경 지도 복구 설계](../specs/2026-10-14-basemap-service-restoration-design.md). 사용자 승인 2026-10-15, 이 세션 직접 실행 방식을 유지한다. 작성된 구현 계획도2026-10-15 승인받았다.
 
 ## Global Constraints
 
@@ -203,8 +203,8 @@ void _onBasemapError(int generation) {
 - quality의 release/all mode는 키가 없으면 Flutter/외부 명령 실행 전에 일반 오류로 끝난다. debug/no-build mode는 기존 CI에서 키 없이도 허용한다.
 - quality는 자신이 만든 임시 디렉터리의 파일만 EXIT trap에서 정리한다. 빌드에는 `--dart-define-from-file <path>`를 전달하고 키를 argv나 shell trace에 넣지 않는다.
 
-- [ ] Step1: 새 Python CLI에 대해 환경 키 없음/공백, `a&b?x=+` 보존, 기존 파일 덮어쓰기 거부,0600 권한, stdout/stderr 키 누출 없음을 Process.run으로 검사하는 Dart test를 쓴다. release gate는 키 없는 환경에서 빠르게 실패하고 Flutter를 호출하지 않는지 확인한다. 현재 cli 부재 RED를 확인한다.
-- [ ] Step2: stdlib만으로 준비 스크립트를 구현한다.
+- [x] Step1: 새 Python CLI에 대해 환경 키 없음/공백, `a&b?x=+` 보존, 기존 파일 덮어쓰기 거부,0600 권한, stdout/stderr 키 누출 없음을 Process.run으로 검사하는 Dart test를 쓴다. release gate는 키 없는 환경에서 빠르게 실패하고 Flutter를 호출하지 않는지 확인한다. 현재 cli 부재 RED를 확인한다.
+- [x] Step2: stdlib만으로 준비 스크립트를 구현한다.
 
 ```python
 key = os.environ.get('CARTO_BASEMAP_KEY', '').strip()
@@ -217,7 +217,7 @@ with open(sys.argv[1], 'x', encoding='utf-8',
 
 argv 개수 오류와 파일 작성 오류는 키나 payload 대신 일반 오류로 보고한다.
 
-- [ ] Step3: quality의 mode 선택 직후 release/all의 비어있는 환경 키를 검사한다. 기존 clean-tree/signing/manifest/hash 게이트를 유지한다. private 임시 디렉터리와 trap을 만들고 Step2로 파일을 준비한 뒤 모든 해당 Flutter build에 define 파일을 전달한다.
+- [x] Step3: quality의 mode 선택 직후 release/all의 비어있는 환경 키를 검사한다. 기존 clean-tree/signing/manifest/hash 게이트를 유지한다. private 임시 디렉터리와 trap을 만들고 Step2로 파일을 준비한 뒤 모든 해당 Flutter build에 define 파일을 전달한다.
 
 ```bash
 carto_define_dir=""
@@ -244,7 +244,7 @@ flutter_build appbundle --release --target lib/main.dart
 
 debug APK는 키가 있을 때만 같은 define 파일을 쓰고, 기본 CI에서는 기존 build 명령을 실행한다. 빈 배열의 Bash3 nounset 차이에도 의존하지 않는다. `set -x`를 켜지 않는다. 파일은 기존 키 파일/사용자 파일과 구별되는 새 경로만 쓴다.
 
-- [ ] Step4: focused config tests와 `bash -n scripts/run_quality_loop.sh`, 기존 release metadata tests를 통과시킨다. 키 준비 방법/비공개 파일/환경 전달을 release 문서에 기록한다. 사용자가 로컬에 둔 키의 경로만 받고 실제 값을 대화/문서에 복사하지 않는다. 해당 파일을 `build: CARTO 키를 비공개 파일로 배포 빌드에 전달`로 커밋한다.
+- [x] Step4: focused config tests와 `bash -n scripts/run_quality_loop.sh`, 기존 release metadata tests를 통과시킨다. 키 준비 방법/비공개 파일/환경 전달을 release 문서에 기록한다. 사용자가 로컬에 둔 키의 경로만 받고 실제 값을 대화/문서에 복사하지 않는다. 해당 파일을 `build: CARTO 키를 비공개 파일로 배포 빌드에 전달`로 커밋한다.
 - [ ] Step5: 사용자의 실제 전용 키가 준비됐을 때 clean committed tree에서 build SHA를 기록하고 `QUALITY_BASE_REF=v0.9.1 bash scripts/run_quality_loop.sh --all-apk`를 한 번 실행한다. native source/의존성이 달라지지 않았다면 직전16/11 native gate 소스 diff를 기록하고 불필요한 전체 native 반복을 하지 않는다. APK3개/AAB의 버전/인증서/hash를 새로 조회한다. 키 없이 signed 후보를 새로 만들거나 기존 후보를 새 제품 코드라고 주장하지 않는다.
 - [ ] Step6: 실제 키를 넣은 Android/iOS build에서 도로와 지명이 표시되는지 확인한다. 키 누락 build, 합성 invalid-key build, 기기 네트워크를 끈 상태를 각각 관찰해 경로/재생/실패 안내를 검사한다. 테스트 전용 emulator/simulator만 사용하고 네트워크 설정은 원복한다. 정상200/PNG인 안내 이미지가 아닌 실제 지도를 눈으로 확인한다. 실제키/URL이 드러나는 도구 출력을 저장하지 않는다.
 - [ ] Step7: 기존 Android 업데이트/백업 통과 결과와 변경 제품 소스의 연결을 구분한다. 실제 Settings 저장/재가져오기와 상세/재생을 새 APK에서도 smoke한다. 기록을 삭제하거나 pm clear/uninstall로 업데이트를 대신하지 않는다. 결과/미검증 항목을 문서에 기록하고 product-source diff를 남긴다.

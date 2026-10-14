@@ -417,7 +417,7 @@ rollback과 손상 파일 거부는 기존 walk_backup_test를 함께 실행해 
 않는다. save 취소 후 null을 검사하는 scenario를 별도로 두고 동일 이름 두 번
 저장 시 이전 파일이 남는지도 실제 picker에서 확인한다.
 
-- [ ] Step 5: Android emulator와 iOS simulator의 실제 picker로 native integration test를
+- [x] Step 5: Android emulator와 iOS simulator의 실제 picker로 native integration test를
 각각 실행한다. `adb devices`/`xcrun simctl list devices available`로 전용 기기를
 조회하고 선택한 실제 ID를 `backup_device_id`에 넣어 아래 명령을 실행한다.
 
@@ -444,6 +444,7 @@ ACTION_CREATE_DOCUMENT는 기존 파일을 덮어쓰지 않고 이름을 조정�
 
 현재 Task 3 구현과 host 26개 테스트, 전체 품질/native gate는 통과했습니다.
 iOS 실제 picker는 Mac 접근이 복구된 뒤 같은 소스로 재시도해 취소/저장/복원과
-동일 이름 두 파일 보존이 통과했습니다. Android CUA 접근이 없어 해당 OS의 실제
-picker 검증은 아직 남아 Task 3는 미완료입니다.
+동일 이름 두 파일 보존이 통과했습니다. Android도2026-10-15 대체 UI 자동화 승인 뒤
+전용 API34 emulator의 실제 picker E2E1개가1분15초에 통과했습니다. 취소/저장/
+복원/중복 ID 건너뛰기/동일 이름 두 파일 재읽기를 확인해 Task3 검증을 완료했습니다.
 [검증 기록](../verification/2026-10-14-maintenance-stage1.md)에 상태를 남겼습니다.

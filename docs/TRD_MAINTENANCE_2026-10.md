@@ -230,9 +230,13 @@ schema/backup migration은 후속 측정 설계에서 함께 확정한다.
 MR-17의 현재 `RouteMap.tileUrlTemplate`은 인증 없는 CARTO raster URL이다. 실제
 HTTP200 PNG와 iOS 상세 화면에 지도 대신 API 키 안내가 표시됐다. 공급자가
 [키 없는 raster 제공을 중단](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)했으므로 기존 성공 status 검사는 수용 게이트가 될 수 없다.
-[지도 복구 설계 초안](superpowers/specs/2026-10-14-basemap-service-restoration-design.md)에서
-기존 CARTO 유지와 공급자 변경을 비교한다. 인증 키 준비와 추가 설계 승인은 별도이며,
-승인된 MR-01~07 구현에 지도 복구가 포함됐다고 주장하지 않는다.
+[지도 복구 설계](superpowers/specs/2026-10-14-basemap-service-restoration-design.md)와
+구현 계획을2026-10-15 승인받아 기존 CARTO에 인증을 연결했다. 현재 소스는 키가
+없으면 요청하지 않고 안내하며, HTTP/stream/codec 실패에서도 경로를 보존한다.
+기존 renderer/cache를 쓰는 전용 provider로 키가 든 URL의 SDK 진단 누출을 막는다.
+공급자200 안내 이미지는 보존하며 실패/안내 cache만 제거해 재열기 복구를 허용한다.
+키 준비/실제 도로·지명/새 서명 후보는 미검증이다. 기존 `ddede22` 산출물에는
+이 변경이 포함되지 않는다.
 
 1차 종료 게이트는 새 회귀 테스트, analyzer, 전체 Flutter 테스트, Android/iOS native
 테스트, Android debug/release 빌드, 문서 검증, `git diff --check`다. 모바일
