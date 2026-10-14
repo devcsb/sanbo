@@ -11,6 +11,102 @@ import 'package:sanbo/domain/services/session_export.dart';
 import 'package:sanbo/domain/services/walk_stats.dart';
 
 void main() {
+  test('completed JSON uses the same average as the human summary', () {
+    final t = DateTime.utc(2026, 10, 14);
+    final session = WalkSession(
+      id: 'canonical-export',
+      startedAt: t,
+      endedAt: t.add(const Duration(seconds: 110)),
+      status: SessionStatus.completed,
+      trackingMode: TrackingMode.balanced,
+      timezone: 'Asia/Seoul',
+      totalDistanceM: 100,
+      movingTimeS: 100,
+      durationS: 110,
+      stationaryTimeS: 10,
+      avgSpeedMps: 9,
+    );
+    const export = SessionExport();
+    final doc = export.toJsonDocument(session: session, windows: const []);
+    expect((doc['session'] as Map)['avg_speed_mps'], 1);
+    final ndjson = export.toNdjson(
+      session: session,
+      windows: const [],
+      samples: const [],
+      exclusions: const [],
+    );
+    final meta = jsonDecode(ndjson.split('\n').first) as Map;
+    expect((meta['session'] as Map)['avg_speed_mps'], 1);
+    expect(export.humanSummary(session: session), contains('3.6 km/h'));
+  });
+
+  for (final distance in <double?>[null, 0, double.nan, double.infinity]) {
+    test('completed export leaves unavailable average null for $distance', () {
+      final session = WalkSession(
+        id: 'missing',
+        startedAt: DateTime.utc(2026, 10, 14),
+        timezone: 'Asia/Seoul',
+        trackingMode: TrackingMode.balanced,
+        status: SessionStatus.completed,
+        totalDistanceM: distance,
+        movingTimeS: 100,
+        avgSpeedMps: 9,
+      );
+      expect(
+        (const SessionExport().toJsonDocument(
+              session: session,
+              windows: const [],
+            )['session']
+            as Map)['avg_speed_mps'],
+        isNull,
+      );
+    });
+  }
+  for (final moving in <int?>[null, 0]) {
+    test(
+      'completed export leaves unavailable average null for time $moving',
+      () {
+        final session = WalkSession(
+          id: 'missing',
+          startedAt: DateTime.utc(2026, 10, 14),
+          timezone: 'Asia/Seoul',
+          trackingMode: TrackingMode.balanced,
+          status: SessionStatus.completed,
+          totalDistanceM: 100,
+          movingTimeS: moving,
+          avgSpeedMps: 9,
+        );
+        expect(
+          (const SessionExport().toJsonDocument(
+                session: session,
+                windows: const [],
+              )['session']
+              as Map)['avg_speed_mps'],
+          isNull,
+        );
+      },
+    );
+  }
+  test('active structured export retains the stored instantaneous value', () {
+    final session = WalkSession(
+      id: 'active',
+      startedAt: DateTime.utc(2026, 10, 14),
+      timezone: 'Asia/Seoul',
+      trackingMode: TrackingMode.balanced,
+      totalDistanceM: 100,
+      movingTimeS: 100,
+      avgSpeedMps: 9,
+    );
+    expect(
+      (const SessionExport().toJsonDocument(
+            session: session,
+            windows: const [],
+          )['session']
+          as Map)['avg_speed_mps'],
+      9,
+    );
+  });
+
   group('WalkStats', () {
     test('aggregates completed walks only', () {
       final sessions = [
