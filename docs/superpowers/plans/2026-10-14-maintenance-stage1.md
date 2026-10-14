@@ -119,11 +119,11 @@ checksum_file="$checksum_dir/SHA256SUMS_v$expected_version_name.txt"
 - Verification record contains source/build SHA, actual commands/exits, test counts, native picker results, device model/OS, cert/manifest/hash, and unverified physical/store items.
 - Published release URL/version/assets are re-read from GitHub API after the publication step. Draft URL is not publication evidence.
 
-- [ ] Step 1: 새 build 전에 old release APK 3개를 `/tmp/sanbo-v0.9.1-upgrade-baseline`에
+- [x] Step 1: 새 build 전에 old release APK 3개를 `/tmp/sanbo-v0.9.1-upgrade-baseline`에
 보존한다. 로컬 output이 없으면 GitHub의 v0.9.1 asset을 같은 폴더에 받고 기존 공개
 hash와 비교한다. 기존 태그나 원격 asset은 수정하지 않는다.
 
-- [ ] Step 2: clean committed tree에서 새 소스 SHA를 기록하고 서로의 generated state를
+- [x] Step 2: clean committed tree에서 새 소스 SHA를 기록하고 서로의 generated state를
 바꿀 수 있는 Flutter/Gradle/Pods gate는 순차 실행한다.
 
 ```bash
@@ -137,7 +137,7 @@ bash scripts/run_native_platform_tests.sh
 기록한다. gate가 제품 파일이나 lockfile을 바꾸면 생성 변경을 검토한 뒤 새 revision에서
 필요한 gate만 다시 실행한다. 성공한 같은 revision의 전체 gate를 별 이유 없이 반복하지 않는다.
 
-- [ ] Step 3: APK 3개에 대해 실제 versionName/versionCode/targetSdk/certificate를 조회한다.
+- [x] Step 3: APK 3개에 대해 실제 versionName/versionCode/targetSdk/certificate를 조회한다.
 각 새 versionCode는 같은 ABI의 0.9.1 APK보다 커야 한다. arm64의 기존 값 2015와 기본 15를
 혼동하지 않는다. AAB도 artifact manifest와 jar 서명을 검사한다. bundletool CLI가 없으면
 공식 google/bundletool release의 all-jar를 도구용 `/tmp`에 받고 버전과 SHA를 기록한다.
@@ -173,7 +173,7 @@ apksigner/apkanalyzer가 PATH에 없으면 실행 중 확인한 Android SDK 도�
 synthetic 계산 시간만으로 주장하지 않는다. VoiceOver/TalkBack을 실행하지 못하면
 Semantics/widget 증거와 구분한다.
 
-- [ ] Step 7: 결과 문서를 실제 source SHA와 함께 기록한다. 검증 후 문서만 추가해 commit이
+- [x] Step 7: 결과 문서를 실제 source SHA와 함께 기록한다. 검증 후 문서만 추가해 commit이
 바뀌면 아래처럼 제품 소스가 같은지 확인한다. 여기서 release_build_sha는 Step 2에서
 기록한 실제 값이고 committed 제품 파일이 달라지면 artifact 검증을 새로 해야 한다.
 
@@ -211,6 +211,13 @@ Release를 준비한다. CI는 PR의 현재 head SHA에서 완료됐는지 조�
 Google Play/스토어 게시나 물리 기기 테스트를 실행하지 않았으면 완료로 기록하지 않는다.
 
 ## 후속 범위와 전체 목표
+
+2026-10-14 실제 iOS 파일 왕복과 location/notification smoke는 통과했다.
+Android CUA 접근이 없어 대체 UI 자동화에 필요한 명시 요청을 기다린다.
+기존 APK 설치는 끝났으나 산책 생성/업데이트와 Android 파일 왕복은 미완료다.
+실제 지도에 API 키 안내만 표시되는 M-19/MR-17을 추가로 확인해 공개 게시를
+차단했다. [지도 복구 설계 초안](../specs/2026-10-14-basemap-service-restoration-design.md)은
+별도 검토 전이며 승인된 MR-01~07에 몰래 포함하지 않는다.
 
 사용자가 선택한 지속 고속+GPS 품질 기반 자동 제외를 다음 측정 설계의 제품 기준으로
 사용한다. 새 거리 reducer, 작은 변위/정지 노이즈, 병합 속도 분모, 시간 보존, 부분 제외와

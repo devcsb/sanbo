@@ -225,6 +225,14 @@ schema/backup migration은 후속 측정 설계에서 함께 확정한다.
 | MR-13 | 물리 기기 QA | Galaxy/Pixel/iPhone 야외/화면 잠금/배터리 matrix |
 | MR-14 | 후속 날짜 목록/CTA 접근성 | 선택 날짜 가시성, 큰 글자, 실제 VoiceOver/TalkBack focus |
 | MR-15 | 후속 부분 제외 집계와 표시 | backup v2 부분/복수 제외, 20초 제외 시35m/40초 일치, 개별 복원과 사용자 메타데이터 유지 |
+| MR-17 | 긴급 지도 공급자 인증과 장애 표시 | 실제 PNG 내용과 Android/iOS 화면, 키 미설정/인증 실패/오프라인에서 경로 보존 |
+
+MR-17의 현재 `RouteMap.tileUrlTemplate`은 인증 없는 CARTO raster URL이다. 실제
+HTTP200 PNG와 iOS 상세 화면에 지도 대신 API 키 안내가 표시됐다. 공급자가
+[키 없는 raster 제공을 중단](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)했으므로 기존 성공 status 검사는 수용 게이트가 될 수 없다.
+[지도 복구 설계 초안](superpowers/specs/2026-10-14-basemap-service-restoration-design.md)에서
+기존 CARTO 유지와 공급자 변경을 비교한다. 인증 키 준비와 추가 설계 승인은 별도이며,
+승인된 MR-01~07 구현에 지도 복구가 포함됐다고 주장하지 않는다.
 
 1차 종료 게이트는 새 회귀 테스트, analyzer, 전체 Flutter 테스트, Android/iOS native
 테스트, Android debug/release 빌드, 문서 검증, `git diff --check`다. 모바일

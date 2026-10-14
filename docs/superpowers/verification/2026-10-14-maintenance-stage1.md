@@ -11,8 +11,11 @@
 | APK 버전/서명 | 세 ABI의 versionCode 각각 증가, 기존 인증서 일치 |
 | AAB manifest/서명 | 0.9.2+16, SDK36, JAR 검증과 인증서 일치, bundletool validate exit0 |
 | 기존 APK 보존 | 공개 v0.9.1 세 파일 SHA-256 일치, 별도 보존 |
-| 실제 iOS picker 왕복 | UI 조작 불가, 12분 timeout. 미완료 |
-| 실제 Android picker / 설치 업데이트 | 미실행 |
+| 실제 iOS picker 왕복 | 재시도 PASS, 취소/저장/복원/중복 이름 보존과 두 파일 재읽기 |
+| iOS 실제 위치/알림 채널 smoke | PASS, 전용 simulator의 native provider와 notification cancel 호출 2개 |
+| 실제 Home 표시 | iOS 밝은/어두운 테마에서 측정 대기, 유효0, stale 문구와 Semantics 확인 |
+| 실제 Android picker / 설치 업데이트 | 전용 API34 emulator에 기존 APK 설치. CUA가 앱을 인식하지 못해 UI 검증 대기 |
+| 실제 배경 지도 | FAIL, HTTP200 PNG에 API 키 안내. M-19/MR-17으로 신규 공개 게시 차단 |
 | 실제 스크린리더 / 물리 GPS·배터리 | 미실행 |
 | 신규 공개 게시 / Play | 미실행 |
 
@@ -44,7 +47,7 @@ iOS Health Connect 설정 버튼을 숨깁니다. 모바일 백업은 파일 경
   바로 필터/분할하면20m임을 확인했습니다. PRD M-18/MR-16으로 추적합니다.
 - Flutter test의 real timer, offscreen/merged Semantics를 분리해 실제 widget
   callback의 시각을 검사했습니다. 실제 VoiceOver 포커스/발화는 별도 검증입니다.
-- 여러 파일 변경의 교차 검토, 실제 picker 왕복, 기존 설치 업데이트와 게시 확인이
+- 여러 파일 변경의 교차 검토, Android picker 왕복, 기존 설치 업데이트와 지도 복구/게시 확인이
   끝나기 전에는 이 계획과 전체 목표를 완료로 표시하지 않습니다.
 
 ## 로컬 실행 로그
@@ -67,7 +70,57 @@ O(n log n) 재계산하며, 자주 발생하는 provider에는 후속 indexed re
 필요합니다. Native 소스/의존성은 직전16/11개 gate 소스와 diff가 없습니다.
 
 저자 검토로 구현/취소/오류/stream close/경로와 최신성/시간대/export 경계를
-읽고 확인했습니다. 새로 확인한 늦은 좌표 불일치는 수정했습니다. 실제 picker,
-설치 데이터 보존과 독립 PR 검토는 미완료이므로 merge/publication 준비 완료로
+읽고 확인했습니다. 새로 확인한 늦은 좌표 불일치는 수정했습니다. Android picker,
+설치 데이터 보존과 독립 PR 검토, 추가 발견한 지도 오류는 미완료이므로 merge/publication 준비 완료로
 판정하지 않습니다. M-18과 측정 정책, 실제 스크린리더/물리 GPS는 후속 요구로
 유지합니다. 테스트와 문서로 그 항목을 완료한 것으로 대체하지 않습니다.
+
+## 실제 iOS 검증 재개
+
+첫 시도의 Mac 잠금/12분 timeout은 환경 제한이었다. 전용 iPhone17Pro
+`Sanbo Maintenance 20261014` / iOS26.5 / device ID
+`47B2C6D4-88A1-4D43-90B3-0C4DB02EE71A`를 부팅한 뒤 CUA 화면에 접근할 수 있었다.
+같은 제품 소스에서 다음 새 검증을 진행했다.
+
+```bash
+flutter test --no-pub integration_test/native_backup_export_e2e_test.dart -d 47B2C6D4-88A1-4D43-90B3-0C4DB02EE71A
+flutter test --no-pub integration_test/native_notification_channel_e2e_test.dart integration_test/native_location_e2e_test.dart -d 47B2C6D4-88A1-4D43-90B3-0C4DB02EE71A
+```
+
+첫 명령은 1개 test, 3분2초, exit0이다. 시스템 저장창에서 취소하고 다시 저장한
+파일의 bytes와 두 native SQLite DB의 원본7개, 분별 라벨/메모/장소/제외를
+비교했다. 동일 파일 재가져오기는 중복 산책1개를 건너뛰었다. 같은 이름으로 두 번째
+내용을 저장할 때 시스템 `둘 다 유지`를 선택하고 두 파일을 각각 열어 첫 내용과
+새 내용이 보존됐는지 확인했다. 성공은 mock/native unit의 대체 결과가 아니다.
+로그는 백업 ledger의 `task-3-ios-e2e-retry.log`다.
+
+두 번째 명령은 2개 test, 1분38초, exit0이다. CoreLocation provider에 simctl로
+합성 보행 경로1.4m/s를 주고, CUA로 위치를 한 번 허용했다. 거리15m 초과,
+유효 위치3개 이상과 완료 저장을 확인하는 기존 smoke 및 실제 notification
+channel cancel 호출이 통과했다. `ios-native-smoke.log`에 결과가 있다. 물리
+정확도나 실제 알림 발화/배터리 검증으로 일반화하지 않는다. 종료 후 합성 위치를
+clear했다.
+
+`lib/main.dart` 실제 실행에서는 신호 전 `측정 대기`, 합성 정지 관측 뒤
+`0.0km/h`, 위치 공급 clear 후 `측정 중단`을 화면에서 확인했다. CUA AX 값도
+stale 상태에서는 `현재 속도 측정 중단`으로 바뀌고 이전 숫자를 읽지 않았다.
+어두운 테마에서도 같은 상태와 종료 버튼을 확인하고 테스트 산책을 종료했다.
+320dp/2배 글자는 앞서 통과한 widget 검증이며 이 simulator 크기로 검증했다고
+주장하지 않는다. 실제 VoiceOver/TalkBack 검증은 여전히 미실행이다.
+
+## Android 검증 접근과 추가 지도 오류
+
+새 전용 `sanbo_maintenance_20261014`, Pixel6/API34/arm64 emulator에 보존한
+v0.9.1 signed APK를 설치했고 `adb install` 결과는 Success였다. 기존 다른
+프로젝트 AVD나 사용자 기기의 데이터를 지우지 않았다. CUA는 실행 중인
+`qemu-system-aarch64` 이름과 실제 binary 경로를 모두 `Invalid app`으로
+거절했다. 다른 UI 자동화 사용에 필요한 사용자 명시 요청을 기다리고 있으며
+구버전 산책 생성/업데이트와 Android picker가 통과했다고 주장하지 않는다.
+
+실제 iOS 상세 지도는 `API KEY REQUIRED` 이미지였다. 기존 CARTO endpoint에
+HTTP200/image/png/2049bytes가 반환됐으나 파일을 직접 열어 정상 지도가 아님을
+확인했다. [공식 CARTO 계약](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)도
+2026-09-25부터 키 없는 raster 제공을 중단했다고 설명한다. PRD M-19/MR-17과
+[추가 설계 초안](../specs/2026-10-14-basemap-service-restoration-design.md)에
+기록하고 신규 공개 게시를 막는다. 승인된 1차 코드에 지도 수정이 포함됐다고
+주장하지 않는다.

@@ -427,7 +427,7 @@ flutter test --no-pub integration_test/native_backup_export_e2e_test.dart -d "$b
 
 실제 값/OS/저장 위치/파일 재가져오기/취소/재생성 결과를 검증 문서에 남긴다.
 물리 기기 결과로 승격하지 않는다.
-- [ ] Step 6: `fix: 모바일 백업 저장 어댑터와 파일 왕복 복구`로 커밋한다.
+- [x] Step 6: `fix: 모바일 백업 저장 어댑터와 파일 왕복 복구`로 커밋한다.
 
 ## 이 계획의 종료 증거
 
@@ -443,5 +443,7 @@ ACTION_CREATE_DOCUMENT는 기존 파일을 덮어쓰지 않고 이름을 조정�
 요구하지 않는다. 동일 이름 동작도 실제 E2E에서 확인한다.
 
 현재 Task 3 구현과 host 26개 테스트, 전체 품질/native gate는 통과했습니다.
-Mac 잠금으로 실제 picker 왕복과 설치 업데이트가 남아 Task 3는 미완료입니다.
+iOS 실제 picker는 Mac 접근이 복구된 뒤 같은 소스로 재시도해 취소/저장/복원과
+동일 이름 두 파일 보존이 통과했습니다. Android CUA 접근이 없어 해당 OS의 실제
+picker 검증은 아직 남아 Task 3는 미완료입니다.
 [검증 기록](../verification/2026-10-14-maintenance-stage1.md)에 상태를 남겼습니다.
