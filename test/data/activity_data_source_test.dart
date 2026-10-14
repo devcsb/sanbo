@@ -2,6 +2,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/data/activity_data_source.dart';
 
 void main() {
+  test('settings capability reflects an installed opener', () {
+    final reader = _FakeDailyStepsReader(
+      sourceKind: ActivitySourceKind.healthKit,
+    );
+    final noSettings = HealthActivityDataSource(reader);
+    expect(noSettings.canOpenSettings, isFalse);
+    final withSettings = HealthActivityDataSource(
+      reader,
+      settingsOpener: () async => true,
+    );
+    expect(withSettings.canOpenSettings, isTrue);
+  });
+
   test('unavailable source returns no fabricated zero totals', () async {
     final rows = await const UnavailableActivityDataSource().readDailySteps(
       startDate: DateTime(2026, 8, 1),

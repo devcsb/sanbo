@@ -59,6 +59,7 @@ class DailyActivityPanel extends ConsumerWidget {
           snapshot: snapshot,
           connector: connector,
           settingsOpener: settingsOpener,
+          onRetry: () => ref.invalidate(dailyActivityProvider),
           onConnect: connector == null
               ? null
               : () async {
@@ -97,6 +98,7 @@ class _DailyActivityLoaded extends StatelessWidget {
     required this.connector,
     required this.settingsOpener,
     required this.onConnect,
+    required this.onRetry,
     required this.selectedDay,
     required this.onSelectDay,
     required this.onMoveWeek,
@@ -106,6 +108,7 @@ class _DailyActivityLoaded extends StatelessWidget {
   final ActivityDataSourceConnector? connector;
   final ActivityDataSourceSettingsOpener? settingsOpener;
   final Future<ActivityAccessState> Function()? onConnect;
+  final VoidCallback onRetry;
   final DateTime selectedDay;
   final ValueChanged<DateTime> onSelectDay;
   final ValueChanged<DateTime> onMoveWeek;
@@ -113,7 +116,9 @@ class _DailyActivityLoaded extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final opener = settingsOpener;
+    final opener = settingsOpener?.canOpenSettings == true
+        ? settingsOpener
+        : null;
     final selected = localDateOnly(selectedDay);
     final selectedStats = snapshot.days.firstWhere(
       (day) => day.date == selected,
@@ -128,11 +133,16 @@ class _DailyActivityLoaded extends StatelessWidget {
     final steps =
         snapshot.stepsByDate[selected] ??
         DailyStepSnapshot.unavailable(selected);
-    final stepsValue = switch (steps.coverage) {
-      ActivityCoverage.partial => '일부 기간만 확인됨',
-      ActivityCoverage.complete when steps.steps != null =>
-        '${NumberFormat.decimalPattern('ko').format(steps.steps)}걸음',
-      ActivityCoverage.complete || ActivityCoverage.unavailable => '연결되지 않음',
+    final stepsValue = switch (steps) {
+      DailyStepSnapshot(source: ActivitySourceKind.error) => '불러오기 실패',
+      DailyStepSnapshot(source: ActivitySourceKind.denied) => '권한 필요',
+      DailyStepSnapshot(coverage: ActivityCoverage.partial) => '일부 기간만 확인됨',
+      DailyStepSnapshot(
+        coverage: ActivityCoverage.complete,
+        steps: final int total,
+      ) =>
+        '${NumberFormat.decimalPattern('ko').format(total)}걸음',
+      _ => '연결 전',
     };
     final sourceLabel = switch (steps.source) {
       ActivitySourceKind.healthConnect => 'Health Connect에서 가져옴',
@@ -314,6 +324,14 @@ class _DailyActivityLoaded extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (steps.source == ActivitySourceKind.error) ...[
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: onRetry,
+                        icon: const Icon(Icons.refresh_rounded),
+                        label: const Text('다시 불러오기'),
+                      ),
+                    ],
                     if (showConnectAction) ...[
                       const SizedBox(height: 8),
                       _ActivityConnectButton(
