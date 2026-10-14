@@ -64,8 +64,9 @@ esac
 
 case "$build_mode" in
   release|all)
-    expected_release_version="0.9.1+15"
-    release_evidence="docs/release/2026-09-24-android-release.md"
+    expected_release_version="0.9.2+16"
+    expected_version_name="${expected_release_version%%+*}"
+    release_evidence="docs/release/2026-10-14-maintenance-stage1-release.md"
     actual_release_version="$(sed -n 's/^version: //p' pubspec.yaml | head -1)"
     if [[ "$actual_release_version" != "$expected_release_version" ]]; then
       echo "release version mismatch: expected $expected_release_version" >&2
@@ -128,7 +129,7 @@ case "$build_mode" in
     grep -q 'foregroundServiceType="0x8"' <<<"$manifest"
 
     step "Android release version and target SDK"
-    if [[ "$(apkanalyzer manifest version-name "$apk")" != "0.9.1" ]]; then
+    if [[ "$(apkanalyzer manifest version-name "$apk")" != "$expected_version_name" ]]; then
       echo "release version name mismatch: $apk" >&2
       exit 1
     fi
@@ -150,7 +151,7 @@ case "$build_mode" in
 
     step "Android release checksums"
     checksum_dir="build/app/outputs/release"
-    checksum_file="$checksum_dir/SHA256SUMS_v0.9.1.txt"
+    checksum_file="$checksum_dir/SHA256SUMS_v$expected_version_name.txt"
     mkdir -p "$checksum_dir"
     shasum -a 256 \
       build/app/outputs/bundle/release/app-release.aab \
