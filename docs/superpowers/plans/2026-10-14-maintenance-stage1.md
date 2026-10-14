@@ -70,7 +70,7 @@ MR-08~15와 스토어 준비 요구는 1차 완료로 표시하지 않는다. �
 - Gate produces `build/app/outputs/release/SHA256SUMS_v0.9.2.txt` and signed AAB/ABI APKs.
 - release evidence distinguishes planned/pass/fail/not-run by command/revision, never by intent.
 
-- [ ] Step 1: release_metadata_docs_test를 새 버전과 새 증적 파일로 바꿔 실제 파일
+- [x] Step 1: release_metadata_docs_test를 새 버전과 새 증적 파일로 바꿔 실제 파일
 미존재/버전 불일치로 RED를 확인한다. 기존 0.9.1 증적은 그대로 두고 기대값만
 신규 후보로 옮긴다.
 
@@ -90,7 +90,7 @@ test('release metadata selects 0.9.2 and keeps device status explicit', () {
 게이트 결과는 이 문자열 test로 증명하지 않고 실제 command output으로 기록한다.
 새 증적 문서에는 실제 연결 조회 결과로 물리 기기 검증 상태를 적는다.
 
-- [ ] Step 2: pubspec/AppInfo 버전을 변경하고 release gate의 candidate/evidence/
+- [x] Step 2: pubspec/AppInfo 버전을 변경하고 release gate의 candidate/evidence/
 versionName/checksum 이름을 새 후보로 바꾼다. signing/manifest/clean-tree/
 generated-file 검사와 기존 키 접근 방식을 유지한다. versionName은 선택한
 `expected_release_version`의 `+` 앞값에서 도출해 중복 hard-code를 줄인다.
@@ -102,10 +102,10 @@ release_evidence="docs/release/2026-10-14-maintenance-stage1-release.md"
 checksum_file="$checksum_dir/SHA256SUMS_v$expected_version_name.txt"
 ```
 
-- [ ] Step 3: release notes는 실제 구현된 MR-01~06과 검증 범위만 쓰고 자동 제외/
+- [x] Step 3: release notes는 실제 구현된 MR-01~06과 검증 범위만 쓰고 자동 제외/
 노이즈 개선을 포함했다고 쓰지 않는다. 새 gate/실제 기기 결과는 처음에는 미실행으로
 기록하고 command가 끝난 뒤만 갱신한다.
-- [ ] Step 4: `flutter test --no-pub --concurrency=1 test/features/release_metadata_docs_test.dart test/app_info_test.dart`와 `git diff --check`를 실행하고 해당 파일만 `chore: 산보 0.9.2 릴리즈 후보 메타데이터 정리`로 커밋한다.
+- [x] Step 4: `flutter test --no-pub --concurrency=1 test/features/release_metadata_docs_test.dart test/app_info_test.dart`와 `git diff --check`를 실행하고 해당 파일만 `chore: 산보 0.9.2 릴리즈 후보 메타데이터 정리`로 커밋한다.
 
 ### Task 2: 통합 검증, 기존 설치 업데이트, PR와 배포 자료
 
@@ -224,7 +224,7 @@ MR-14 날짜/접근성과 MR-12 스토어 privacy 진입도 해당 흐름에서 
 
 - [x] 1차 설계 사용자 승인, 자동 제외 후속 방향 선택 기록
 - [x] 독립 계획 두 개와 통합/릴리즈 계획 작성
-- [ ] 사용자가 작성된 계획을 검토
-- [ ] 이 세션에서 직접 구현하는 기존 실행 방식으로 진행
+- [x] 사용자가 작성된 계획을 검토, 실행 승인 2026-10-14
+- [x] 이 세션에서 직접 구현하는 기존 실행 방식으로 진행
 - [ ] 새 회귀/native/실제 파일 왕복/전체 gate/업데이트 검증
 - [ ] PR 교차 검토와 구체적인 공개 배포 확인

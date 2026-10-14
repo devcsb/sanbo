@@ -56,7 +56,7 @@ controller/repository 전체 분해는 하지 않는다. 새 순수 함수는 �
 - Produces: 같은 필터 목록의 복구/완료 `liveDistanceM` 일치, 마지막 fragment 안에서만 재구성한 live speed.
 - Adds private `bool _liveRouteInterrupted = false` to keep route continuity distinct from the filter's jump anchor.
 
-- [ ] Step 1: 아래 회귀를 기존 session_flow_test에 추가한다. 기존 imports에 SessionPipeline과 RoutePartitioner를 필요할 때만 추가한다.
+- [x] Step 1: 아래 회귀를 기존 session_flow_test에 추가한다. 기존 imports에 SessionPipeline과 RoutePartitioner를 필요할 때만 추가한다.
 
 ```dart
 test('recovery preserves filtered route boundaries', () async {
@@ -95,7 +95,7 @@ test('recovery preserves filtered route boundaries', () async {
 });
 ```
 
-- [ ] Step 2: 마지막 샘플이 filtered인 별도 회귀를 추가한다.
+- [x] Step 2: 마지막 샘플이 filtered인 별도 회귀를 추가한다.
 
 ```dart
 test('recovery does not bridge a filtered tail', () async {
@@ -134,9 +134,9 @@ test('recovery does not bridge a filtered tail', () async {
 });
 ```
 
-- [ ] Step 3: `flutter test --no-pub --concurrency=1 test/features/session_flow_test.dart --plain-name 'recovery preserves filtered route boundaries'`를 실행해 기존30m와 기대10m의 차이로 실패하는지 확인한다. tail test도 단독 실행한다.
+- [x] Step 3: `flutter test --no-pub --concurrency=1 test/features/session_flow_test.dart --plain-name 'recovery preserves filtered route boundaries'`를 실행해 기존30m와 기대10m의 차이로 실패하는지 확인한다. tail test도 단독 실행한다.
 
-- [ ] Step 4: 다음 계산을 복구 재계산에 넣고 평탄화된 valid 목록으로 거리/속도를 만드는 두 helper 호출을 교체한다.
+- [x] Step 4: 다음 계산을 복구 재계산에 넣고 평탄화된 valid 목록으로 거리/속도를 만드는 두 helper 호출을 교체한다.
 
 ```dart
 final filtered = _liveFilter.apply(bounded);
@@ -170,9 +170,9 @@ if (acceptedByIncrementalFilter) {
 }
 ```
 
-- [ ] Step 5: start/stop/discard/failure cleanup의 기존 private counter reset에서 새 flag도 false로 초기화한다. 마지막 filtered point 종류별로 jump, stale, soft accuracy, malformed를 기존 fixture에 추가해 새 anchor를 임의로 연결하지 않는지 확인한다. 60초 경계와 60초 초과 공백은 기존 route partition 테스트 계약을 재사용한다.
-- [ ] Step 6: `flutter test --no-pub --concurrency=1 test/features/session_flow_test.dart test/domain/route_partitioner_test.dart test/domain/session_pipeline_test.dart`를 실행한다. 승인된 수학 하한이 변하지 않았는지 diff로 확인한다.
-- [ ] Step 7: 두 task 파일만 커밋한다. 메시지는 `fix: 복구 거리에서 필터 경계 연결 차단`.
+- [x] Step 5: start/stop/discard/failure cleanup의 기존 private counter reset에서 새 flag도 false로 초기화한다. 마지막 filtered point 종류별로 jump, stale, soft accuracy, malformed를 기존 fixture에 추가해 새 anchor를 임의로 연결하지 않는지 확인한다. 60초 경계와 60초 초과 공백은 기존 route partition 테스트 계약을 재사용한다.
+- [x] Step 6: `flutter test --no-pub --concurrency=1 test/features/session_flow_test.dart test/domain/route_partitioner_test.dart test/domain/session_pipeline_test.dart`를 실행한다. 승인된 수학 하한이 변하지 않았는지 diff로 확인한다.
+- [x] Step 7: 두 task 파일만 커밋한다. 메시지는 `fix: 복구 거리에서 필터 경계 연결 차단`.
 
 ### Task 2: 현재 속도 최신성 및 Home 안내
 
@@ -189,7 +189,7 @@ if (acceptedByIncrementalFilter) {
 - Controller adds private `bool _hasLiveSpeedEvidence = false` and `DateTime? _lastUsableFixAt`, reset with the existing metrics. Background callbacks update these private fields even while UI publication is paused. New availability fields are display state, not DB fields.
 - `LiveSessionState.copyWith` adds `bool clearLastUsableFixAt = false` so reset can clear a nullable instant rather than retaining it through `??`.
 
-- [ ] Step 1: 순수 함수에 아래 경계 테스트를 작성하고 import 미존재로 RED를 확인한다.
+- [x] Step 1: 순수 함수에 아래 경계 테스트를 작성하고 import 미존재로 RED를 확인한다.
 
 ```dart
 test('availability separates waiting, zero speed and stale data', () {
@@ -212,7 +212,7 @@ test('availability separates waiting, zero speed and stale data', () {
 null instant도 별도로 waiting인지 검사한다. `hasSpeedEvidence=true`에는 유효한 0m/s도
 포함하며 숫자값만으로 available을 추정하지 않는다.
 
-- [ ] Step 2: 다음 순수 함수를 구현한다.
+- [x] Step 2: 다음 순수 함수를 구현한다.
 
 ```dart
 enum LiveSpeedAvailability { waiting, available, stale }
@@ -232,7 +232,7 @@ LiveSpeedAvailability liveSpeedAvailability({
 }
 ```
 
-- [ ] Step 3: 기존 clock override fixture로 last fix=t+8s에 대해 now=t+38s는available,
+- [x] Step 3: 기존 clock override fixture로 last fix=t+8s에 대해 now=t+38s는available,
 now=t+38.001s는stale인 controller 회귀를 추가한다. Widget test에서는 DB/start를
 `tester.runAsync` 안에서 실행하고, clock을 바꾼 뒤 `tester.pump(Duration(seconds:1))`
 한 번으로 기존 ticker를 실행한다. raw sample을 그대로 두고 availability만 바뀌어야 한다.
@@ -274,7 +274,7 @@ testWidgets('ticker expires speed without changing the recorded distance', (test
 provider speed가 없으면 waiting, 유효한 정지 선분/유효 provider speed 0은 available,
 background 전환 후 resume는 ticker를 기다리지 않고 stale을 동기화함을 각 test로 고정한다.
 
-- [ ] Step 4: `_onSample`에서 accepted sample만 lastUsableFixAt를 갱신하고, 신뢰 가능한
+- [x] Step 4: `_onSample`에서 accepted sample만 lastUsableFixAt를 갱신하고, 신뢰 가능한
 선분 또는 finite/non-negative provider speed가 있을 때 evidence=true로 만든다.
 Task 1의 interrupted fragment에서는 이전 fragment 속도 evidence를 가져오지 않는다.
 각 accepted sample마다 현재 선분/provider의 근거를 다시 판정한다. 선분 시간은
@@ -305,7 +305,7 @@ state = state.copyWith(
 ticker, onSample, foreground catch-up snapshot 모두 같은 표시 계약을 쓴다.
 백그라운드 ticker 중단과 권한 재검증 흐름은 유지한다.
 
-- [ ] Step 5: Home 현재 속도 표시를 다음 switch로 바꾸고 Semantics도 같은 문자열을
+- [x] Step 5: Home 현재 속도 표시를 다음 switch로 바꾸고 Semantics도 같은 문자열을
 사용한다. idle 화면의0 표시에는 active freshness 문구를 붙이지 않는다.
 
 ```dart
@@ -320,10 +320,10 @@ label은 `현재 속도`, active status pill은 raw count 대신 유효 위치�
 오래된 값을 읽는 Semantics를 제거하고 기존 warning/permission 메시지는 덮어쓰지 않는다.
 큰 글자 및 320dp 화면에서는 기존 MetricStrip 반응형 구조를 유지한다.
 
-- [ ] Step 6: focused controller/domain/Home tests를 실행하고, 기존 synthetic fixture가
+- [x] Step 6: focused controller/domain/Home tests를 실행하고, 기존 synthetic fixture가
 LiveSessionState만 override한다면 새 availability를 명시해 측정 의도를 유지한다.
 명령은 `flutter test --no-pub --concurrency=1 test/domain/live_speed_availability_test.dart test/features/session_flow_test.dart test/features/ux_nav_tracking_test.dart test/features/ux_home_recovery_test.dart`.
-- [ ] Step 7: 해당 파일만 `fix: 현재 속도의 측정 대기와 신호 공백 표시`로 커밋한다.
+- [x] Step 7: 해당 파일만 `fix: 현재 속도의 측정 대기와 신호 공백 표시`로 커밋한다.
 
 ### Task 3: 재생 시각을 산책 시간대로 표시
 
@@ -335,7 +335,7 @@ LiveSessionState만 override한다면 새 availability를 명시해 측정 의�
 - `_RoutePlaybackControls` adds required `String timezone`, passed from `session.timezone`.
 - Every clock label uses existing `asLocal(DateTime, timezone:)`. Elapsed duration and slider indices remain instant based.
 
-- [ ] Step 1: 기존 route playback widget test와 같은 실제 repository setup에서 UTC00:00~00:03
+- [x] Step 1: 기존 route playback widget test와 같은 실제 repository setup에서 UTC00:00~00:03
 샘플, Asia/Seoul session을 생성한다. 기존 `_settle(tester)` helper로 detail을 로드한 뒤
 끝점09:00/09:03, 현재09:03:00, slider Semantics09:03:00을 assert한다. 이전 구현의
 00:03:00이 표시되는 실패를 확인한다.
@@ -377,7 +377,7 @@ testWidgets('playback clocks use the session timezone', (tester) async {
 });
 ```
 
-- [ ] Step 2: 파일에 geo import를 추가하고 timezone을 부모에서 전달한다. 현재 sample,
+- [x] Step 2: 파일에 geo import를 추가하고 timezone을 부모에서 전달한다. 현재 sample,
 firstTimestamp, lastTimestamp와 Semantics의 네 포맷을 모두 다음과 같이 바꾼다.
 
 ```dart
@@ -386,7 +386,7 @@ DateFormat('HH:mm').format(asLocal(firstTimestamp, timezone: timezone));
 DateFormat('HH:mm').format(asLocal(lastTimestamp, timezone: timezone));
 ```
 
-- [ ] Step 3: America/New_York의2026-11-01T05:30Z와06:30Z는 모두01:30이지만 elapsed는
+- [x] Step 3: America/New_York의2026-11-01T05:30Z와06:30Z는 모두01:30이지만 elapsed는
 1시간인 fixture를 추가한다. session timezone만 바꾸고 기기 timezone에 기대지 않도록
 UTC input과 IANA 변환을 테스트한다. 잘못된 zone은 기존 asLocal fallback을 깨지 않는다.
 
@@ -398,8 +398,8 @@ expect(asLocal(b, timezone: 'America/New_York').hour, 1);
 expect(b.difference(a), const Duration(hours: 1));
 ```
 
-- [ ] Step 4: `flutter test --no-pub --concurrency=1 test/features/route_playback_flow_test.dart test/domain/utc_minute_window_test.dart`를 실행한다.
-- [ ] Step 5: `fix: 경로 재생 시각을 산책 시간대로 표시`로 커밋한다.
+- [x] Step 4: `flutter test --no-pub --concurrency=1 test/features/route_playback_flow_test.dart test/domain/utc_minute_window_test.dart`를 실행한다.
+- [x] Step 5: `fix: 경로 재생 시각을 산책 시간대로 표시`로 커밋한다.
 
 ### Task 4: 완료 JSON/NDJSON 평균 속도 통일
 
@@ -411,7 +411,7 @@ expect(b.difference(a), const Duration(hours: 1));
 - Consumes existing `completedAverageSpeedMps({required double? totalDistanceM, required int? movingTimeS}) -> double?`.
 - Completed session export field `avg_speed_mps` is canonical, or null when unavailable. Active session export retains its existing meaning.
 
-- [ ] Step 1: 실제 helper와 JSON 구조를 검사하는 아래 test를 작성한다. NDJSON의 첫
+- [x] Step 1: 실제 helper와 JSON 구조를 검사하는 아래 test를 작성한다. NDJSON의 첫
 session line도 decode해 같은1m/s인지 assert한다.
 
 ```dart
@@ -436,7 +436,7 @@ test('completed JSON uses the same average as the human summary', () {
 });
 ```
 
-- [ ] Step 2: focused test를 실행해 저장값9가 출력되는 RED를 확인한다. 완료
+- [x] Step 2: focused test를 실행해 저장값9가 출력되는 RED를 확인한다. 완료
 metadata의 `avg_speed_mps`를 다음 식으로 교체하고 계산식을 중복하지 않는다.
 
 ```dart
@@ -447,12 +447,12 @@ metadata의 `avg_speed_mps`를 다음 식으로 교체하고 계산식을 중복
     : session.avgSpeedMps,
 ```
 
-- [ ] Step 3: distance0/missing, movingTime0/missing, non-finite distance는
+- [x] Step 3: distance0/missing, movingTime0/missing, non-finite distance는
 toJsonDocument의 평균 field가null인지 검사한다. 비유한 값 fixture의 전체 JSON
 인코딩 성공으로 일반화하지 않는다. 전체 백업의 영속값은 바꾸지 않고 active
 session export는 기존 저장값을 유지하는 회귀를 추가한다.
-- [ ] Step 4: `flutter test --no-pub --concurrency=1 test/domain/walk_stats_export_test.dart test/domain/completed_walk_metrics_test.dart`를 실행한다.
-- [ ] Step 5: `fix: 완료 기록 내보내기의 평균 속도 기준 통일`로 커밋한다.
+- [x] Step 4: `flutter test --no-pub --concurrency=1 test/domain/walk_stats_export_test.dart test/domain/completed_walk_metrics_test.dart`를 실행한다.
+- [x] Step 5: `fix: 완료 기록 내보내기의 평균 속도 기준 통일`로 커밋한다.
 
 ### Task 5: 건강 데이터 오류와 지원 설정 구분
 
@@ -466,7 +466,7 @@ session export는 기존 저장값을 유지하는 회귀를 추가한다.
 - HealthActivityDataSource returns `_settingsOpener != null`; existing Android opener remains available and iOS factory's null opener remains unsupported.
 - Test `_SettingsActivitySource` implements the new getter with true, with a false variant for unavailable capability.
 
-- [ ] Step 1: 실제 source의 iOS처럼null opener와 Android처럼non-null opener가 각각false/true인
+- [x] Step 1: 실제 source의 iOS처럼null opener와 Android처럼non-null opener가 각각false/true인
 test를 작성한다. 기존 reader fake를 재사용하고 source capability 타입만으로 지원을
 판정하지 않는 아래 assertion을 추가한다.
 
@@ -480,7 +480,7 @@ test('settings capability reflects an installed opener', () {
 });
 ```
 
-- [ ] Step 2: Daily panel fixture에서 source=error/coverage=unavailable/steps=null은
+- [x] Step 2: Daily panel fixture에서 source=error/coverage=unavailable/steps=null은
 `불러오기 실패`와`다시 불러오기`, denied는`권한 필요`, unavailable은`연결 전`,
 partial은기존`일부 기간만 확인됨`, complete steps0은`0걸음`인지 table test를 추가한다.
 false capability에서 `Health Connect 설정 열기`가 없어야 하고 true Android fixture는
@@ -525,7 +525,7 @@ for (final row in <(ActivitySourceKind, ActivityCoverage, int?, String)>[
 }
 ```
 
-- [ ] Step 3: interface와 getter를 추가하고 수치의 switch를 source 우선 판정으로 바꾼다.
+- [x] Step 3: interface와 getter를 추가하고 수치의 switch를 source 우선 판정으로 바꾼다.
 
 ```dart
 // ActivityDataSourceSettingsOpener의 공개 계약에 추가한다.
@@ -570,8 +570,8 @@ if (steps.source == ActivitySourceKind.error)
 HealthKit의 읽기 권한 불확실성 때문에 필요한 연결 확인 action 자체를 숨기지 않으며,
 재조회와 권한 연결의 문구를 구분한다. GPS 통계와 5분 cache/resume invalidation은 유지한다.
 
-- [ ] Step 4: `flutter test --no-pub --concurrency=1 test/data/activity_data_source_test.dart test/features/daily_activity_panel_test.dart test/features/daily_activity_provider_test.dart`를 실행한다.
-- [ ] Step 5: `fix: 건강 데이터 오류와 설정 지원 여부 구분`으로 커밋한다.
+- [x] Step 4: `flutter test --no-pub --concurrency=1 test/data/activity_data_source_test.dart test/features/daily_activity_panel_test.dart test/features/daily_activity_provider_test.dart`를 실행한다.
+- [x] Step 5: `fix: 건강 데이터 오류와 설정 지원 여부 구분`으로 커밋한다.
 
 ## 이 계획의 종료 증거
 
@@ -579,3 +579,6 @@ Task 1~5의 focused tests가 각각 원래 오류로 RED가 되고 수정 후GRE
 전체 gate는 [통합 계획](2026-10-14-maintenance-stage1.md)의 마지막 검증에서 한 번 실행한다.
 baseline439개 통과는 새 코드의 검증으로 재사용하지 않는다. 제품 구현 승인은 통합 계획
 검토 이후이며, 이 문서 작성 자체는 구현 완료가 아니다.
+
+작업 1~5의 회귀와 수정은 커밋했습니다. 전체 gate와 남은 실제 플랫폼 검증 상태는
+[구현 검증 기록](../verification/2026-10-14-maintenance-stage1.md)을 따릅니다.

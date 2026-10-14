@@ -61,7 +61,7 @@ Flutter 설정 화면은 기존 `저장 실패` 처리와 busy/finally를 재사
 - `BackupExportHandler(activity: FlutterFragmentActivity)` exposes `attach(messenger: BinaryMessenger)`, `onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean`, `close()`.
 - Request code4105 is unique; existing notification permission request4104 remains unchanged.
 
-- [ ] Step 1: 새 validator/stream 함수가 없는 상태에서 실패하는 JUnit 회귀를 작성한다.
+- [x] Step 1: 새 validator/stream 함수가 없는 상태에서 실패하는 JUnit 회귀를 작성한다.
 
 ```kotlin
 @Test fun rejectsSourceOutsideExportRoot() {
@@ -85,7 +85,7 @@ symlink가 root 밖을 가리키는 경우, missing file, slash/NUL name, 50MB �
 거부하는 tests를 추가한다. 큰 테스트 파일은 RandomAccessFile.setLength를 사용해
 52MB 데이터를 메모리로 만들지 않는다.
 
-- [ ] Step 2: 아래 close 실패를 성공으로 처리하지 않는 stream test를 추가한다.
+- [x] Step 2: 아래 close 실패를 성공으로 처리하지 않는 stream test를 추가한다.
 
 ```kotlin
 @Test fun propagatesOutputCloseFailure() {
@@ -106,7 +106,7 @@ symlink가 root 밖을 가리키는 경우, missing file, slash/NUL name, 50MB �
 openOutput가 IOException을 던지는 경우, write fault, 성공 시 byte 동일 및 close
 완료도 같은 실제 stream 경계로 검사한다.
 
-- [ ] Step 3: `android`에서 `./gradlew app:testDebugUnitTest --tests 'com.sanbo.sanbo.BackupExportContractTest'`를 실행해 RED를 확인하고 다음 validation/copy를 구현한다.
+- [x] Step 3: `android`에서 `./gradlew app:testDebugUnitTest --tests 'com.sanbo.sanbo.BackupExportContractTest'`를 실행해 RED를 확인하고 다음 validation/copy를 구현한다.
 
 ```kotlin
 internal fun validatedBackupExportSource(
@@ -127,7 +127,7 @@ internal fun copyBackupExport(source: File, openOutput: () -> java.io.OutputStre
 }
 ```
 
-- [ ] Step 4: handler에서 `save`의 typed args를 검증하고 동시 pending은export_busy로
+- [x] Step 4: handler에서 `save`의 typed args를 검증하고 동시 pending은export_busy로
 반환한다. 다음 Intent를 띄우고 native callback에 source/result를 보존한다.
 
 ```kotlin
@@ -155,14 +155,14 @@ export_interrupted를 반환한다. copy 중이면 interrupted flag를 세우고
 끝난 뒤 실패를 반환해 Dart의source 정리가 먼저 실행되지 않게 한다. 늦은 결과는
 operation identity를 비교해 이미 완료된 result에 다시 응답하지 않는다.
 
-- [ ] Step 5: MainActivity에서configureFlutterEngine에 새 handler를 등록한다. 기존
+- [x] Step 5: MainActivity에서configureFlutterEngine에 새 handler를 등록한다. 기존
 notification/Health channel과 onNewIntent는 유지한다. onActivityResult는 owned
 result만 handler에 맡기고 나머지는super로 전달한다. onDestroy/새 engine 등록에서
 이전 handler를 close한다. copy executor는 동작 종료 후shutdown한다.
-- [ ] Step 6: Android native unit tests 전체를 실행한다. Intent/picker의 실제 성공/취소와
+- [x] Step 6: Android native unit tests 전체를 실행한다. Intent/picker의 실제 성공/취소와
 Activity 재생성은Task3 native E2E에서 검사한다. pure helper 통과를 실제 UI 저장
 성공으로 주장하지 않는다.
-- [ ] Step 7: `fix: Android 시스템 문서 저장으로 백업 내보내기`로 커밋한다.
+- [x] Step 7: `fix: Android 시스템 문서 저장으로 백업 내보내기`로 커밋한다.
 
 ### Task 2: iOS 파일 export와 delegate 수명
 
@@ -177,7 +177,7 @@ Activity 재생성은Task3 native E2E에서 검사한다. pure helper 통과를 
 - It exposes `attach(messenger: FlutterBinaryMessenger)` and `close()`, owns a pending FlutterResult and picker strongly, and completes each operation once.
 - Minimum iOS15.0 already permits `UIDocumentPickerViewController(forExporting:asCopy:)`; deployment target is not raised.
 
-- [ ] Step 1: 실제 임시 파일을 만드는 validator test를 RunnerTests에 추가하고 함수가 없어 실패하는지 확인한다.
+- [x] Step 1: 실제 임시 파일을 만드는 validator test를 RunnerTests에 추가하고 함수가 없어 실패하는지 확인한다.
 
 ```swift
 func testBackupSourceMustStayInsideExportRoot() throws {
@@ -200,7 +200,7 @@ func testBackupSourceMustStayInsideExportRoot() throws {
 in:.userDomainMask).first` 아래`sanbo_exports`가 product root임을 별도로 검증한다.
 FileManager.temporaryDirectory를 product root로 쓰지 않는다.
 
-- [ ] Step 2: validator를 구현하고 PBXFileReference/PBXBuildFile/Runner group/
+- [x] Step 2: validator를 구현하고 PBXFileReference/PBXBuildFile/Runner group/
 Runner Sources에 새 Swift 파일을 등록한다.
 
 ```swift
@@ -223,7 +223,7 @@ func validatedBackupExportSource(
 }
 ```
 
-- [ ] Step 3: coordinator가 save 요청의 typed args, 검증한 URL과 pending 단일성을
+- [x] Step 3: coordinator가 save 요청의 typed args, 검증한 URL과 pending 단일성을
 확인한다. picker delegate를 self로 설정하고 강한 참조를 유지한다.
 
 ```swift
@@ -238,7 +238,7 @@ null로 처리한다. pending을 먼저 nil로 만든 뒤 callback을 완료해 
 막는다. close는 picker dismiss가 끝난 뒤 export_interrupted를 반환해 OS가
 source를 사용하는 동안 Dart finally가 파일을 지우지 않게 한다.
 
-- [ ] Step 4: AppDelegate의 implicit engine 등록에서 coordinator를 유지하고 channel을
+- [x] Step 4: AppDelegate의 implicit engine 등록에서 coordinator를 유지하고 channel을
 attach한다. 현재 key UIWindowScene의 root와 최상위 presented controller를 찾아
 window에 올라와 있을 때 picker를 표시한다.
 
@@ -252,13 +252,13 @@ let root = UIApplication.shared.connectedScenes
 이전 engine coordinator는 close한다. notification readiness와 SceneDelegate의
 tap 처리는 유지하고 coordinator를 picker delegate 종료까지 보관한다.
 
-- [ ] Step 5: callback recorder를 주입한 presentPicker에서 picker를 보관해 실제
+- [x] Step 5: callback recorder를 주입한 presentPicker에서 picker를 보관해 실제
 UIDocumentPickerDelegate 메서드를 호출한다. 성공/취소/중복 callback/presenter
 부재의 응답 횟수를 검사하고 Task3의 simulator E2E에서 닫힘 순서와 파일 재읽기를
 확인한다.
-- [ ] Step 6: `bash scripts/run_native_platform_tests.sh`로 XCTest와 기존 notification
+- [x] Step 6: `bash scripts/run_native_platform_tests.sh`로 XCTest와 기존 notification
 회귀를 실행한다. 같은 revision에서 통과한 gate를 바로 반복하지 않는다.
-- [ ] Step 7: `fix: iOS 파일 내보내기로 전체 백업 저장`로 해당 파일만 커밋한다.
+- [x] Step 7: `fix: iOS 파일 내보내기로 전체 백업 저장`로 해당 파일만 커밋한다.
 
 ### Task 3: Flutter 실제 저장 어댑터와 파일 왕복
 
@@ -274,7 +274,7 @@ UIDocumentPickerDelegate 메서드를 호출한다. 성공/취소/중복 callbac
 - Request source is `Caches/sanbo_exports/export-<unique>/fileName`. Unique operation directory prevents concurrent export files colliding.
 - Integration fixture produces `seedNativeBackupWalk(WalkRepository repo) -> Future<String>` and uses the native sqflite factory, never host FFI initialization.
 
-- [ ] Step 1: 실제서비스에 Android/iOS platform과임시Directory, mock channel을 주입한다.
+- [x] Step 1: 실제서비스에 Android/iOS platform과임시Directory, mock channel을 주입한다.
 fake BackupFileService를 만들지 않고 channel에서 실제source 파일을 읽는 아래 test를
 추가한다. 클래스의 새 constructor parameter 부재로 RED를 확인한다.
 
@@ -313,7 +313,7 @@ imports는 dart:io/dart:typed_data, Flutter foundation/services/test, 실제 서
 source 유지, 동시 저장의 서로 다른 source, 다른 temp file 보존, 50MB 초과,
 잘못된 basename, 빈 destination을 각각 검사한다.
 
-- [ ] Step 2: 파일/경로/typed message 경계를 아래 코드로 구현한다. desktop branch는
+- [x] Step 2: 파일/경로/typed message 경계를 아래 코드로 구현한다. desktop branch는
 기존 getSaveLocation/saveTo를 유지한다.
 
 ```dart
@@ -341,7 +341,7 @@ try {
 promise를 기다리고 cleanup 실패가 원래 native 오류를 감추지 않도록 오류 우선순위를
 명시한다. 디렉터리가 이미 없으면 cleanup은 성공으로 취급한다.
 
-- [ ] Step 3: `flutter test --no-pub --concurrency=1 test/platform/backup_file_service_test.dart test/features/ux_settings_safety_test.dart test/data/walk_backup_test.dart`를 실행한다. 설정 busy/cancel/error/성공 문구는 기존구조로 검증하며 native지원완료를fake만으로 주장하지 않는다.
+- [x] Step 3: `flutter test --no-pub --concurrency=1 test/platform/backup_file_service_test.dart test/features/ux_settings_safety_test.dart test/data/walk_backup_test.dart`를 실행한다. 설정 busy/cancel/error/성공 문구는 기존구조로 검증하며 native지원완료를fake만으로 주장하지 않는다.
 
 - [ ] Step 4: integration_test에서는 host용 FFI DB helper를 호출하지 않는다.
 기존 native_location_e2e_test처럼 `WalkRepository.open(path:)`와 실제 sqflite를
@@ -441,3 +441,7 @@ flutter test --no-pub integration_test/native_backup_export_e2e_test.dart -d "$b
 설치된 path_provider_foundation 2.6.0 및 file_selector_ios 0.5.3+5 코드다. Android
 ACTION_CREATE_DOCUMENT는 기존 파일을 덮어쓰지 않고 이름을 조정하며 별도 저장소 권한을
 요구하지 않는다. 동일 이름 동작도 실제 E2E에서 확인한다.
+
+현재 Task 3 구현과 host 26개 테스트, 전체 품질/native gate는 통과했습니다.
+Mac 잠금으로 실제 picker 왕복과 설치 업데이트가 남아 Task 3는 미완료입니다.
+[검증 기록](../verification/2026-10-14-maintenance-stage1.md)에 상태를 남겼습니다.
