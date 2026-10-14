@@ -14,6 +14,7 @@ import '../../domain/models/walk_session.dart';
 import '../../domain/pipeline/geo.dart';
 import '../../domain/pipeline/route_partitioner.dart';
 import '../../domain/pipeline/sample_filter.dart';
+import '../../domain/services/live_speed_availability.dart';
 import '../../domain/services/session_deadline.dart';
 import '../../domain/services/session_guard.dart';
 import '../../domain/services/location_quality_policy.dart';
@@ -42,6 +43,8 @@ class LiveSessionState {
     this.isBusy = false,
     this.liveDistanceM = 0,
     this.liveSpeedMps = 0,
+    this.speedAvailability = LiveSpeedAvailability.waiting,
+    this.lastUsableFixAt,
     this.sampleCount = 0,
     this.validSampleCount = 0,
     this.lastAccuracyM,
@@ -63,6 +66,8 @@ class LiveSessionState {
   final bool isBusy;
   final double liveDistanceM;
   final double liveSpeedMps;
+  final LiveSpeedAvailability speedAvailability;
+  final DateTime? lastUsableFixAt;
   final int sampleCount;
 
   /// Samples that pass the soft filter (used for path distance).
@@ -93,6 +98,9 @@ class LiveSessionState {
     bool? isBusy,
     double? liveDistanceM,
     double? liveSpeedMps,
+    LiveSpeedAvailability? speedAvailability,
+    DateTime? lastUsableFixAt,
+    bool clearLastUsableFixAt = false,
     int? sampleCount,
     int? validSampleCount,
     double? lastAccuracyM,
@@ -119,6 +127,10 @@ class LiveSessionState {
       isBusy: isBusy ?? this.isBusy,
       liveDistanceM: liveDistanceM ?? this.liveDistanceM,
       liveSpeedMps: liveSpeedMps ?? this.liveSpeedMps,
+      speedAvailability: speedAvailability ?? this.speedAvailability,
+      lastUsableFixAt: clearLastUsableFixAt
+          ? null
+          : (lastUsableFixAt ?? this.lastUsableFixAt),
       sampleCount: sampleCount ?? this.sampleCount,
       validSampleCount: validSampleCount ?? this.validSampleCount,
       lastAccuracyM: lastAccuracyM ?? this.lastAccuracyM,
@@ -198,6 +210,8 @@ class SessionController extends Notifier<LiveSessionState> {
   double _liveDistanceM = 0;
   double _liveSpeedMps = 0;
   bool _liveRouteInterrupted = false;
+  bool _hasLiveSpeedEvidence = false;
+  DateTime? _lastUsableFixAt;
   double? _lastAccuracyM;
   int _validSampleCount = 0;
 
@@ -366,6 +380,8 @@ class SessionController extends Notifier<LiveSessionState> {
     );
     final valid = route.includedSamples;
     _lastValidSample = valid.isEmpty ? null : valid.last;
+    _lastUsableFixAt = _lastValidSample?.timestamp.toUtc();
+    _hasLiveSpeedEvidence = false;
     _validSampleCount = valid.length;
     _liveRouteInterrupted = filtered.isNotEmpty && filtered.last.isFilteredOut;
     _liveSpeedMps = _liveSpeedFromSamples(
@@ -437,6 +453,8 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist.clear();
         _lastValidSample = null;
         _liveRouteInterrupted = false;
+        _hasLiveSpeedEvidence = false;
+        _lastUsableFixAt = null;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -475,6 +493,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = LiveSessionState(
         session: active,
         isTracking: false,
+        speedAvailability: LiveSpeedAvailability.waiting,
         needsRecovery: true,
         elapsed: _elapsedSince(active.startedAt),
         sampleCount: _sessionSamples.length,
@@ -561,12 +580,24 @@ class SessionController extends Notifier<LiveSessionState> {
     }
   }
 
+  LiveSpeedAvailability get _speedAvailability => liveSpeedAvailability(
+    lastUsableFixAt: _lastUsableFixAt,
+    now: _clock(),
+    hasSpeedEvidence: _hasLiveSpeedEvidence,
+    maxAge: _locationQuality.maxAge,
+    maxFutureSkew: _locationQuality.maxFutureSkew,
+  );
+
   void _startTicker(DateTime startedAt) {
     _ticker?.cancel();
     if (!_appForeground) return;
     _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!state.isTracking || !_appForeground) return;
-      state = state.copyWith(elapsed: _elapsedSince(startedAt));
+      state = state.copyWith(
+        elapsed: _elapsedSince(startedAt),
+        speedAvailability: _speedAvailability,
+        statusMessage: state.statusMessage,
+      );
     });
   }
 
@@ -945,6 +976,8 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist.clear();
         _lastValidSample = null;
         _liveRouteInterrupted = false;
+        _hasLiveSpeedEvidence = false;
+        _lastUsableFixAt = null;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -999,6 +1032,7 @@ class SessionController extends Notifier<LiveSessionState> {
           session: session,
           isBusy: false,
           isTracking: false,
+          speedAvailability: LiveSpeedAvailability.waiting,
           needsRecovery: true,
           errorMessage: _locationErrorMessage(e),
           errorCode: _locationErrorCode(e),
@@ -1023,6 +1057,9 @@ class SessionController extends Notifier<LiveSessionState> {
         sampleCount: _sessionSamples.length,
         validSampleCount: liveValid,
         liveDistanceM: liveDistance,
+        liveSpeedMps: _liveSpeedMps,
+        speedAvailability: _speedAvailability,
+        lastUsableFixAt: _lastUsableFixAt,
         permissionState: perm,
         errorMessage: perm == LocationPermissionState.grantedForegroundOnly
             ? '화면을 잠그고 기록하려면 설정에서 산보 위치 권한을 항상 허용해 주세요.'
@@ -1043,6 +1080,7 @@ class SessionController extends Notifier<LiveSessionState> {
         session: session,
         isBusy: false,
         isTracking: false,
+        speedAvailability: LiveSpeedAvailability.waiting,
         needsRecovery: session != null || state.needsRecovery,
         errorMessage: '시작할 수 없습니다. 잠시 후 다시 시도해 주세요.',
         errorCode: SessionErrorCode.generic,
@@ -1082,6 +1120,7 @@ class SessionController extends Notifier<LiveSessionState> {
     _firstFixTimer = null;
     state = state.copyWith(
       isTracking: false,
+      speedAvailability: LiveSpeedAvailability.waiting,
       isBusy: false,
       needsRecovery: true,
       clearActiveWarning: true,
@@ -1188,6 +1227,7 @@ class SessionController extends Notifier<LiveSessionState> {
         ordered &&
         !marked.isFilteredOut;
     double? segmentSpeed;
+    var hasStationaryObservation = false;
     SessionGuardObservation? observation;
     var acceptedByIncrementalFilter = false;
     if (ordered && !marked.isFilteredOut) {
@@ -1201,6 +1241,10 @@ class SessionController extends Notifier<LiveSessionState> {
             lat2: marked.latitude,
             lon2: marked.longitude,
           );
+          hasStationaryObservation =
+              dtUs <= _maxObservedLiveGap.inMicroseconds &&
+              d.isFinite &&
+              d < _minLiveSegmentDistanceM;
           // Match pathDistanceMeters jitter floor (1.5 m).
           if (dtUs <= _maxObservedLiveGap.inMicroseconds &&
               d >= _minLiveSegmentDistanceM) {
@@ -1226,6 +1270,15 @@ class SessionController extends Notifier<LiveSessionState> {
     }
 
     final providerSpeed = sample.speedMps;
+    if (acceptedByIncrementalFilter) {
+      _lastUsableFixAt = marked.timestamp.toUtc();
+      _hasLiveSpeedEvidence =
+          segmentSpeed != null ||
+          hasStationaryObservation ||
+          (providerSpeed != null &&
+              providerSpeed.isFinite &&
+              providerSpeed >= 0);
+    }
     if (segmentSpeed != null) {
       // Android fused fixes frequently report 0 m/s while the coordinates
       // are moving. Prefer the measured segment whenever it is trustworthy.
@@ -1234,7 +1287,7 @@ class SessionController extends Notifier<LiveSessionState> {
         !marked.isFilteredOut &&
         providerSpeed != null &&
         providerSpeed.isFinite &&
-        providerSpeed > 0) {
+        providerSpeed >= 0) {
       _liveSpeedMps = providerSpeed;
     } else if (ordered && !marked.isFilteredOut && prev != null) {
       // A valid stationary/duplicate fix should not leave the previous
@@ -1264,6 +1317,9 @@ class SessionController extends Notifier<LiveSessionState> {
         sampleCount: _sessionSamples.length,
         validSampleCount: _validSampleCount,
         liveSpeedMps: _liveSpeedMps,
+        speedAvailability: _speedAvailability,
+        lastUsableFixAt: _lastUsableFixAt,
+        clearLastUsableFixAt: _lastUsableFixAt == null,
         liveDistanceM: _liveDistanceM,
         lastAccuracyM: _lastAccuracyM,
         statusMessage: _validSampleCount == 0 ? 'GPS 보정 중' : '기록 중',
@@ -1684,6 +1740,9 @@ class SessionController extends Notifier<LiveSessionState> {
         sampleCount: _sessionSamples.length,
         validSampleCount: _validSampleCount,
         liveSpeedMps: _liveSpeedMps,
+        speedAvailability: _speedAvailability,
+        lastUsableFixAt: _lastUsableFixAt,
+        clearLastUsableFixAt: _lastUsableFixAt == null,
         liveDistanceM: _liveDistanceM,
         lastAccuracyM: _lastAccuracyM,
         statusMessage: state.activeWarning == null
@@ -1796,6 +1855,8 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist.clear();
         _lastValidSample = null;
         _liveRouteInterrupted = false;
+        _hasLiveSpeedEvidence = false;
+        _lastUsableFixAt = null;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -1838,6 +1899,8 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist.clear();
         _lastValidSample = null;
         _liveRouteInterrupted = false;
+        _hasLiveSpeedEvidence = false;
+        _lastUsableFixAt = null;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -1860,6 +1923,8 @@ class SessionController extends Notifier<LiveSessionState> {
         _pendingPersist.clear();
         _lastValidSample = null;
         _liveRouteInterrupted = false;
+        _hasLiveSpeedEvidence = false;
+        _lastUsableFixAt = null;
         _lastJumpRejectedSample = null;
         _liveDistanceM = 0;
         _liveSpeedMps = 0;
@@ -1891,6 +1956,8 @@ class SessionController extends Notifier<LiveSessionState> {
       _pendingPersist.clear();
       _lastValidSample = null;
       _liveRouteInterrupted = false;
+      _hasLiveSpeedEvidence = false;
+      _lastUsableFixAt = null;
       _lastJumpRejectedSample = null;
       _liveDistanceM = 0;
       _liveSpeedMps = 0;
@@ -1909,6 +1976,7 @@ class SessionController extends Notifier<LiveSessionState> {
       state = state.copyWith(
         isBusy: false,
         isTracking: false,
+        speedAvailability: LiveSpeedAvailability.waiting,
         needsRecovery: true,
         clearActiveWarning: true,
         errorMessage: '저장에 실패했습니다. 아래 ‘저장하고 종료’를 다시 눌러 주세요.',
@@ -1972,6 +2040,8 @@ class SessionController extends Notifier<LiveSessionState> {
       _pendingPersist.clear();
       _lastValidSample = null;
       _liveRouteInterrupted = false;
+      _hasLiveSpeedEvidence = false;
+      _lastUsableFixAt = null;
       _lastJumpRejectedSample = null;
       _liveDistanceM = 0;
       _liveSpeedMps = 0;

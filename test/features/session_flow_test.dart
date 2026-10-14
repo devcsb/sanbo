@@ -11,6 +11,7 @@ import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/models/walk_session.dart';
+import 'package:sanbo/domain/services/live_speed_availability.dart';
 import 'package:sanbo/features/home/session_controller.dart';
 import 'package:sanbo/platform/location/location_engine.dart';
 import 'package:sanbo/platform/location/synthetic_location_engine.dart';
@@ -255,6 +256,203 @@ class _RetryableFailureRepository extends WalkRepository {
 }
 
 void main() {
+  test('terminal stream failure hides the previous current speed', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final engine = _ErroringLocationEngine();
+    final now = DateTime.utc(2026, 10, 14);
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(engine),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await controller.start();
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: now,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+        speedMps: 1,
+      ),
+    ]);
+    expect(controller.state.speedAvailability, LiveSpeedAvailability.available);
+    await engine.closeStream();
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.state.needsRecovery, isTrue);
+    expect(controller.state.speedAvailability, LiveSpeedAvailability.waiting);
+    await controller.stop();
+  });
+
+  test(
+    'accepted fixes own freshness and zero is a valid measurement',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      var now = DateTime.utc(2026, 10, 14);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      LocationSample fix({double? speed, double accuracy = 5}) =>
+          LocationSample(
+            timestamp: now,
+            latitude: 37.5,
+            longitude: 127,
+            accuracyM: accuracy,
+            speedMps: speed,
+          );
+      controller.debugIngestSamples([fix()]);
+      expect(controller.state.speedAvailability, LiveSpeedAvailability.waiting);
+      now = now.add(const Duration(seconds: 4));
+      controller.debugIngestSamples([fix(speed: 0)]);
+      expect(
+        controller.state.speedAvailability,
+        LiveSpeedAvailability.available,
+      );
+      expect(controller.state.liveSpeedMps, 0);
+      final acceptedAt = now;
+      now = now.add(const Duration(seconds: 4));
+      controller.debugIngestSamples([fix(accuracy: 600)]);
+      expect(controller.state.lastUsableFixAt, acceptedAt);
+      controller.setAppForeground(false);
+      now = acceptedAt.add(const Duration(seconds: 31));
+      controller.setAppForeground(true);
+      expect(controller.state.speedAvailability, LiveSpeedAvailability.stale);
+      await Future<void>.delayed(Duration.zero);
+      await controller.stop();
+    },
+  );
+
+  test(
+    'warm background fix is current but cold recovery waits for new evidence',
+    () async {
+      final repo = await openTestRepository();
+      addTearDown(repo.close);
+      var now = DateTime.utc(2026, 10, 14);
+      final container = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(container.dispose);
+      final controller = container.read(sessionControllerProvider.notifier);
+      await controller.start();
+      controller.setAppForeground(false);
+      now = now.add(const Duration(seconds: 4));
+      controller.debugIngestSamples([
+        LocationSample(
+          timestamp: now,
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+          speedMps: 1,
+        ),
+      ]);
+      controller.setAppForeground(true);
+      expect(
+        controller.state.speedAvailability,
+        LiveSpeedAvailability.available,
+      );
+      expect(controller.state.lastUsableFixAt, now);
+      await Future<void>.delayed(Duration.zero);
+      // Seed the persisted checkpoint, then simulate a fresh process with a new scope.
+      controller.setAppForeground(false);
+      await repo.insertSamples(controller.state.session!.id, [
+        LocationSample(
+          timestamp: now,
+          latitude: 37.5,
+          longitude: 127,
+          accuracyM: 5,
+          speedMps: 1,
+        ),
+      ]);
+      final cold = ProviderContainer(
+        overrides: [
+          walkRepositoryProvider.overrideWithValue(repo),
+          locationEngineProvider.overrideWithValue(
+            SyntheticLocationEngine(
+              permission: LocationPermissionState.granted,
+            ),
+          ),
+          sessionClockProvider.overrideWithValue(() => now),
+        ],
+      );
+      addTearDown(cold.dispose);
+      final recovered = cold.read(sessionControllerProvider.notifier);
+      await recovered.restoreIfNeeded();
+      await recovered.resumeRecoveredSession();
+      expect(recovered.state.speedAvailability, LiveSpeedAvailability.waiting);
+      await recovered.stop();
+    },
+  );
+
+  testWidgets('ticker expires speed without changing the recorded distance', (
+    tester,
+  ) async {
+    late WalkRepository repo;
+    var now = DateTime.utc(2026, 10, 14);
+    await tester.runAsync(() async {
+      repo = await openTestRepository();
+    });
+    addTearDown(() => tester.runAsync(repo.close));
+    final container = ProviderContainer(
+      overrides: [
+        walkRepositoryProvider.overrideWithValue(repo),
+        locationEngineProvider.overrideWithValue(
+          SyntheticLocationEngine(permission: LocationPermissionState.granted),
+        ),
+        sessionClockProvider.overrideWithValue(() => now),
+      ],
+    );
+    addTearDown(container.dispose);
+    final controller = container.read(sessionControllerProvider.notifier);
+    await tester.runAsync(controller.start);
+    controller.setAppForeground(false);
+    controller.setAppForeground(true);
+    await tester.pump();
+    controller.debugIngestSamples([
+      LocationSample(
+        timestamp: now,
+        latitude: 37.5,
+        longitude: 127,
+        accuracyM: 5,
+        speedMps: 1,
+      ),
+    ]);
+    final lastFix = now;
+    final measuredDistance = controller.state.liveDistanceM;
+    expect(controller.state.speedAvailability, LiveSpeedAvailability.available);
+    now = lastFix.add(const Duration(seconds: 30));
+    await tester.pump(const Duration(seconds: 1));
+    expect(controller.state.speedAvailability, LiveSpeedAvailability.available);
+    now = lastFix.add(const Duration(milliseconds: 30001));
+    await tester.pump(const Duration(seconds: 1));
+    expect(controller.state.speedAvailability, LiveSpeedAvailability.stale);
+    expect(controller.state.liveDistanceM, measuredDistance);
+    await tester.runAsync(controller.stop);
+  });
+
   test('recovery preserves filtered route boundaries', () async {
     final repo = await openTestRepository();
     addTearDown(repo.close);
