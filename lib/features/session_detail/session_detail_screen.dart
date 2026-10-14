@@ -15,6 +15,7 @@ import '../../domain/models/minute_window.dart';
 import '../../domain/models/place_memory.dart';
 import '../../domain/models/route_exclusion.dart';
 import '../../domain/models/walk_session.dart';
+import '../../domain/pipeline/geo.dart';
 import '../../domain/pipeline/route_partitioner.dart';
 import '../../domain/pipeline/segment_merger.dart';
 import '../../domain/services/place_memory.dart';
@@ -258,9 +259,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
               totalDistanceM: session.totalDistanceM,
               movingTimeS: session.movingTimeS,
             );
-            final kmh = averageSpeedMps == null
-                ? null
-                : averageSpeedMps * 3.6;
+            final kmh = averageSpeedMps == null ? null : averageSpeedMps * 3.6;
             final playbackPoints = _pointsForPlayback(data.route);
             final fragments = _fragmentCache;
             final segments = data.segments.isNotEmpty
@@ -361,6 +360,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                   if (playbackPoints.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _RoutePlaybackControls(
+                      timezone: session.timezone,
+                      playbackPoints: playbackPoints,
                       sample: currentSample!,
                       firstTimestamp: playbackPoints.first.sample.timestamp,
                       lastTimestamp: playbackPoints.last.sample.timestamp,
@@ -1423,6 +1424,8 @@ String _playbackDuration(Duration duration) {
 class _RoutePlaybackControls extends StatelessWidget {
   const _RoutePlaybackControls({
     required this.sample,
+    required this.timezone,
+    required this.playbackPoints,
     required this.firstTimestamp,
     required this.lastTimestamp,
     required this.index,
@@ -1435,6 +1438,8 @@ class _RoutePlaybackControls extends StatelessWidget {
   });
 
   final LocationSample sample;
+  final String timezone;
+  final List<RoutePlaybackPoint> playbackPoints;
   final DateTime firstTimestamp;
   final DateTime lastTimestamp;
   final int index;
@@ -1475,7 +1480,7 @@ class _RoutePlaybackControls extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${DateFormat('HH:mm:ss').format(sample.timestamp)} · '
+                      '${DateFormat('HH:mm:ss').format(asLocal(sample.timestamp, timezone: timezone))} · '
                       '$currentLabel',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
@@ -1512,12 +1517,24 @@ class _RoutePlaybackControls extends StatelessWidget {
           const SizedBox(height: 4),
           Semantics(
             label:
-                '경로 재생 위치 ${DateFormat('HH:mm:ss').format(sample.timestamp)}',
+                '경로 재생 위치 ${DateFormat('HH:mm:ss').format(asLocal(sample.timestamp, timezone: timezone))}',
             child: Slider(
               key: const ValueKey('route-playback-slider'),
               min: 0,
               max: sampleCount > 1 ? (sampleCount - 1).toDouble() : 1,
               value: index.toDouble(),
+              semanticFormatterCallback: (value) =>
+                  DateFormat('HH:mm:ss').format(
+                    asLocal(
+                      playbackPoints[value.round().clamp(
+                            0,
+                            playbackPoints.length - 1,
+                          )]
+                          .sample
+                          .timestamp,
+                      timezone: timezone,
+                    ),
+                  ),
               onChanged: sampleCount > 1
                   ? (value) => onIndexChanged(value.round())
                   : null,
@@ -1529,14 +1546,18 @@ class _RoutePlaybackControls extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  DateFormat('HH:mm').format(firstTimestamp),
+                  DateFormat(
+                    'HH:mm',
+                  ).format(asLocal(firstTimestamp, timezone: timezone)),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
                 Text(
-                  DateFormat('HH:mm').format(lastTimestamp),
+                  DateFormat(
+                    'HH:mm',
+                  ).format(asLocal(lastTimestamp, timezone: timezone)),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,
                     fontFeatures: const [FontFeature.tabularFigures()],
