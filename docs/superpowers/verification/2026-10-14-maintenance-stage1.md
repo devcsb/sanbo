@@ -1,22 +1,23 @@
 # 1차 유지보수 구현과 검증 기록
 
-기존 서명 후보 build SHA는 `ddede226e62532c4613707a92818d1fc7c615929`입니다.
-2026-10-15 지도 복구 제품 변경은 이 후보에 포함되지 않으며 새 빌드 검증을 구분합니다.
+현재 서명 후보 build SHA는 `2dbdc9c5392bdf0077c90a4edfd1d08e47b47ae1`입니다.
+지도 수정 전 후보 `ddede22`와 새 실제 키를 포함한 빌드를 구분해 기록합니다.
 [통합 계획](../plans/2026-10-14-maintenance-stage1.md),
 [릴리즈 증적](../../release/2026-10-14-maintenance-stage1-release.md)을 함께 봅니다.
 
 | 검사 | 결과 |
 |---|---|
-| 전체 품질 loop `--all-apk` | PASS, Flutter 479개, analyzer, debug/release/AAB, manifest, cert, hash, clean-tree |
-| 전체 native gate | PASS, Android JUnit 16개, iOS 26.5 XCTest 11개 |
+| 전체 품질 loop `--all-apk` | PASS, Flutter517개, analyzer, debug/release/AAB, manifest, cert, hash, clean-tree |
+| 전체 native gate | 동일 native 소스의 JUnit16개/XCTest11개 PASS, 2dbdc9c 원격 native CI도 PASS |
 | APK 버전/서명 | 세 ABI의 versionCode 각각 증가, 기존 인증서 일치 |
 | AAB manifest/서명 | 0.9.2+16, SDK36, JAR 검증과 인증서 일치, bundletool validate exit0 |
 | 기존 APK 보존 | 공개 v0.9.1 세 파일 SHA-256 일치, 별도 보존 |
 | 실제 iOS picker 왕복 | 재시도 PASS, 취소/저장/복원/중복 이름 보존과 두 파일 재읽기 |
 | iOS 실제 위치/알림 채널 smoke | PASS, 전용 simulator의 native provider와 notification cancel 호출 2개 |
 | 실제 Home 표시 | iOS 밝은/어두운 테마에서 측정 대기, 유효0, stale 문구와 Semantics 확인 |
-| 실제 Android picker / 설치 업데이트 | PASS, API34 실제 파일 왕복 E2E1개와 구버전→ddede22 데이터 보존 |
-| 실제 배경 지도 | FAIL, HTTP200 PNG에 API 키 안내. M-19/MR-17으로 신규 공개 게시 차단 |
+| 실제 Android picker / 설치 업데이트 | PASS, API34 E2E1개와 구버전→ddede22→2dbdc9c 보존, 새 후보 백업/중복2개 건너뛰기 |
+| 실제 배경 지도 | Android/iOS 정상 도로/지명 PASS, 키 누락/invalid도 경로와 재생 보존 |
+| 실제 네트워크 단절 | Android PASS, iOS 미검증 |
 | 실제 스크린리더 / 물리 GPS·배터리 | 미실행 |
 | 신규 공개 게시 / Play | 미실행 |
 
@@ -197,3 +198,49 @@ DB I/O도 허용하고, 500회 안에 완료되지 않으면 명확하게 실패
 Flutter517개, analyzer, 문서 구조, whitespace와 generated-file audit가 통과했습니다.
 이번 수정은 테스트 helper와 증적 문서뿐이며 새 APK를 빌드하지 않았습니다.
 원격 CI가 성공했다고 기록하지 않습니다.
+
+## 2026-10-16 실제 키와 새 지도 후보
+
+clean `2dbdc9c5392bdf0077c90a4edfd1d08e47b47ae1`에서 사용자 키를 값 출력 없이
+환경으로 읽고 private0600 define 파일을 전달했습니다. `--all-apk`는 exit0이며
+Flutter517개/analyzer/debug APK/서명 APK3개/AAB/manifest/버전/인증서/hash/작업 트리
+검사가 통과했습니다. AAB는 bundletool1.18.3 validate exit0, JAR 서명과 기존 인증서
+일치를 확인했습니다. 새 hash는 [릴리즈 증적](../../release/2026-10-14-maintenance-stage1-release.md)에 있습니다.
+
+Android/iOS/pubspec 소스는 native16/11개를 검증한 `ddede22`와 diff가 없습니다.
+변경 없는 native gate를 로컬에서 다시 실행하지 않았고, 제품 build head의
+[CI38818465567](https://github.com/devcsb/sanbo/actions/runs/38818465567)는 두 job 모두
+성공했습니다. 이후 증적 문서 commit의 CI는 별도로 현재 PR head에서 확인합니다.
+
+| 실제 앱 검사 | Android API34 | iOS26.5 |
+|---|---|---|
+| 실제 키의 도로/건물/지명 | PASS, 새 signed arm64 APK | PASS, 현재 소스 simulator build |
+| 경로/시작/종료/재생 | 새 합성9개 위치,00:24 진행 확인 | 새 합성12개 위치,00:00→01:12 확인 |
+| 키 없음 | 이전 동일 제품 소스 debug PASS | 새 keyless build PASS |
+| 합성 invalid key | 이전 동일 제품 소스 debug PASS | 새 invalid build PASS |
+| 공급자 안내 이미지 보존 | PASS | PASS |
+| 실제 네트워크 단절 후 재열기 | PASS, 전용 AVD Wi-Fi/data off 후 원복 | 미검증 |
+
+iOS 전용 단말만 네트워크에서 분리하는 기능을 현재 simctl/Simulator 메뉴에서
+찾지 못했습니다. 사용자 Mac의 네트워크를 끊지 않았으며 iOS 실제 단절이 통과했다고
+주장하지 않습니다. 공통 HTTP/stream/codec widget 실패 결과와 Android 실제 단절
+증거를 구분합니다. 실제 iOS 스크린리더나 물리 기기 정확도/배터리 검증도 아닙니다.
+
+Android는 SwiftShader 전용 AVD에서 새 release APK를 정상 launch했습니다. 첫 지도
+screenshot에는 일부 타일만 로딩돼 있었고 이후 도로/건물이 모두 표시됐습니다.
+최종 증거는 `android-keyed-map-settled.png`, 재생은 `android-keyed-playback-start.*`입니다.
+iOS는 `ios-keyed-map.jpg`, 기존 단일 위치의 Hangang River 지명은
+`ios-keyed-city-labels.jpg`, 실패는 `ios-keyless-map.jpg`/`ios-invalid-map.jpg`에 있습니다.
+잘못된 키의 안내 이미지를 가리지 않았습니다. 정상 키 앱을 다시 설치하고 모의 위치를
+해제했으며 기존/새 기록은 보존했습니다. 실제 키와 keyed URL은 캡처한 Android/iOS
+현재 프로세스 로그와 빌드 로그, Android 백업 파일에 없었습니다.
+
+새 Android APK를 보존된 후보 위에 `install -r`로 적용했습니다. 실제 Settings의
+시스템 picker로12747bytes 백업을 저장했고, 이전 백업의 모든 행이5개 table에서
+동일하게 보존됐습니다. 산책2개/원본24개/분별10개/장소1개이며 이전 메모/확정 라벨도
+동일합니다. 같은 파일의 재가져오기는 `산책 0개를 가져왔어요 · 중복 2개 건너뜀`으로
+완료됐습니다. 신규/중복 이름 전체 복원은 기존 native E2E 결과와 구분합니다.
+
+경미한 후속 UX 항목은 iOS 실패 문구의 끝 `요.`가 별도 줄로 내려가는 배치입니다.
+문구/경로/재생은 읽고 사용할 수 있었고320dp/2배 widget 회귀도 통과했습니다. 승인된
+카피를 이번 후보에 유지하고 줄바꿈 조정은 후속으로 남깁니다.

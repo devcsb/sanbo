@@ -4,7 +4,7 @@
 |---|---|
 | 문서 ID | TRD-SANBO-MAINT-2026-10 |
 | 작성일 | 2026-10-13 |
-| 보강일 | 2026-10-14, 시간 보존과 과거 부분 제외 처리 경계 |
+| 보강일 | 2026-10-16, 실제 키와 지도/서명 후보 검증 추가 |
 | 상태 | 1차 설계와 구현 계획 승인, 후보 구현/검증 진행. 후속 측정과 저장 설계는 제안 단계 |
 | 기준 | `v0.9.1`, SQLite v6, 전체 백업 v2, 세션 export v2 |
 | 관련 문서 | [PRD](PRD_MAINTENANCE_2026-10.md), [1차 설계](superpowers/specs/2026-10-13-measurement-consistency-and-backup-design.md), [근거](superpowers/verification/2026-10-13-maintenance-audit.md) |
@@ -227,7 +227,7 @@ schema/backup migration은 후속 측정 설계에서 함께 확정한다.
 | MR-15 | 후속 부분 제외 집계와 표시 | backup v2 부분/복수 제외, 20초 제외 시35m/40초 일치, 개별 복원과 사용자 메타데이터 유지 |
 | MR-17 | 긴급 지도 공급자 인증과 장애 표시 | 실제 PNG 내용과 Android/iOS 화면, 키 미설정/인증 실패/오프라인에서 경로 보존 |
 
-MR-17의 현재 `RouteMap.tileUrlTemplate`은 인증 없는 CARTO raster URL이다. 실제
+MR-17 발견 당시 `RouteMap.tileUrlTemplate`은 인증 없는 CARTO raster URL이었다. 실제
 HTTP200 PNG와 iOS 상세 화면에 지도 대신 API 키 안내가 표시됐다. 공급자가
 [키 없는 raster 제공을 중단](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)했으므로 기존 성공 status 검사는 수용 게이트가 될 수 없다.
 [지도 복구 설계](superpowers/specs/2026-10-14-basemap-service-restoration-design.md)와
@@ -235,8 +235,12 @@ HTTP200 PNG와 iOS 상세 화면에 지도 대신 API 키 안내가 표시됐다
 없으면 요청하지 않고 안내하며, HTTP/stream/codec 실패에서도 경로를 보존한다.
 기존 renderer/cache를 쓰는 전용 provider로 키가 든 URL의 SDK 진단 누출을 막는다.
 공급자200 안내 이미지는 보존하며 실패/안내 cache만 제거해 재열기 복구를 허용한다.
-키 준비/실제 도로·지명/새 서명 후보는 미검증이다. 기존 `ddede22` 산출물에는
-이 변경이 포함되지 않는다.
+2026-10-16 실제 키를 비공개 define 파일로 전달한 clean `2dbdc9c`에서 Flutter517개와
+새 서명 APK3개/AAB gate를 통과했다. Android/iOS 실제 도로/지명과 경로/재생,
+키 누락/합성 invalid key를 확인했다. Android 새 후보의 백업은 기존5개 table의
+모든 행을 보존했고 같은 파일의2개 중복을 건너뛰었다. iOS 실제 네트워크 단절,
+물리 기기 수용 검증과 독립 PR 검토/공개 확인은 남아 있다. 이전 `ddede22` 산출물은
+지도 수정 전 후보이며 새 checksum과 구분한다.
 
 1차 종료 게이트는 새 회귀 테스트, analyzer, 전체 Flutter 테스트, Android/iOS native
 테스트, Android debug/release 빌드, 문서 검증, `git diff --check`다. 모바일

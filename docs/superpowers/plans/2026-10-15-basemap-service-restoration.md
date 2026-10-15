@@ -252,9 +252,9 @@ flutter_build appbundle --release --target lib/main.dart
 debug APK는 키가 있을 때만 같은 define 파일을 쓰고, 기본 CI에서는 기존 build 명령을 실행한다. 빈 배열의 Bash3 nounset 차이에도 의존하지 않는다. `set -x`를 켜지 않는다. 파일은 기존 키 파일/사용자 파일과 구별되는 새 경로만 쓴다.
 
 - [x] Step4: focused config tests와 `bash -n scripts/run_quality_loop.sh`, 기존 release metadata tests를 통과시킨다. 키 준비 방법/비공개 파일/환경 전달을 release 문서에 기록한다. 사용자가 로컬에 둔 키의 경로만 받고 실제 값을 대화/문서에 복사하지 않는다. 해당 파일을 `build: CARTO 키를 비공개 파일로 배포 빌드에 전달`로 커밋한다.
-- [ ] Step5: 사용자의 실제 전용 키가 준비됐을 때 clean committed tree에서 build SHA를 기록하고 `QUALITY_BASE_REF=v0.9.1 bash scripts/run_quality_loop.sh --all-apk`를 한 번 실행한다. native source/의존성이 달라지지 않았다면 직전16/11 native gate 소스 diff를 기록하고 불필요한 전체 native 반복을 하지 않는다. APK3개/AAB의 버전/인증서/hash를 새로 조회한다. 키 없이 signed 후보를 새로 만들거나 기존 후보를 새 제품 코드라고 주장하지 않는다.
+- [x] Step5: 사용자의 실제 전용 키가 준비됐을 때 clean committed tree에서 build SHA를 기록하고 `QUALITY_BASE_REF=v0.9.1 bash scripts/run_quality_loop.sh --all-apk`를 한 번 실행한다. native source/의존성이 달라지지 않았다면 직전16/11 native gate 소스 diff를 기록하고 불필요한 전체 native 반복을 하지 않는다. APK3개/AAB의 버전/인증서/hash를 새로 조회한다. 키 없이 signed 후보를 새로 만들거나 기존 후보를 새 제품 코드라고 주장하지 않는다.
 - [ ] Step6: 실제 키를 넣은 Android/iOS build에서 도로와 지명이 표시되는지 확인한다. 키 누락 build, 합성 invalid-key build, 기기 네트워크를 끈 상태를 각각 관찰해 경로/재생/실패 안내를 검사한다. 테스트 전용 emulator/simulator만 사용하고 네트워크 설정은 원복한다. 정상200/PNG인 안내 이미지가 아닌 실제 지도를 눈으로 확인한다. 실제키/URL이 드러나는 도구 출력을 저장하지 않는다.
-- [ ] Step7: 기존 Android 업데이트/백업 통과 결과와 변경 제품 소스의 연결을 구분한다. 실제 Settings 저장/재가져오기와 상세/재생을 새 APK에서도 smoke한다. 기록을 삭제하거나 pm clear/uninstall로 업데이트를 대신하지 않는다. 결과/미검증 항목을 문서에 기록하고 product-source diff를 남긴다.
+- [x] Step7: 기존 Android 업데이트/백업 통과 결과와 변경 제품 소스의 연결을 구분한다. 실제 Settings 저장/재가져오기와 상세/재생을 새 APK에서도 smoke한다. 기록을 삭제하거나 pm clear/uninstall로 업데이트를 대신하지 않는다. 결과/미검증 항목을 문서에 기록하고 product-source diff를 남긴다.
 - [ ] Step8: 새 build SHA/4개 asset/checksum으로 기존 draft release를 갱신하고 원격 digest/draft=true를 대조한다. PR#1을 최종 범위/실제 검증/미검증 내용으로 갱신한다. exact PR head CI를 조회하되 running을 성공으로 쓰지 않는다. 독립 PR 검토와 구체적인 게시 승인은 완료 전에 별도로 받는다.
 
 ## 계획 검토 상태
@@ -263,7 +263,7 @@ debug APK는 키가 있을 때만 같은 define 파일을 쓰고, 기본 CI에�
 - [x] 기존 직접 구현 방식 유지, 재위임 없음
 - [x] 확인한 invalid-key200/ETag와 flutter_map7 로그 경로를 계획에 반영
 - [x] 작성된 이 구현 계획의 사용자 검토, 2026-10-15 직접 구현 승인
-- [ ] 실제 전용 basemap 키 준비
+- [x] 실제 전용 basemap 키 준비
 - [ ] 세 작업 구현/검증과 새 후보, 독립 검토/공개 확인
 
 2026-10-15 실행 판정: 새로 확인한 [CARTO 공식 안내](https://docs.carto.com/faqs/carto-basemaps#why-do-i-see-an-api-key-required-watermark)는 공급자 notice를 숨기지 않도록 요구한다. 따라서 확인된 HTTP200 안내 PNG는 client가 성공 bytes로 보존하며 별도 상태 callback으로 앱 안내를 표시하도록 Task1/2를 구체화했다. 기존 공급자를 바꾸거나 유료 사용을 추가하는 범위 변경은 아니다.
@@ -273,3 +273,21 @@ metadata1개 focused 검증을 통과했습니다. 제품 소스 `8d56049`의 �
 Flutter516개/analyzer/debug APK와 tree audit도 통과했습니다. 실제 Android에서
 키 없음/합성 invalid key/네트워크 단절과 marker/재생 UI를 확인했습니다. 정상 키와
 iOS 지도, 새 signed APK/AAB/asset 교체, 독립 PR 검토/공개 확인은 남아 있습니다.
+
+2026-10-16 실행 상태: 실제 키를 읽어 clean `2dbdc9c`에서 `--all-apk`를 통과했습니다.
+Flutter517개/analyzer/debug+signed APK3개/AAB/manifest/버전/인증서/hash/tree audit가
+통과했고 AAB bundletool/JAR도 확인했습니다. 두 OS의 정상 지도와 키 없음/합성 invalid
+key, 경로/재생을 실제 앱에서 확인했습니다. 새 Android APK는 기존 데이터 위에 설치했고
+Settings 백업12747bytes의 기존5개 table 모든 행 보존과 재가져오기 중복2개 건너뛰기를
+확인했습니다. 제품 build head CI38818465567은 두 job 모두 성공했습니다.
+
+Step6은 iOS 실제 네트워크 단절을 미검증으로 남겨 완료 체크하지 않았습니다. 전용
+simulator만 분리하는 기능을 현재 도구/메뉴에서 찾지 못했고 사용자 Mac 네트워크를
+끊지 않았습니다. Android 실제 단절과 공통 HTTP/widget 경계 결과와 구분합니다.
+Step8은 새 draft asset5개의 digest 대조, 최종 PR head CI, 독립 PR 검토와 게시 확인을
+각각 기록하며, 공개 승인 전에는 완료로 표시하지 않습니다. 좁은 iOS 화면에서 승인한
+실패 문구의 끝 음절이 한 줄로 내려가는 경미한 배치는 후속 UX 조정으로 남깁니다.
+
+새 draft412291177은 target `2dbdc9c`, tag `v0.9.2`, draft=true와 원격5개 digest 일치를
+다시 조회했습니다. 기존 공개 latest는 계속 `v0.9.1`이며 새 후보는 공개하지 않았습니다.
+최종 증적 문서 head CI와 독립 검토/공개 확인은 별도로 남아 있습니다.
