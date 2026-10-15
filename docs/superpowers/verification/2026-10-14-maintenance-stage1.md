@@ -180,3 +180,20 @@ marker/재생 UI를 유지했습니다. 네트워크 설정은 초기값으로 �
 증거는 `android-invalid-key-settled.*`, `android-offline-detail.*`와
 `android-invalid-build-check.json`입니다. 종료 후 두 전용 AVD를 중지했으며 데이터는
 보존했습니다. 실제 정상 키와 iOS 지도 UI, 새 signed map candidate는 여전히 남아 있습니다.
+
+## 2026-10-16 CI 대기 문제
+
+지도 문서 head `5d8c8e5`의 [CI run38654372976](https://github.com/devcsb/sanbo/actions/runs/38654372976)에서
+native job은 성공했지만 Flutter job은 30분 상한으로 취소됐습니다. 상세 화면의
+제외/복구 테스트가 재로딩을 기다리던 중 10분 timeout에 걸렸고, 이후 테스트에서도
+끝나지 않은 `runAsync` 때문에 재진입 오류가 발생했습니다.
+
+같은 기존 테스트는 로컬에서 단독 실행하면 통과했습니다. 별도로 fake clock에서
+아직 끝나지 않은 provider를 준비하자 기존 대기 helper가 멈추는 문제를 재현했습니다.
+재현용 1초 timeout은 진단 뒤 제거했습니다. helper가 fake clock을 진행하면서 실제
+DB I/O도 허용하고, 500회 안에 완료되지 않으면 명확하게 실패하도록 수정했습니다.
+새 회귀와 해당 widget 파일 12개는 통과했습니다. 이어
+`QUALITY_BASE_REF=v0.9.1 bash scripts/run_quality_loop.sh`가 exit0으로 끝났고 전체
+Flutter517개, analyzer, 문서 구조, whitespace와 generated-file audit가 통과했습니다.
+이번 수정은 테스트 helper와 증적 문서뿐이며 새 APK를 빌드하지 않았습니다.
+원격 CI가 성공했다고 기록하지 않습니다.

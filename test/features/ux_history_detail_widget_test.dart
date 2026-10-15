@@ -39,10 +39,20 @@ Future<void> waitForDetailReload(WidgetTester tester, String sessionId) async {
     tester.element(find.byType(SessionDetailScreen)),
     listen: false,
   );
-  await tester.runAsync(() async {
-    await container.read(sessionDetailProvider(sessionId).future);
-  });
-  await tester.pump();
+  // Pump fake time while allowing real database I/O; bound a stalled reload.
+  for (var attempt = 0; attempt < 500; attempt++) {
+    await tester.pump(const Duration(milliseconds: 20));
+    final detail = container.read(sessionDetailProvider(sessionId));
+    if (!detail.isLoading) {
+      expect(detail.hasError, isFalse, reason: '${detail.error}');
+      await tester.pump();
+      return;
+    }
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+  }
+  fail('Session detail reload did not finish after 500 pumps.');
 }
 
 Widget detailApp(
@@ -158,6 +168,31 @@ void main() {
 
   setUpAll(() async {
     await initializeDateFormatting('ko');
+  });
+
+  testWidgets('detail reload waiter pumps pending provider work', (
+    tester,
+  ) async {
+    const sessionId = 'delayed-detail';
+    var loaded = false;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          sessionDetailProvider(sessionId).overrideWith((ref) async {
+            await Future<void>.delayed(const Duration(milliseconds: 80));
+            loaded = true;
+            return null;
+          }),
+        ],
+        child: const MaterialApp(
+          home: SessionDetailScreen(sessionId: sessionId),
+        ),
+      ),
+    );
+    expect(loaded, isFalse);
+    await waitForDetailReload(tester, sessionId);
+    expect(loaded, isTrue);
+    expect(find.text('기록을 찾을 수 없어요'), findsOneWidget);
   });
 
   testWidgets('empty HistoryScreen CTA navigates home via go_router', (

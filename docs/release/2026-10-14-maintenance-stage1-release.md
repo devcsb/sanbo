@@ -27,6 +27,12 @@ APK까지 통과했습니다. release 빌드는 키 누락 시 조기에 실패�
 auto-GPU ANR과 SwiftShader 재실행 조건은 [검증 기록](../superpowers/verification/2026-10-14-maintenance-stage1.md)에
 구분해 남겼습니다. 이전 signed gate를 새 지도 release 검증으로 대신하지 않습니다.
 
+2026-10-16 확인한 `5d8c8e5` CI는 native 성공, Flutter 30분 timeout 취소였습니다.
+상세 테스트의 재로딩 대기 helper가 fake clock을 진행하도록 수정했고 회귀를
+추가했습니다. 해당 widget 파일 12개와 전체 Flutter517개, analyzer, 문서/whitespace/
+generated-file audit가 통과했습니다. 제품 소스와 기존 APK/AAB는 바꾸지 않았습니다.
+원격 CI와 정상 지도/새 서명 후보 검증은 각각 새 결과로 확인해야 합니다.
+
 ## 1차 서명 후보 검증
 
 - 복구 거리와 필터 경계 관련 52개 테스트 통과.
