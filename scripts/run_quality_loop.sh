@@ -4,7 +4,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
-release_base="${QUALITY_BASE_REF:-$(git describe --tags --abbrev=0 2>/dev/null || printf 'HEAD')}"
 expected_cert_sha256="ceb40402d706589acee5da5df5a010c3dd5c2e9329cd3218961dfce56a6d38ac"
 
 build_mode="none"
@@ -19,6 +18,38 @@ case "${1:-}" in
     ;;
 esac
 
+if [[ "$build_mode" == "release" || "$build_mode" == "all" ]] &&
+  [[ -z "${CARTO_BASEMAP_KEY//[[:space:]]/}" ]]; then
+  echo "CARTO_BASEMAP_KEY is required for release builds" >&2
+  exit 1
+fi
+
+carto_define_dir=""
+cleanup_carto_defines() {
+  local result=$?
+  if [[ -n "$carto_define_dir" ]]; then
+    rm -f "$carto_define_dir/carto.json"
+    rmdir "$carto_define_dir"
+  fi
+  exit "$result"
+}
+trap cleanup_carto_defines EXIT
+
+if [[ "$build_mode" != "none" && -n "${CARTO_BASEMAP_KEY:-}" ]] &&
+  [[ -n "${CARTO_BASEMAP_KEY//[[:space:]]/}" ]]; then
+  carto_define_dir="$(mktemp -d "${TMPDIR:-/tmp}/sanbo-map-define.XXXXXX")"
+  python3 scripts/prepare_carto_defines.py "$carto_define_dir/carto.json"
+fi
+
+flutter_build() {
+  if [[ -n "$carto_define_dir" ]]; then
+    flutter build "$@" --dart-define-from-file "$carto_define_dir/carto.json"
+  else
+    flutter build "$@"
+  fi
+}
+
+release_base="${QUALITY_BASE_REF:-$(git describe --tags --abbrev=0 2>/dev/null || printf 'HEAD')}"
 status_before="$(git status --porcelain=v1 --untracked-files=all)"
 if [[ "$build_mode" == "release" || "$build_mode" == "all" ]] &&
   [[ -n "$status_before" ]]; then
@@ -58,14 +89,15 @@ flutter test --no-pub --concurrency=1
 case "$build_mode" in
   debug|all)
     step "Android debug APK"
-    flutter build apk --debug --target lib/main.dart
+    flutter_build apk --debug --target lib/main.dart
     ;;
 esac
 
 case "$build_mode" in
   release|all)
-    expected_release_version="0.9.1+15"
-    release_evidence="docs/release/2026-09-24-android-release.md"
+    expected_release_version="0.9.2+16"
+    expected_version_name="${expected_release_version%%+*}"
+    release_evidence="docs/release/2026-10-14-maintenance-stage1-release.md"
     actual_release_version="$(sed -n 's/^version: //p' pubspec.yaml | head -1)"
     if [[ "$actual_release_version" != "$expected_release_version" ]]; then
       echo "release version mismatch: expected $expected_release_version" >&2
@@ -89,9 +121,9 @@ case "$build_mode" in
     # Do not use --no-pub here: Flutter's build preparation refreshes the
     # platform registrant and excludes dev-only integration_test plugins from
     # the release Java compilation.
-    flutter build apk --release --split-per-abi --target lib/main.dart
+    flutter_build apk --release --split-per-abi --target lib/main.dart
     step "Android release app bundle"
-    flutter build appbundle --release --target lib/main.dart
+    flutter_build appbundle --release --target lib/main.dart
     if [[ ! -s build/app/outputs/bundle/release/app-release.aab ]]; then
       echo "release app bundle was not produced" >&2
       exit 1
@@ -128,7 +160,7 @@ case "$build_mode" in
     grep -q 'foregroundServiceType="0x8"' <<<"$manifest"
 
     step "Android release version and target SDK"
-    if [[ "$(apkanalyzer manifest version-name "$apk")" != "0.9.1" ]]; then
+    if [[ "$(apkanalyzer manifest version-name "$apk")" != "$expected_version_name" ]]; then
       echo "release version name mismatch: $apk" >&2
       exit 1
     fi
@@ -150,7 +182,7 @@ case "$build_mode" in
 
     step "Android release checksums"
     checksum_dir="build/app/outputs/release"
-    checksum_file="$checksum_dir/SHA256SUMS_v0.9.1.txt"
+    checksum_file="$checksum_dir/SHA256SUMS_v$expected_version_name.txt"
     mkdir -p "$checksum_dir"
     shasum -a 256 \
       build/app/outputs/bundle/release/app-release.aab \

@@ -57,6 +57,8 @@ abstract interface class ActivityDataSourceConnector {
 }
 
 abstract interface class ActivityDataSourceSettingsOpener {
+  bool get canOpenSettings;
+
   Future<bool> openSettings();
 }
 
@@ -143,6 +145,9 @@ class HealthActivityDataSource
       return ActivityAccessState.error;
     }
   }
+
+  @override
+  bool get canOpenSettings => _settingsOpener != null;
 
   @override
   Future<bool> openSettings() async {

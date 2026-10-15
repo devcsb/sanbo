@@ -43,9 +43,7 @@ class SessionExport {
       ..writeln('시작: $date')
       ..writeln('거리: $km km')
       ..writeln('시간: $dur')
-      ..writeln(
-        kmh == null ? '평균 속도: 측정되지 않음' : '평균 속도: $kmh km/h',
-      );
+      ..writeln(kmh == null ? '평균 속도: 측정되지 않음' : '평균 속도: $kmh km/h');
     if (pace != null) buf.writeln('페이스: $pace');
     if (session.movingTimeS != null) {
       buf.writeln(
@@ -102,7 +100,12 @@ class SessionExport {
         'duration_s': session.durationS,
         'moving_time_s': session.movingTimeS,
         'stationary_time_s': session.stationaryTimeS,
-        'avg_speed_mps': session.avgSpeedMps,
+        'avg_speed_mps': session.status == SessionStatus.completed
+            ? completedAverageSpeedMps(
+                totalDistanceM: session.totalDistanceM,
+                movingTimeS: session.movingTimeS,
+              )
+            : session.avgSpeedMps,
         'valid_sample_count': session.validSampleCount,
         'median_accuracy_m': session.medianAccuracyM,
         'notes': session.notes,

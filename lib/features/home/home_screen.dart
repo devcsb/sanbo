@@ -11,6 +11,7 @@ import '../../data/walk_repository.dart';
 import '../../domain/models/session_warning.dart';
 import '../../domain/models/session_error_code.dart';
 import '../../domain/models/walk_session.dart';
+import '../../domain/services/live_speed_availability.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
 import '../intro/intro_providers.dart';
@@ -44,6 +45,13 @@ class HomeScreen extends ConsumerWidget {
         };
     final km = live.liveDistanceM / 1000.0;
     final kmh = live.liveSpeedMps * 3.6;
+    final speedText = !tracking && !recovery
+        ? '${kmh.toStringAsFixed(1)} km/h'
+        : switch (live.speedAvailability) {
+            LiveSpeedAvailability.available => '${kmh.toStringAsFixed(1)} km/h',
+            LiveSpeedAvailability.waiting => '측정 대기',
+            LiveSpeedAvailability.stale => '측정 중단',
+          };
 
     return Scaffold(
       appBar: AppBar(title: const AppBarTitle('산보', showBrand: true)),
@@ -176,7 +184,7 @@ class HomeScreen extends ConsumerWidget {
                         // announcement so a screen reader isn't read a wall of
                         // meaningless "0" before reaching the start button.
                         label: (tracking || recovery)
-                            ? '시간 ${_formatDuration(live.elapsed)}, 거리 ${km.toStringAsFixed(2)} 킬로미터, 속도 ${kmh.toStringAsFixed(1)} 시속, 위치 ${live.sampleCount}개'
+                            ? '시간 ${_formatDuration(live.elapsed)}, 거리 ${km.toStringAsFixed(2)} 킬로미터, 현재 속도 $speedText, 유효 위치 ${live.validSampleCount}개'
                             : null,
                         excludeSemantics: tracking || recovery,
                         child: MetricStrip(
@@ -184,9 +192,13 @@ class HomeScreen extends ConsumerWidget {
                               ? Align(
                                   alignment: Alignment.center,
                                   child: StatusPill(
-                                    label: live.sampleCount == 0
-                                        ? 'GPS 잡는 중'
-                                        : '기록 중 · 위치 ${live.sampleCount}',
+                                    label:
+                                        live.speedAvailability ==
+                                            LiveSpeedAvailability.stale
+                                        ? 'GPS 신호 대기'
+                                        : live.validSampleCount == 0
+                                        ? 'GPS 신호 대기'
+                                        : '기록 중 · 유효 위치 ${live.validSampleCount}',
                                     icon: Icons.fiber_manual_record_rounded,
                                     color: theme.colorScheme.tertiary,
                                   ),
@@ -202,10 +214,7 @@ class HomeScreen extends ConsumerWidget {
                               label: '거리',
                               value: '${km.toStringAsFixed(2)} km',
                             ),
-                            MetricData(
-                              label: '속도',
-                              value: '${kmh.toStringAsFixed(1)} km/h',
-                            ),
+                            MetricData(label: '현재 속도', value: speedText),
                           ],
                         ),
                       ),
@@ -301,6 +310,11 @@ class HomeScreen extends ConsumerWidget {
   }
 
   String _trackingDescription(LiveSessionState live) {
+    if (live.speedAvailability == LiveSpeedAvailability.stale &&
+        live.activeWarning == null &&
+        live.errorMessage == null) {
+      return 'GPS 신호를 기다리고 있어요. 새 위치를 받으면 속도를 다시 표시해요.';
+    }
     if (live.sampleCount == 0) {
       final elapsed = live.elapsed.inSeconds;
       if (elapsed >= 15) {

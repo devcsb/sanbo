@@ -15,6 +15,9 @@ migrate_working_dir/
 # GJC local workflow state
 /.gjc/
 
+# Local web research output
+/.firecrawl/
+
 # IntelliJ related
 *.iml
 *.ipr

@@ -20,6 +20,100 @@ Future<void> _settle(WidgetTester tester) async {
 }
 
 void main() {
+  for (final fixture in [
+    (
+      timezone: 'Asia/Seoul',
+      start: DateTime.utc(2026, 10, 14),
+      duration: const Duration(minutes: 3),
+      startText: '09:00',
+      endText: '09:03',
+      currentText: '09:03:00',
+    ),
+    (
+      timezone: 'America/New_York',
+      start: DateTime.utc(2026, 11, 1, 5, 30),
+      duration: const Duration(hours: 1),
+      startText: '01:30',
+      endText: '01:30',
+      currentText: '01:30:00',
+    ),
+  ]) {
+    testWidgets('playback clocks use ${fixture.timezone}', (tester) async {
+      late WalkRepository repo;
+      late String sessionId;
+      await tester.runAsync(() async {
+        repo = await openTestRepository();
+        final start = fixture.start;
+        final end = start.add(fixture.duration);
+        final session = await repo.startSession(
+          startedAt: start,
+          timezone: fixture.timezone,
+        );
+        sessionId = session.id;
+        final samples = buildWalkTrace(
+          start: start,
+          duration: fixture.duration,
+        );
+        final result = SessionPipeline().process(
+          session: session,
+          rawSamples: samples,
+          endedAt: end,
+        );
+        await repo.finalizeSession(
+          session: session,
+          samples: result.filteredSamples,
+          windows: result.windows,
+          endedAt: end,
+          totalDistanceM: result.metrics.totalDistanceM,
+          durationS: result.metrics.durationS,
+          movingTimeS: result.metrics.movingTimeS,
+          stationaryTimeS: result.metrics.stationaryTimeS,
+          avgSpeedMps: result.metrics.avgSpeedMps,
+          validSampleCount: result.metrics.validSampleCount,
+          medianAccuracyM: result.metrics.medianAccuracyM,
+        );
+      });
+      addTearDown(() => tester.runAsync(repo.close));
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [walkRepositoryProvider.overrideWithValue(repo)],
+            child: MaterialApp(home: SessionDetailScreen(sessionId: sessionId)),
+          ),
+        );
+        await _settle(tester);
+        await _settle(tester);
+        expect(find.text(fixture.startText), findsWidgets);
+        expect(find.text(fixture.endText), findsWidgets);
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('route-playback-slider')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.bySemanticsLabel(RegExp('경로 재생 위치 ${fixture.currentText}')),
+          findsWidgets,
+        );
+        expect(
+          tester
+              .widget<Slider>(
+                find.byKey(const ValueKey('route-playback-slider')),
+              )
+              .semanticFormatterCallback
+              ?.call(
+                tester
+                    .widget<Slider>(
+                      find.byKey(const ValueKey('route-playback-slider')),
+                    )
+                    .value,
+              ),
+          fixture.currentText,
+        );
+      } finally {
+        semantics.dispose();
+      }
+    });
+  }
   TestWidgetsFlutterBinding.ensureInitialized();
 
   setUpAll(() => initializeDateFormatting('ko'));

@@ -9,6 +9,87 @@ import 'package:sanbo/features/history/history_providers.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 void main() {
+  testWidgets('retry replaces a health read error with valid zero steps', (
+    tester,
+  ) async {
+    final days = _days();
+    final date = days.last.date;
+    var reads = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          dailyActivityProvider.overrideWith((ref) async {
+            final failed = reads++ == 0;
+            return DailyActivitySnapshot(
+              days: days,
+              weekStart: days.first.date,
+              weekEnd: date,
+              stepsByDate: {
+                date: DailyStepSnapshot(
+                  date: date,
+                  steps: failed ? null : 0,
+                  source: failed
+                      ? ActivitySourceKind.error
+                      : ActivitySourceKind.healthKit,
+                  coverage: failed
+                      ? ActivityCoverage.unavailable
+                      : ActivityCoverage.complete,
+                ),
+              },
+            );
+          }),
+          dailyWeekEndProvider.overrideWith((ref) => date),
+          dailySelectedDayProvider.overrideWith((ref) => date),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const Scaffold(body: DailyActivityPanel()),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('불러오기 실패'), findsOneWidget);
+    await tester.tap(find.text('다시 불러오기'));
+    await tester.pumpAndSettle();
+    expect(find.text('0걸음'), findsOneWidget);
+    expect(find.text('불러오기 실패'), findsNothing);
+  });
+
+  for (final row in <(ActivitySourceKind, ActivityCoverage, int?, String)>[
+    (ActivitySourceKind.error, ActivityCoverage.unavailable, null, '불러오기 실패'),
+    (ActivitySourceKind.denied, ActivityCoverage.unavailable, null, '권한 필요'),
+    (
+      ActivitySourceKind.unavailable,
+      ActivityCoverage.unavailable,
+      null,
+      '연결 전',
+    ),
+    (ActivitySourceKind.healthKit, ActivityCoverage.partial, 5, '일부 기간만 확인됨'),
+    (ActivitySourceKind.healthKit, ActivityCoverage.complete, 0, '0걸음'),
+  ]) {
+    testWidgets('step status is ${row.$4}', (tester) async {
+      final days = _days();
+      final date = days.last.date;
+      await _pumpPanel(
+        tester,
+        days,
+        selected: date,
+        source: _SettingsActivitySource(canOpenSettings: false),
+        steps: DailyStepSnapshot(
+          date: date,
+          steps: row.$3,
+          source: row.$1,
+          coverage: row.$2,
+        ),
+      );
+      expect(find.text(row.$4), findsWidgets);
+      expect(find.text('Health Connect 설정 열기'), findsNothing);
+      if (row.$1 == ActivitySourceKind.error) {
+        expect(find.text('다시 불러오기'), findsOneWidget);
+      }
+    });
+  }
+
   setUpAll(() async {
     await initializeDateFormatting('ko');
   });
@@ -279,6 +360,9 @@ final class _SettingsActivitySource
         ActivityDataSourceConnector,
         ActivityDataSourceSettingsOpener,
         ActivityDataSourceCacheInvalidator {
+  _SettingsActivitySource({this.canOpenSettings = true});
+  @override
+  final bool canOpenSettings;
   var settingsCalls = 0;
   var requestCalls = 0;
 
@@ -312,15 +396,20 @@ Future<void> _pumpPanel(
   WidgetTester tester,
   List<DailyWalkStats> days, {
   required DateTime selected,
+  DailyStepSnapshot? steps,
+  ActivityDataSource? source,
 }) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        if (source != null)
+          activityDataSourceProvider.overrideWithValue(source),
         dailyActivityProvider.overrideWith(
           (ref) async => DailyActivitySnapshot(
             days: days,
             weekStart: days.first.date,
             weekEnd: days.last.date,
+            stepsByDate: steps == null ? const {} : {steps.date: steps},
           ),
         ),
         dailyWeekEndProvider.overrideWith((ref) => days.last.date),

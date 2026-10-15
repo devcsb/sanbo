@@ -61,6 +61,7 @@ final class NotificationTapBuffer {
   private var notificationChannel: FlutterMethodChannel?
   private var notificationChannelReady = false
   private var notificationChannelGeneration = 0
+  private var backupExportCoordinator: BackupExportCoordinator?
 
   override func application(
     _ application: UIApplication,
@@ -72,6 +73,24 @@ final class NotificationTapBuffer {
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    backupExportCoordinator?.close()
+    if let cache = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+      let coordinator = BackupExportCoordinator(
+        exportRoot: cache.appendingPathComponent("sanbo_exports", isDirectory: true),
+        presentPicker: { picker in
+          guard var presenter = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .flatMap({ $0.windows })
+            .first(where: { $0.isKeyWindow })?.rootViewController else { return false }
+          while let top = presenter.presentedViewController { presenter = top }
+          guard presenter.viewIfLoaded?.window != nil, !presenter.isBeingDismissed else { return false }
+          presenter.present(picker, animated: true)
+          return true
+        }
+      )
+      backupExportCoordinator = coordinator
+      coordinator.attach(messenger: engineBridge.applicationRegistrar.messenger())
+    }
     let channel = FlutterMethodChannel(
       name: Self.methodChannelName,
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
