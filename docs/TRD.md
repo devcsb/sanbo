@@ -252,6 +252,8 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
 
 `finalizeSession`과 active 기록을 완료하는 `completeSession`에서만 속도 증거를 전달한다. 완료 세션의 라벨 편집은 속도 증거 없이 방금 차량으로 확정한 분만 전달한다. 따라서 과거 기록의 속도를 재평가하거나 다른 분을 편집한 뒤 제외 취소를 되돌리지 않는다. 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신은 기존 SQLite transaction을 유지한다. 원시 GPS 샘플과 사용자 메타데이터는 보존하고 상세 화면의 복원 경로는 일반 수동 제외와 동일하게 사용한다. DB schemaVersion 6과 백업 schema 2는 유지하며 기존 제외도 소급 변경하지 않는다. 이 정책은 라이브 세션을 속도만으로 자동 종료하지 않으며 `계속 기록` 동작도 기존대로 경고 표시만 닫는다.
 
+두 완료 API는 같은 transaction 안에서 저장된 세션 상태를 먼저 확인한다. 이미 completed이면 그 저장 결과를 반환하고 samples/windows/exclusions/집계/사용자 메타데이터를 쓰지 않는다. discarded와 없는 세션은 거부한다. 따라서 동시 완료와 오래된 요청 재시도에서도 제외가 한 번만 생성되고 이후 사용자 수정이 보존된다. 최초 완료에서는 전달받은 오래된 세션 객체 대신 transaction의 현재 세션 메타데이터를 사용한다. 라벨 편집 helper는 실제 수정한 DB의 window_start 키를 반환하며, 차량 제외 후보를 고를 때 해당 키를 저장된 세션 시간대로 해석한다. 사용자가 넘긴 시각을 다시 추측해서 다른 분을 고르지 않는다.
+
 알림 tap에서 warm tap은 즉시 `/`로 이동한다. cold tap은 복구가 끝난 뒤 active session이 있을 때만 경고를 표시한다. 종료됐거나 없는 세션은 tap을 버린다. native와 Dart의 pending buffer는 하나만 저장하고 한 번만 전달한다.
 
 정확한 공개 표면은 아래와 같다. 아래 선언은 완전한 독립 라이브러리가 아니라 실제 Dart 소스의 public type, field, getter, method 선언을 계약으로 옮긴 것이다.
