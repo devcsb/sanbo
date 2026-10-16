@@ -21,6 +21,8 @@ class RouteSegment {
 class RouteFragment {
   const RouteFragment(this.samples);
 
+  /// May end at an excluded interval's actual start fix, solely to close the
+  /// preceding included edge. That fix is not owned by includedSamples.
   final List<LocationSample> samples;
 }
 
@@ -43,6 +45,7 @@ abstract final class RoutePartitioner {
     Duration maxGap = trustedLocationGap,
     DateTime? sessionStart,
     DateTime? sessionEnd,
+    bool preserveExclusionStartEndpoint = true,
   }) {
     final startUtc = sessionStart?.toUtc();
     final endUtc = sessionEnd?.toUtc();
@@ -81,12 +84,21 @@ abstract final class RoutePartitioner {
       final excluded = orderedExclusions.any(
         (exclusion) => exclusion.contains(sample.timestamp),
       );
-      if (sample.isFilteredOut || !_validFix(sample) || excluded) {
+      final closesIncludedFragment =
+          excluded &&
+          preserveExclusionStartEndpoint &&
+          current.isNotEmpty &&
+          orderedExclusions.any(
+            (exclusion) => exclusion.startAt.isAtSameMomentAs(sample.timestamp),
+          );
+      if (sample.isFilteredOut ||
+          !_validFix(sample) ||
+          (excluded && !closesIncludedFragment)) {
         flush();
         continue;
       }
 
-      included.add(sample);
+      if (!excluded) included.add(sample);
       if (current.isEmpty) {
         current = [sample];
         continue;
@@ -113,7 +125,7 @@ abstract final class RoutePartitioner {
           speed.isFinite;
       if (!connect) {
         flush();
-        current = [sample];
+        if (!excluded) current = [sample];
         continue;
       }
 
@@ -121,6 +133,7 @@ abstract final class RoutePartitioner {
       segments.add(
         RouteSegment(start: previous, end: sample, distanceM: distance),
       );
+      if (closesIncludedFragment) flush();
     }
     flush();
 

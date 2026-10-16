@@ -240,11 +240,21 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
   REFERENCES route_exclusions(id) ON DELETE SET NULL;
 ```
 
-`RoutePartitioner.partition`은 필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다. 즉 필터된 샘플, 유효하지 않은 좌표, 사용자 제외 내부 샘플, 제외 범위를 가로지르는 두 endpoint와 `trustedLocationGap`보다 긴 공백을 지나 선분을 잇지 않는다. 포함 샘플만 fragments에 두며, fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 양수인 1ms 미만 간격도 microseconds로 유한 속도를 계산한다. 1.5m 미만 선분은 fragment와 관측 시간 분류에는 남기되 거리에는 더하지 않는다. `timestamp == sessionEnd` 샘플은 마지막 실제 분이 소유한다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다.
+`RoutePartitioner.partition`은 필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다. 제외 시작 시각과 정확히 같은 유효한 실제 좌표는 앞쪽 포함 fragment의 끝점으로만 사용할 수 있다. 앞 좌표와의 간격이 양수이고 `maxGap` 이하이며 제외를 교차하지 않을 때만 선분을 추가하고 즉시 fragment를 닫는다. 이 끝점은 `[startAt, endAt)` 소속에 따라 `includedSamples`에는 넣지 않으며 제외 내부의 새 fragment 시작점으로 쓰지 않는다. 인접 제외, 필터 거부와 관측 공백을 건너 잇거나 경계 좌표를 보간하지 않는다. `preserveExclusionStartEndpoint`의 기본값은 true다. fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 양수인 1ms 미만 간격도 microseconds로 유한 속도를 계산한다. 1.5m 미만 선분은 fragment와 관측 시간 분류에는 남기되 거리에는 더하지 않는다. `timestamp == sessionEnd` 샘플은 마지막 실제 분이 소유한다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다. 구간 선택 지도는 해당 구간의 종료 시각과 정확히 같은 fragment 끝점도 보존하며, 서로 다른 fragment를 연결하지 않는다.
+
+`SessionPipeline.recalculateCompleted`는 새 경계 계산을 적용한 제외 분의 기존 `evidence` 필드에 `distance_window:exclusion_start_endpoint`를 기록한다. 상세 provider는 이 근거가 있는 제외 분을 읽었을 때만 경계 끝점 보존을 켠다. 근거 없는 과거 기록은 false로 읽어 저장된 집계와 경로를 유지하며, 상세 조회와 백업 가져오기는 숨은 재계산이나 쓰기를 하지 않는다. 명시적인 제외/복원으로 재계산할 때는 집계와 분 근거를 같은 transaction에서 함께 갱신한다. 백업 schema 2의 기존 `evidence_json` 문자열 배열로 근거를 왕복 보존하고, 세션 JSON/NDJSON export에도 `evidence` 배열을 추가한다. DB schema와 백업 버전은 바꾸지 않는다.
 
 `SessionGuard`의 observedAt 수신 시각은 최대 과거 30초와 미래 5초만 허용한다. `WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 분 기록 전체 교체, 세션 집계 갱신, 제외 레코드 삭제 마지막 순서로 쓴다. 같은 SQLite transaction은 원본과 파생 상태를 함께 rollback한다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
 
-완료 시 자동 제외 정책은 라이브 고속 경고와 분리한다. `AutomaticRouteExclusionPolicy`는 필터가 통과한 파생 `MinuteWindow.maxSpeedMps >= 10 / 3.6`(시속 10km/h 이상)을 고속 후보로 만들고, `SegmentMerger` 결과의 `ActivityLabel.vehicle` 확정 구간도 후보로 만든다. 단, 사용자가 차량이 아닌 활동으로 확정한 분은 고속 후보에서 제외해 빠른 걷기를 덮어쓰지 않는다. 후보는 세션 범위에 clamp하고 기존 제외와 겹치지 않게 한 뒤 맞닿거나 겹치는 범위를 합친다. 속도 후보의 `RouteExclusionReason`은 `highSpeed`, 차량 라벨 후보는 `vehicle`이며, 겹친 후보는 `highSpeed`를 우선한다. `finalizeSession`과 완료 세션의 사용자 라벨 변경은 같은 SQLite transaction에서 자동 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신을 수행한다. 원시 GPS 샘플과 사용자 메타데이터는 보존하고 상세 화면의 복원 경로는 일반 수동 제외와 동일하게 사용한다. 이 정책은 라이브 세션을 속도만으로 자동 종료하지 않는다.
+완료 시 자동 제외 정책은 라이브 고속 경고와 분리한다. `AutomaticRouteExclusionPolicy`는 저장할 필터 결과를 유지한 `LocationSample`을 `RoutePartitioner`에 전달한다. 양 끝점의 예상 오차가 유한한 0~25m이고, 인접 간격이 0초 초과 30초 이하이며, 좌표 기반 속도가 `10 / 3.6`m/s 이상이고 기존 `SampleFilterConfig.maxJumpSpeedMps` 이하인 선분만 연속 고속 증거로 쓴다. provider speed와 분의 최고 속도는 근거로 쓰지 않는다. 필터 거부, 무효 좌표, 끊긴 fragment, 낮은 속도와 부적합한 정확도에서는 연속성이 끊긴다. 동일 경로의 연속 선분 최소 3개(좌표 4개), 실제 관측 시간 30초 이상인 run만 후보를 뒷받침한다. 속도 경계의 부동소수점 오차는 1e-9m/s까지만 허용한다.
+
+분의 실제 범위 `[max(windowStart, session.startedAt), min(windowStart + 1분, session.endedAt))` 전체가 하나의 run 안에 있어야 한다. 시작/종료 부분 분도 전체 범위를 확인한다. 해당 분을 감싸는 실제 선분들의 양 끝점 순이동량이 그 선분 거리 합의 60% 이상이고 양 끝점 예상 오차 합보다 커야 한다. 경계 좌표를 만들어 보간하지 않는다. 왕복 흔들림과 급한 되돌림 등 불확실한 경로는 자동 제외를 보류한다. 이 보수적인 정책은 분 중간에 시작하거나 끝난 고속 이동을 포함할 수 있다.
+
+`userConfirmed && userLabel == ActivityLabel.vehicle`인 분은 GPS 조건과 별도로 사용자 확정 후보가 된다. 차량이 아닌 활동으로 확정한 분은 속도 후보에서 제외한다. 추정 vehicle 라벨과 확정하지 않은 사용자 라벨은 우회 근거가 되지 않는다. 후보는 세션 범위에 clamp하고 기존 제외 범위를 빼며, 맞닿거나 겹치는 범위를 합친다. 속도 후보의 `RouteExclusionReason`은 `highSpeed`, 차량 확정 후보는 `vehicle`이고 겹친 후보는 `highSpeed`를 우선한다.
+
+`finalizeSession`과 active 기록을 완료하는 `completeSession`에서만 속도 증거를 전달한다. 완료 세션의 라벨 편집은 속도 증거 없이 방금 차량으로 확정한 분만 전달한다. 따라서 과거 기록의 속도를 재평가하거나 다른 분을 편집한 뒤 제외 취소를 되돌리지 않는다. 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신은 기존 SQLite transaction을 유지한다. 원시 GPS 샘플과 사용자 메타데이터는 보존하고 상세 화면의 복원 경로는 일반 수동 제외와 동일하게 사용한다. DB schemaVersion 6과 백업 schema 2는 유지하며 기존 제외도 소급 변경하지 않는다. 이 정책은 라이브 세션을 속도만으로 자동 종료하지 않으며 `계속 기록` 동작도 기존대로 경고 표시만 닫는다.
+
+두 완료 API는 같은 transaction 안에서 저장된 세션 상태를 먼저 확인한다. 이미 completed이면 그 저장 결과를 반환하고 samples/windows/exclusions/집계/사용자 메타데이터를 쓰지 않는다. discarded와 없는 세션은 거부한다. 따라서 동시 완료와 오래된 요청 재시도에서도 제외가 한 번만 생성되고 이후 사용자 수정이 보존된다. 최초 완료에서는 전달받은 오래된 세션 객체 대신 transaction의 현재 세션 메타데이터를 사용한다. 라벨 편집 helper는 실제 수정한 DB의 window_start 키를 반환하며, 차량 제외 후보를 고를 때 해당 키를 저장된 세션 시간대로 해석한다. 사용자가 넘긴 시각을 다시 추측해서 다른 분을 고르지 않는다.
 
 알림 tap에서 warm tap은 즉시 `/`로 이동한다. cold tap은 복구가 끝난 뒤 active session이 있을 때만 경고를 표시한다. 종료됐거나 없는 세션은 tap을 버린다. native와 Dart의 pending buffer는 하나만 저장하고 한 번만 전달한다.
 
@@ -258,7 +268,7 @@ class AutomaticRouteExclusionPolicy {
   final double speedThresholdMps;
   List<AutomaticRouteExclusionCandidate> detect({
     required List<MinuteWindow> windows,
-    required List<ActivitySegment> segments,
+    required List<LocationSample> samples,
     required DateTime sessionStart,
     required DateTime sessionEnd,
     Iterable<RouteExclusion> existingExclusions = const [],
@@ -319,10 +329,15 @@ abstract final class RoutePartitioner {
     required List<LocationSample> samples,
     required List<RouteExclusion> exclusions,
     Duration maxGap = trustedLocationGap,
+    DateTime? sessionStart,
+    DateTime? sessionEnd,
+    bool preserveExclusionStartEndpoint = true,
   });
 }
 
 class MinuteWindow {
+  static const exclusionStartEndpointEvidence =
+      'distance_window:exclusion_start_endpoint';
   final String? userExclusionId;
   bool get isUserExcluded;
 }

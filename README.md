@@ -169,7 +169,9 @@ flutter build appbundle --release
 
 ### 지도
 
-베이스맵은 **OpenStreetMap** 데이터(CARTO 타일)만 사용합니다. 별도 API 키·브이월드 연동은 없습니다.
+베이스맵은 **OpenStreetMap** 데이터와 CARTO 타일을 사용합니다. CARTO 타일 요청에는
+발급받은 basemap 키가 필요합니다. 키는 Git에 넣지 않고 비공개 빌드 설정으로 전달합니다.
+로컬 파일 준비와 빌드 절차는 [지도 키 준비 안내](docs/release/2026-10-14-maintenance-stage1-release.md#비공개-지도-키-준비와-빌드)를 따릅니다.
 산책 원본 좌표를 업로드하지는 않지만, 지도를 열면 표시 영역에 해당하는 타일 좌표와
 IP 등 네트워크 정보가 CARTO에 전달될 수 있습니다. 지도 타일을 불러오지 못해도 GPS 기록과
 로컬 저장은 계속 동작합니다.

@@ -418,49 +418,58 @@ WHERE status = ?
     required int validSampleCount,
     double? medianAccuracyM,
   }) async {
-    final ended = session.copyWith(
-      endedAt: endedAt,
-      status: SessionStatus.completed,
-      totalDistanceM: totalDistanceM,
-      durationS: durationS,
-      movingTimeS: movingTimeS,
-      stationaryTimeS: stationaryTimeS,
-      avgSpeedMps: avgSpeedMps,
-      validSampleCount: validSampleCount,
-      medianAccuracyM: medianAccuracyM,
-    );
-    final automaticExclusions = _materializeAutomaticExclusions(
-      session: ended,
-      windows: windows,
-      segments: SegmentMerger().merge(
-        windows,
-        sessionId: session.id,
-        sessionStart: session.startedAt,
-        sessionEnd: endedAt,
-      ),
-    );
-    final recalculation = automaticExclusions.isEmpty
-        ? null
-        : _pipeline.recalculateCompleted(
-            session: ended,
-            storedSamples: samples,
-            exclusions: automaticExclusions,
-            previousWindows: windows,
-          );
-    final persistedWindows = recalculation?.windows ?? windows;
-    final persistedMetrics = recalculation?.metrics;
-    final persistedSession = persistedMetrics == null
-        ? ended
-        : ended.copyWith(
-            totalDistanceM: persistedMetrics.totalDistanceM,
-            durationS: persistedMetrics.durationS,
-            movingTimeS: persistedMetrics.movingTimeS,
-            stationaryTimeS: persistedMetrics.stationaryTimeS,
-            avgSpeedMps: persistedMetrics.avgSpeedMps,
-            validSampleCount: persistedMetrics.validSampleCount,
-            medianAccuracyM: persistedMetrics.medianAccuracyM,
-          );
-    await _db.transaction((txn) async {
+    return _db.transaction((txn) async {
+      // The transaction snapshot is authoritative: a retry must not replace
+      // a completed walk, recreate exclusions, or overwrite later user edits.
+      final rows = await txn.query(
+        'sessions',
+        where: 'id = ?',
+        whereArgs: [session.id],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw StateError('세션을 찾을 수 없습니다');
+      final current = _sessionFromRow(rows.single);
+      if (current.status == SessionStatus.completed) return current;
+      if (current.status != SessionStatus.active) {
+        throw StateError('진행 중인 산책만 완료할 수 있습니다');
+      }
+      final ended = current.copyWith(
+        endedAt: endedAt,
+        status: SessionStatus.completed,
+        totalDistanceM: totalDistanceM,
+        durationS: durationS,
+        movingTimeS: movingTimeS,
+        stationaryTimeS: stationaryTimeS,
+        avgSpeedMps: avgSpeedMps,
+        validSampleCount: validSampleCount,
+        medianAccuracyM: medianAccuracyM,
+      );
+      final automaticExclusions = _materializeAutomaticExclusions(
+        session: ended,
+        windows: windows,
+        samples: samples,
+      );
+      final recalculation = automaticExclusions.isEmpty
+          ? null
+          : _pipeline.recalculateCompleted(
+              session: ended,
+              storedSamples: samples,
+              exclusions: automaticExclusions,
+              previousWindows: windows,
+            );
+      final persistedWindows = recalculation?.windows ?? windows;
+      final persistedMetrics = recalculation?.metrics;
+      final persistedSession = persistedMetrics == null
+          ? ended
+          : ended.copyWith(
+              totalDistanceM: persistedMetrics.totalDistanceM,
+              durationS: persistedMetrics.durationS,
+              movingTimeS: persistedMetrics.movingTimeS,
+              stationaryTimeS: persistedMetrics.stationaryTimeS,
+              avgSpeedMps: persistedMetrics.avgSpeedMps,
+              validSampleCount: persistedMetrics.validSampleCount,
+              medianAccuracyM: persistedMetrics.medianAccuracyM,
+            );
       await txn.delete(
         'location_samples',
         where: 'session_id = ?',
@@ -500,8 +509,8 @@ WHERE status = ?
       if (updated != 1) {
         throw StateError('산책 완료 상태를 저장하지 못했습니다');
       }
+      return persistedSession;
     });
-    return persistedSession;
   }
 
   /// Replace all samples for a session (after filter flags are known).
@@ -908,22 +917,30 @@ WHERE w.session_id = ?
     required int validSampleCount,
     double? medianAccuracyM,
   }) async {
-    final current = await getSession(sessionId);
-    if (current == null) {
-      throw StateError('세션을 찾을 수 없습니다');
-    }
-    final ended = current.copyWith(
-      endedAt: endedAt,
-      status: SessionStatus.completed,
-      totalDistanceM: totalDistanceM,
-      durationS: durationS,
-      movingTimeS: movingTimeS,
-      stationaryTimeS: stationaryTimeS,
-      avgSpeedMps: avgSpeedMps,
-      validSampleCount: validSampleCount,
-      medianAccuracyM: medianAccuracyM,
-    );
-    await _db.transaction((txn) async {
+    return _db.transaction((txn) async {
+      final rows = await txn.query(
+        'sessions',
+        where: 'id = ?',
+        whereArgs: [sessionId],
+        limit: 1,
+      );
+      if (rows.isEmpty) throw StateError('세션을 찾을 수 없습니다');
+      final current = _sessionFromRow(rows.single);
+      if (current.status == SessionStatus.completed) return current;
+      if (current.status != SessionStatus.active) {
+        throw StateError('진행 중인 산책만 완료할 수 있습니다');
+      }
+      final ended = current.copyWith(
+        endedAt: endedAt,
+        status: SessionStatus.completed,
+        totalDistanceM: totalDistanceM,
+        durationS: durationS,
+        movingTimeS: movingTimeS,
+        stationaryTimeS: stationaryTimeS,
+        avgSpeedMps: avgSpeedMps,
+        validSampleCount: validSampleCount,
+        medianAccuracyM: medianAccuracyM,
+      );
       final updated = await txn.update(
         'sessions',
         _sessionToRow(ended),
@@ -933,9 +950,19 @@ WHERE w.session_id = ?
       if (updated != 1) {
         throw StateError('산책 완료 상태를 저장하지 못했습니다');
       }
-      await _applyAutomaticExclusionsIn(txn, sessionId);
+      await _applyAutomaticExclusionsIn(
+        txn,
+        sessionId,
+        includeSpeedExclusions: true,
+      );
+      final completedRows = await txn.query(
+        'sessions',
+        where: 'id = ?',
+        whereArgs: [sessionId],
+        limit: 1,
+      );
+      return _sessionFromRow(completedRows.single);
     });
-    return (await getSession(sessionId)) ?? ended;
   }
 
   Future<void> updateWindowUserLabel({
@@ -946,7 +973,7 @@ WHERE w.session_id = ?
     bool confirmed = true,
   }) async {
     await _db.transaction((txn) async {
-      await _updateWindowUserLabelIn(
+      final updatedKey = await _updateWindowUserLabelIn(
         txn,
         sessionId: sessionId,
         windowStart: windowStart,
@@ -954,11 +981,20 @@ WHERE w.session_id = ?
         note: note,
         confirmed: confirmed,
       );
-      await _applyAutomaticExclusionsIn(txn, sessionId);
+      if (updatedKey != null &&
+          confirmed &&
+          userLabel == ActivityLabel.vehicle) {
+        await _applyAutomaticExclusionsIn(
+          txn,
+          sessionId,
+          vehicleWindowKeys: {updatedKey},
+        );
+      }
     });
   }
 
-  Future<bool> _updateWindowUserLabelIn(
+  /// Returns the actual stored key, including legacy wall-clock keys.
+  Future<String?> _updateWindowUserLabelIn(
     DatabaseExecutor executor, {
     required String sessionId,
     required DateTime windowStart,
@@ -980,7 +1016,7 @@ WHERE w.session_id = ?
         where: 'session_id = ? AND window_start = ?',
         whereArgs: [sessionId, key],
       );
-      if (updated > 0) return true;
+      if (updated > 0) return key;
     }
     // Last resort: match any row whose parsed window_start equals target minute.
     final rows = await executor.query(
@@ -1016,9 +1052,9 @@ WHERE w.session_id = ?
         where: 'session_id = ? AND window_start = ?',
         whereArgs: [sessionId, raw],
       );
-      return changed > 0;
+      return changed > 0 ? raw : null;
     }
-    return false;
+    return null;
   }
 
   /// Apply the same user label to every minute in [windowStarts] (segment edit).
@@ -1031,8 +1067,9 @@ WHERE w.session_id = ?
   }) async {
     if (windowStarts.isEmpty) return;
     await _db.transaction((txn) async {
+      final updatedKeys = <String>{};
       for (final start in windowStarts) {
-        final updated = await _updateWindowUserLabelIn(
+        final updatedKey = await _updateWindowUserLabelIn(
           txn,
           sessionId: sessionId,
           windowStart: start,
@@ -1040,23 +1077,30 @@ WHERE w.session_id = ?
           note: note,
           confirmed: confirmed,
         );
-        if (!updated) {
+        if (updatedKey == null) {
           throw StateError('시간 구간을 찾을 수 없습니다');
         }
+        updatedKeys.add(updatedKey);
       }
-      await _applyAutomaticExclusionsIn(txn, sessionId);
+      if (confirmed && userLabel == ActivityLabel.vehicle) {
+        await _applyAutomaticExclusionsIn(
+          txn,
+          sessionId,
+          vehicleWindowKeys: updatedKeys,
+        );
+      }
     });
   }
 
   List<RouteExclusion> _materializeAutomaticExclusions({
     required WalkSession session,
     required List<MinuteWindow> windows,
-    required List<ActivitySegment> segments,
+    required List<LocationSample> samples,
     Iterable<RouteExclusion> existingExclusions = const [],
   }) {
     final candidates = _automaticExclusionPolicy.detect(
       windows: windows,
-      segments: segments,
+      samples: samples,
       sessionStart: session.startedAt,
       sessionEnd: session.endedAt ?? session.startedAt,
       existingExclusions: existingExclusions,
@@ -1077,8 +1121,10 @@ WHERE w.session_id = ?
 
   Future<void> _applyAutomaticExclusionsIn(
     DatabaseExecutor executor,
-    String sessionId,
-  ) async {
+    String sessionId, {
+    bool includeSpeedExclusions = false,
+    Set<String>? vehicleWindowKeys,
+  }) async {
     final sessionRows = await executor.query(
       'sessions',
       where: 'id = ?',
@@ -1092,16 +1138,24 @@ WHERE w.session_id = ?
     }
 
     final snapshot = await _loadRouteEditSnapshot(executor, sessionId);
-    final segments = SegmentMerger().merge(
-      snapshot.windows,
-      sessionId: session.id,
-      sessionStart: session.startedAt,
-      sessionEnd: session.endedAt,
-    );
+    final vehicleWindowStarts = vehicleWindowKeys
+        ?.map(
+          (key) => parseStoredInstant(key, timezone: session.timezone).toUtc(),
+        )
+        .toSet();
     final automatic = _materializeAutomaticExclusions(
       session: session,
-      windows: snapshot.windows,
-      segments: segments,
+      windows: vehicleWindowStarts == null
+          ? snapshot.windows
+          : snapshot.windows
+                .where(
+                  (window) =>
+                      vehicleWindowStarts.contains(window.windowStart.toUtc()),
+                )
+                .toList(),
+      // Completed-record edits must never rescan speed evidence or recreate
+      // an exclusion the user cancelled, including on older records.
+      samples: includeSpeedExclusions ? snapshot.samples : const [],
       existingExclusions: snapshot.exclusions,
     );
     if (automatic.isEmpty) return;

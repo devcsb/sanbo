@@ -51,7 +51,6 @@ void main() {
       'route_exclusions',
       'RouteExclusionReason { vehicle, highSpeed }',
       'AutomaticRouteExclusionPolicy',
-      'maxSpeedMps >= 10 / 3.6',
       'minute_windows.user_exclusion_id',
       'location_samples.user_exclusion_id` 열은 만들지 않는다',
       'location_samples.is_filtered_out',
@@ -302,26 +301,32 @@ void main() {
     expect(source, contains('-parallel-testing-enabled NO'));
   });
 
-  test('native XCTest wrapper resolves ignored CocoaPods before xcodebuild', () {
-    final source = File(
-      'scripts/run_native_platform_tests.sh',
-    ).readAsStringSync();
-    final pods = source.indexOf('pod install --no-repo-update');
-    final xcodebuild = source.indexOf('xcodebuild test');
+  test(
+    'native XCTest wrapper resolves ignored CocoaPods before xcodebuild',
+    () {
+      final source = File(
+        'scripts/run_native_platform_tests.sh',
+      ).readAsStringSync();
+      final pods = source.indexOf('pod install --no-repo-update');
+      final xcodebuild = source.indexOf('xcodebuild test');
 
-    expect(pods, greaterThanOrEqualTo(0));
-    expect(xcodebuild, greaterThan(pods));
-  });
+      expect(pods, greaterThanOrEqualTo(0));
+      expect(xcodebuild, greaterThan(pods));
+    },
+  );
 
-  test('native CI selects an SDK compatible with device_info_plus iOS APIs', () {
-    final workflow = File('.github/workflows/quality.yml').readAsStringSync();
+  test(
+    'native CI selects an SDK compatible with device_info_plus iOS APIs',
+    () {
+      final workflow = File('.github/workflows/quality.yml').readAsStringSync();
 
-    expect(
-      workflow,
-      contains('/Applications/Xcode_26.1.1.app/Contents/Developer'),
-    );
-    expect(workflow, isNot(contains('/Applications/Xcode_16.4.app')));
-  });
+      expect(
+        workflow,
+        contains('/Applications/Xcode_26.1.1.app/Contents/Developer'),
+      );
+      expect(workflow, isNot(contains('/Applications/Xcode_16.4.app')));
+    },
+  );
 
   test('iOS simulator smoke terminates stale app before reinstalling', () {
     final script = File(

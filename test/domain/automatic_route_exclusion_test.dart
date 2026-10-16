@@ -2,7 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
 import 'package:sanbo/domain/models/minute_window.dart';
 import 'package:sanbo/domain/models/route_exclusion.dart';
-import 'package:sanbo/domain/pipeline/segment_merger.dart';
+import 'package:sanbo/domain/models/location_sample.dart';
 import 'package:sanbo/domain/services/automatic_route_exclusion.dart';
 
 MinuteWindow _window(
@@ -31,12 +31,29 @@ MinuteWindow _window(
   );
 }
 
+// Each fixture minute moves at its stated speed with ten-second GPS fixes.
+List<LocationSample> _samples(List<MinuteWindow> windows) {
+  var metres = 0.0;
+  return [
+    for (final window in windows)
+      for (var second = 0; second <= window.durationS; second += 10)
+        LocationSample(
+          timestamp: window.windowStart.add(Duration(seconds: second)),
+          latitude:
+              (metres += second == 0 ? 0 : window.avgSpeedMps * 10) /
+              111194.92664455874,
+          longitude: 0,
+          accuracyM: 5,
+        ),
+  ];
+}
+
 void main() {
   const policy = AutomaticRouteExclusionPolicy();
   final start = DateTime.utc(2026, 9, 1, 9);
   final end = start.add(const Duration(minutes: 4));
 
-  test('excludes a minute at exactly 10 km/h', () {
+  test('excludes a continuously observed minute at exactly 10 km/h', () {
     final windows = [
       _window(start),
       _window(start.add(const Duration(minutes: 1)), maxSpeedMps: 10 / 3.6),
@@ -45,7 +62,7 @@ void main() {
 
     final candidates = policy.detect(
       windows: windows,
-      segments: SegmentMerger().merge(windows),
+      samples: _samples(windows),
       sessionStart: start,
       sessionEnd: end,
     );
@@ -62,7 +79,7 @@ void main() {
     expect(
       policy.detect(
         windows: windows,
-        segments: SegmentMerger().merge(windows),
+        samples: _samples(windows),
         sessionStart: start,
         sessionEnd: start.add(const Duration(minutes: 1)),
       ),
@@ -80,7 +97,7 @@ void main() {
     expect(
       policy.detect(
         windows: [window],
-        segments: SegmentMerger().merge([window]),
+        samples: _samples([window]),
         sessionStart: start,
         sessionEnd: start.add(const Duration(minutes: 1)),
       ),
@@ -94,7 +111,7 @@ void main() {
     expect(
       policy.detect(
         windows: [window],
-        segments: SegmentMerger().merge([window]),
+        samples: _samples([window]),
         sessionStart: start,
         sessionEnd: start.add(const Duration(minutes: 1)),
       ),
@@ -112,7 +129,7 @@ void main() {
     expect(
       policy.detect(
         windows: [window],
-        segments: SegmentMerger().merge([window]),
+        samples: _samples([window]),
         sessionStart: start,
         sessionEnd: start.add(const Duration(minutes: 1)),
       ),
@@ -132,7 +149,7 @@ void main() {
 
     final candidates = policy.detect(
       windows: windows,
-      segments: SegmentMerger().merge(windows),
+      samples: _samples(windows),
       sessionStart: start,
       sessionEnd: start.add(const Duration(minutes: 2)),
     );
@@ -151,7 +168,7 @@ void main() {
     expect(
       policy.detect(
         windows: windows,
-        segments: SegmentMerger().merge(windows),
+        samples: _samples(windows),
         sessionStart: start,
         sessionEnd: start.add(const Duration(minutes: 1)),
       ),
@@ -172,7 +189,7 @@ void main() {
 
     final candidates = policy.detect(
       windows: [speedWindow],
-      segments: SegmentMerger().merge([speedWindow]),
+      samples: _samples([speedWindow]),
       sessionStart: start,
       sessionEnd: start.add(const Duration(minutes: 1)),
       existingExclusions: [existing],
@@ -184,7 +201,7 @@ void main() {
     expect(candidates.single.reason, RouteExclusionReason.highSpeed);
   });
 
-  test('merges adjacent speed-triggered minutes into one candidate', () {
+  test('merges adjacent sustained-speed minutes into one candidate', () {
     final windows = [
       _window(start, maxSpeedMps: 10 / 3.6),
       _window(start.add(const Duration(minutes: 1)), maxSpeedMps: 3),
@@ -193,7 +210,7 @@ void main() {
 
     final candidates = policy.detect(
       windows: windows,
-      segments: SegmentMerger().merge(windows),
+      samples: _samples(windows),
       sessionStart: start,
       sessionEnd: end,
     );
@@ -215,7 +232,7 @@ void main() {
 
     final candidates = policy.detect(
       windows: windows,
-      segments: SegmentMerger().merge(windows),
+      samples: _samples(windows),
       sessionStart: start,
       sessionEnd: start.add(const Duration(minutes: 2)),
     );

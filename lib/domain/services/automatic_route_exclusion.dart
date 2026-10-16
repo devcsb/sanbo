@@ -1,7 +1,10 @@
 import '../models/activity_label.dart';
+import '../models/location_sample.dart';
 import '../models/minute_window.dart';
 import '../models/route_exclusion.dart';
-import '../pipeline/segment_merger.dart';
+import '../pipeline/geo.dart';
+import '../pipeline/route_partitioner.dart';
+import '../pipeline/sample_filter.dart';
 
 /// A deterministic exclusion range found by the automatic route policy.
 /// The repository assigns the durable ID when it writes the range.
@@ -19,18 +22,20 @@ class AutomaticRouteExclusionCandidate {
 
 /// Finds route ranges that must not contribute to walking statistics.
 ///
-/// This policy intentionally works from the trusted, derived minute windows
-/// and merged activity segments. Raw samples stay immutable and the caller
-/// persists the returned ranges as ordinary route exclusions.
+/// Speed evidence comes from continuous, quality-checked GPS segments, never
+/// a minute's peak speed or an inferred vehicle label. Raw samples stay
+/// immutable; exclusions retain the existing session-clamped minute contract.
 class AutomaticRouteExclusionPolicy {
   const AutomaticRouteExclusionPolicy({this.speedThresholdMps = 10 / 3.6});
+
+  static const _filterConfig = SampleFilterConfig();
 
   /// 10 km/h expressed in metres per second.
   final double speedThresholdMps;
 
   List<AutomaticRouteExclusionCandidate> detect({
     required List<MinuteWindow> windows,
-    required List<ActivitySegment> segments,
+    required List<LocationSample> samples,
     required DateTime sessionStart,
     required DateTime sessionEnd,
     Iterable<RouteExclusion> existingExclusions = const [],
@@ -41,15 +46,14 @@ class AutomaticRouteExclusionPolicy {
 
     final existing = existingExclusions.toList(growable: false);
     final ranges = <_AutomaticRange>[];
+    final runs = _highSpeedRuns(samples, start, end);
+    final orderedWindows = [...windows]
+      ..sort((a, b) => a.windowStart.compareTo(b.windowStart));
+    var runIndex = 0;
+    var edgeIndex = 0;
 
-    for (final window in windows) {
-      if (window.isUserExcluded ||
-          window.durationS <= 0 ||
-          window.maxSpeedMps < speedThresholdMps ||
-          !window.maxSpeedMps.isFinite ||
-          _hasExplicitNonVehicleLabel(window)) {
-        continue;
-      }
+    for (final window in orderedWindows) {
+      if (window.isUserExcluded || window.durationS <= 0) continue;
       final range = _clampRange(
         window.windowStart,
         window.windowStart.add(const Duration(minutes: 1)),
@@ -57,34 +61,56 @@ class AutomaticRouteExclusionPolicy {
         end,
       );
       if (range == null) continue;
-      ranges.addAll(
-        _subtractExisting(
-          range,
-          existing,
-          reason: RouteExclusionReason.highSpeed,
-        ),
-      );
-    }
-
-    for (final segment in segments) {
-      if (segment.label != ActivityLabel.vehicle ||
-          segment.userExclusionId != null ||
-          segment.durationS <= 0 ||
-          segment.windows.any((window) => window.durationS <= 0)) {
+      final explicitVehicle =
+          window.userConfirmed && window.userLabel == ActivityLabel.vehicle;
+      if (_hasExplicitNonVehicleLabel(window)) continue;
+      while (runIndex < runs.length &&
+          !runs[runIndex].last.end.timestamp.isAfter(range.startAt)) {
+        runIndex++;
+        edgeIndex = 0;
+      }
+      var supportedSpeed = false;
+      if (runIndex < runs.length) {
+        final run = runs[runIndex];
+        if (!run.first.start.timestamp.isAfter(range.startAt) &&
+            !run.last.end.timestamp.isBefore(range.endAt)) {
+          while (edgeIndex < run.length &&
+              !run[edgeIndex].end.timestamp.isAfter(range.startAt)) {
+            edgeIndex++;
+          }
+          var lastIndex = edgeIndex;
+          var distance = 0.0;
+          while (lastIndex < run.length &&
+              run[lastIndex].start.timestamp.isBefore(range.endAt)) {
+            distance += run[lastIndex].distanceM;
+            lastIndex++;
+          }
+          final first = run[edgeIndex].start;
+          final last = run[lastIndex - 1].end;
+          final displacement = haversineMeters(
+            lat1: first.latitude,
+            lon1: first.longitude,
+            lat2: last.latitude,
+            lon2: last.longitude,
+          );
+          // Use real bracketing fixes, not invented boundary coordinates.
+          // A strongly reversing path is uncertain: leave it included rather
+          // than treating repeated GPS oscillation as sustained travel.
+          supportedSpeed =
+              displacement > first.accuracyM! + last.accuracyM! &&
+              displacement >= distance * 0.6;
+        }
+      }
+      if (!supportedSpeed && !explicitVehicle) {
         continue;
       }
-      final range = _clampRange(
-        segment.startAt,
-        segment.endExclusive,
-        start,
-        end,
-      );
-      if (range == null) continue;
       ranges.addAll(
         _subtractExisting(
           range,
           existing,
-          reason: RouteExclusionReason.vehicle,
+          reason: supportedSpeed
+              ? RouteExclusionReason.highSpeed
+              : RouteExclusionReason.vehicle,
         ),
       );
     }
@@ -117,6 +143,59 @@ class AutomaticRouteExclusionPolicy {
           reason: range.reason,
         ),
     ];
+  }
+
+  List<List<RouteSegment>> _highSpeedRuns(
+    List<LocationSample> samples,
+    DateTime start,
+    DateTime end,
+  ) {
+    final partition = RoutePartitioner.partition(
+      samples: samples,
+      exclusions: const [],
+      sessionStart: start,
+      sessionEnd: end,
+    );
+    final runs = <List<RouteSegment>>[];
+    var current = <RouteSegment>[];
+    void finish() {
+      if (current.length >= 3 &&
+          current.last.end.timestamp.difference(
+                current.first.start.timestamp,
+              ) >=
+              const Duration(seconds: 30)) {
+        runs.add(current);
+      }
+      current = <RouteSegment>[];
+    }
+
+    for (final segment in partition.segments) {
+      final firstAccuracy = segment.start.accuracyM;
+      final lastAccuracy = segment.end.accuracyM;
+      final usable =
+          firstAccuracy != null &&
+          firstAccuracy.isFinite &&
+          firstAccuracy >= 0 &&
+          firstAccuracy <= 25 &&
+          lastAccuracy != null &&
+          lastAccuracy.isFinite &&
+          lastAccuracy >= 0 &&
+          lastAccuracy <= 25 &&
+          segment.duration <= const Duration(seconds: 30) &&
+          // Absorb floating-point roundoff at the inclusive speed boundary.
+          segment.speedMps + 1e-9 >= speedThresholdMps &&
+          segment.speedMps <= _filterConfig.maxJumpSpeedMps;
+      if (!usable) {
+        finish();
+        continue;
+      }
+      if (current.isNotEmpty && !identical(current.last.end, segment.start)) {
+        finish();
+      }
+      current.add(segment);
+    }
+    finish();
+    return runs;
   }
 
   bool _hasExplicitNonVehicleLabel(MinuteWindow window) {

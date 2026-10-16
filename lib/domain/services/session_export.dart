@@ -160,6 +160,7 @@ class SessionExport {
     'quality': w.quality.name,
     'hypothesis_label': w.hypothesisLabel.storageKey,
     'hypothesis_confidence': w.hypothesisConfidence,
+    'evidence': w.evidence,
     'user_label': w.userLabel?.storageKey,
     'user_confirmed': w.userConfirmed,
     'user_exclusion_id': w.userExclusionId,
