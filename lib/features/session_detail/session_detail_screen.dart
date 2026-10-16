@@ -49,6 +49,13 @@ final sessionDetailProvider = FutureProvider.autoDispose
         exclusions: exclusions,
         sessionStart: session.startedAt,
         sessionEnd: session.endedAt,
+        preserveExclusionStartEndpoint: windows.any(
+          (window) =>
+              window.isUserExcluded &&
+              window.evidence.contains(
+                MinuteWindow.exclusionStartEndpointEvidence,
+              ),
+        ),
       );
       var segments = SegmentMerger().merge(
         windows,
@@ -657,7 +664,11 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
               .where(
                 (sample) =>
                     !sample.timestamp.isBefore(segment.startAt) &&
-                    sample.timestamp.isBefore(segment.endExclusive),
+                    (sample.timestamp.isBefore(segment.endExclusive) ||
+                        (sample.timestamp.isAtSameMomentAs(
+                              segment.endExclusive,
+                            ) &&
+                            identical(sample, fragment.samples.last))),
               )
               .map((sample) => (lat: sample.latitude, lon: sample.longitude))
               .toList(growable: false),

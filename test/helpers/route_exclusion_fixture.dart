@@ -18,6 +18,55 @@ typedef CompletedRouteFixture = ({
   List<ActivitySegment> segments,
 });
 
+/// Sixty metres walking followed by one fully observed high-speed minute.
+Future<CompletedRouteFixture> seedCompletedBoundaryWalk(
+  WalkRepository repo, {
+  int cadence = 20,
+}) async {
+  final start = DateTime.utc(2026, 10, 16, 9);
+  final end = start.add(const Duration(minutes: 2));
+  final session = await repo.startSession(startedAt: start);
+  final pipeline = SessionPipeline();
+  final result = pipeline.process(
+    session: session,
+    rawSamples: [
+      for (var t = 0; t <= 120; t += cadence)
+        LocationSample(
+          timestamp: start.add(Duration(seconds: t)),
+          latitude: (t <= 60 ? t : 60 + (t - 60) * 3) / 111194.92664455874,
+          longitude: 0,
+          accuracyM: 5,
+        ),
+    ],
+    endedAt: end,
+  );
+  final saved = await repo.finalizeSession(
+    session: session,
+    samples: result.filteredSamples,
+    windows: result.windows,
+    endedAt: end,
+    totalDistanceM: result.metrics.totalDistanceM,
+    durationS: result.metrics.durationS,
+    movingTimeS: result.metrics.movingTimeS,
+    stationaryTimeS: result.metrics.stationaryTimeS,
+    avgSpeedMps: result.metrics.avgSpeedMps,
+    validSampleCount: result.metrics.validSampleCount,
+    medianAccuracyM: result.metrics.medianAccuracyM,
+  );
+  final windows = await repo.getWindows(session.id);
+  return (
+    session: saved,
+    samples: await repo.getSamples(session.id),
+    windows: windows,
+    segments: pipeline.segmentMerger.merge(
+      windows,
+      sessionId: session.id,
+      sessionStart: start,
+      sessionEnd: end,
+    ),
+  );
+}
+
 Future<CompletedRouteFixture> seedCompletedTwoMinuteWalk(
   WalkRepository repo,
 ) async {

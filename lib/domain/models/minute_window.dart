@@ -4,6 +4,11 @@ enum WindowQuality { high, medium, low, gap }
 
 /// One wall-clock minute aggregation (Sanbo first-class record).
 class MinuteWindow {
+  /// Persisted on excluded windows when metrics use the retained start fix.
+  /// Missing evidence keeps historical detail geometry at its saved contract.
+  static const exclusionStartEndpointEvidence =
+      'distance_window:exclusion_start_endpoint';
+
   const MinuteWindow({
     required this.windowStart,
     required this.durationS,

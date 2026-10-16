@@ -282,7 +282,7 @@ void main() {
     expect(result.durationS, 0);
   });
 
-  test('excludes the half-open start and keeps the end point', () {
+  test('keeps half-open sample ownership and the preceding terminal edge', () {
     final start = DateTime.utc(2026, 8, 21);
     final end = start.add(const Duration(minutes: 1));
     final session = _session(id: 'endpoint', start: start);
@@ -331,8 +331,15 @@ void main() {
     expect(exclusion.contains(atStart.timestamp), isTrue);
     expect(exclusion.contains(atEnd.timestamp), isFalse);
     expect(partition.includedSamples, [before, atEnd]);
-    expect(partition.segments, isEmpty);
-    _expectFiniteZeroMetrics(result);
+    expect(partition.segments, hasLength(1));
+    expect(partition.segments.single.start, before);
+    expect(partition.segments.single.end, atStart);
+    expect(result.totalDistanceM, closeTo(11.119492664, 0.000001));
+    expect(result.movingTimeS, 10);
+    expect(result.stationaryTimeS, 0);
+    expect(result.avgSpeedMps, closeTo(1.1119492664, 0.000001));
+    expect(result.validSampleCount, 2);
+    expect(result.medianAccuracyM, isNull);
     expect(result.durationS, 50);
   });
 

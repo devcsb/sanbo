@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:sanbo/data/app_database.dart';
 import 'package:sanbo/data/walk_repository.dart';
 import 'package:sanbo/domain/fixtures/synthetic_trace.dart';
 import 'package:sanbo/domain/models/activity_label.dart';
@@ -169,6 +170,109 @@ void main() {
   setUpAll(() async {
     await initializeDateFormatting('ko');
   });
+
+  for (final legacy in [false, true]) {
+    testWidgets(
+      'detail preserves ${legacy ? 'legacy' : 'new'} boundary geometry without hidden recalculation',
+      (tester) async {
+        late WalkRepository repo;
+        late CompletedRouteFixture fixture;
+        late String before;
+        await tester.runAsync(() async {
+          ensureSqfliteFfi();
+          final db = await openAppDatabase(path: inMemoryDatabasePath);
+          repo = WalkRepository(db);
+          fixture = await seedCompletedBoundaryWalk(repo);
+          if (legacy) {
+            await db.update(
+              'sessions',
+              {'total_distance_m': 40, 'moving_time_s': 40, 'avg_speed_mps': 1},
+              where: 'id = ?',
+              whereArgs: [fixture.session.id],
+            );
+            await db.update(
+              'minute_windows',
+              {'evidence_json': '[]'},
+              where: 'session_id = ?',
+              whereArgs: [fixture.session.id],
+            );
+            await db.update(
+              'minute_windows',
+              {'distance_m': 40, 'avg_speed_mps': 1},
+              where: 'session_id = ? AND user_exclusion_id IS NULL',
+              whereArgs: [fixture.session.id],
+            );
+          }
+          before = await repo.createBackupJson(
+            exportedAt: fixture.session.startedAt,
+          );
+        });
+        addTearDown(() => tester.runAsync(repo.close));
+        tester.view.physicalSize = const Size(800, 1200);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        await tester.pumpWidget(detailApp(repo, fixture.session.id));
+        await waitForDetailReload(tester, fixture.session.id);
+        final map = tester.widget<RouteMap>(find.byType(RouteMap));
+        final terminalLatitude = (legacy ? 40 : 60) / 111194.92664455874;
+        expect(map.fragments.first.last.lat, closeTo(terminalLatitude, 1e-10));
+        expect(map.fragments.last, hasLength(1));
+        expect(find.text(legacy ? '0.04 km' : '0.06 km'), findsWidgets);
+
+        final walkingSegment = fixture.segments.first;
+        final select = find.byKey(
+          ValueKey('segment-select-${walkingSegment.start.toIso8601String()}'),
+        );
+        final scrollable = find
+            .descendant(
+              of: find.byType(ListView).first,
+              matching: find.byType(Scrollable),
+            )
+            .first;
+        await tester.scrollUntilVisible(select, 300, scrollable: scrollable);
+        await tester.ensureVisible(select);
+        await tester.pump();
+        await tester.tap(select);
+        await tester.pumpAndSettle();
+        final selectedMap = tester.widget<RouteMap>(
+          find.byType(RouteMap, skipOffstage: false),
+        );
+        expect(
+          selectedMap.highlightedFragments.single.last.lat,
+          closeTo(terminalLatitude, 1e-10),
+        );
+        final excludedSelect = find.byKey(
+          ValueKey(
+            'segment-select-${fixture.segments.last.start.toIso8601String()}',
+          ),
+        );
+        await tester.scrollUntilVisible(
+          excludedSelect,
+          300,
+          scrollable: scrollable,
+        );
+        await tester.ensureVisible(excludedSelect);
+        await tester.pump();
+        await tester.tap(excludedSelect);
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<RouteMap>(find.byType(RouteMap, skipOffstage: false))
+              .highlightedFragments
+              .every((fragment) => fragment.length <= 1),
+          isTrue,
+        );
+        expect(
+          await tester.runAsync(
+            () => repo.createBackupJson(exportedAt: fixture.session.startedAt),
+          ),
+          before,
+        );
+      },
+    );
+  }
 
   testWidgets('detail reload waiter pumps pending provider work', (
     tester,

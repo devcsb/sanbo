@@ -240,7 +240,9 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
   REFERENCES route_exclusions(id) ON DELETE SET NULL;
 ```
 
-`RoutePartitioner.partition`은 필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다. 즉 필터된 샘플, 유효하지 않은 좌표, 사용자 제외 내부 샘플, 제외 범위를 가로지르는 두 endpoint와 `trustedLocationGap`보다 긴 공백을 지나 선분을 잇지 않는다. 포함 샘플만 fragments에 두며, fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 양수인 1ms 미만 간격도 microseconds로 유한 속도를 계산한다. 1.5m 미만 선분은 fragment와 관측 시간 분류에는 남기되 거리에는 더하지 않는다. `timestamp == sessionEnd` 샘플은 마지막 실제 분이 소유한다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다.
+`RoutePartitioner.partition`은 필터, 무효 좌표, 제외 교차와 trustedLocationGap에서는 fragment와 segment를 절대 연결하지 않는다. 제외 시작 시각과 정확히 같은 유효한 실제 좌표는 앞쪽 포함 fragment의 끝점으로만 사용할 수 있다. 앞 좌표와의 간격이 양수이고 `maxGap` 이하이며 제외를 교차하지 않을 때만 선분을 추가하고 즉시 fragment를 닫는다. 이 끝점은 `[startAt, endAt)` 소속에 따라 `includedSamples`에는 넣지 않으며 제외 내부의 새 fragment 시작점으로 쓰지 않는다. 인접 제외, 필터 거부와 관측 공백을 건너 잇거나 경계 좌표를 보간하지 않는다. `preserveExclusionStartEndpoint`의 기본값은 true다. fragment의 각 선분은 시간 순서이고 0보다 길며 `maxGap` 이하이고 제외 범위를 교차하지 않는다. 양수인 1ms 미만 간격도 microseconds로 유한 속도를 계산한다. 1.5m 미만 선분은 fragment와 관측 시간 분류에는 남기되 거리에는 더하지 않는다. `timestamp == sessionEnd` 샘플은 마지막 실제 분이 소유한다. 지도, 재생, 분 집계와 세션 집계는 같은 partition fragments와 segments를 사용한다. 구간 선택 지도는 해당 구간의 종료 시각과 정확히 같은 fragment 끝점도 보존하며, 서로 다른 fragment를 연결하지 않는다.
+
+`SessionPipeline.recalculateCompleted`는 새 경계 계산을 적용한 제외 분의 기존 `evidence` 필드에 `distance_window:exclusion_start_endpoint`를 기록한다. 상세 provider는 이 근거가 있는 제외 분을 읽었을 때만 경계 끝점 보존을 켠다. 근거 없는 과거 기록은 false로 읽어 저장된 집계와 경로를 유지하며, 상세 조회와 백업 가져오기는 숨은 재계산이나 쓰기를 하지 않는다. 명시적인 제외/복원으로 재계산할 때는 집계와 분 근거를 같은 transaction에서 함께 갱신한다. 백업 schema 2의 기존 `evidence_json` 문자열 배열로 근거를 왕복 보존하고, 세션 JSON/NDJSON export에도 `evidence` 배열을 추가한다. DB schema와 백업 버전은 바꾸지 않는다.
 
 `SessionGuard`의 observedAt 수신 시각은 최대 과거 30초와 미래 5초만 허용한다. `WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 분 기록 전체 교체, 세션 집계 갱신, 제외 레코드 삭제 마지막 순서로 쓴다. 같은 SQLite transaction은 원본과 파생 상태를 함께 rollback한다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
 
@@ -327,10 +329,15 @@ abstract final class RoutePartitioner {
     required List<LocationSample> samples,
     required List<RouteExclusion> exclusions,
     Duration maxGap = trustedLocationGap,
+    DateTime? sessionStart,
+    DateTime? sessionEnd,
+    bool preserveExclusionStartEndpoint = true,
   });
 }
 
 class MinuteWindow {
+  static const exclusionStartEndpointEvidence =
+      'distance_window:exclusion_start_endpoint';
   final String? userExclusionId;
   bool get isUserExcluded;
 }

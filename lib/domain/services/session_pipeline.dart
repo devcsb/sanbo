@@ -150,7 +150,7 @@ class SessionPipeline {
   }
 
   MinuteWindow _restoreMetadata(MinuteWindow rebuilt, MinuteWindow? previous) {
-    if (previous == null) return rebuilt;
+    if (previous == null && !rebuilt.isUserExcluded) return rebuilt;
     return MinuteWindow(
       windowStart: rebuilt.windowStart,
       durationS: rebuilt.durationS,
@@ -171,12 +171,15 @@ class SessionPipeline {
       gapReason: rebuilt.gapReason,
       hypothesisLabel: rebuilt.hypothesisLabel,
       hypothesisConfidence: rebuilt.hypothesisConfidence,
-      evidence: rebuilt.evidence,
-      userLabel: previous.userLabel,
-      userNote: previous.userNote,
-      userConfirmed: previous.userConfirmed,
+      evidence: [
+        ...rebuilt.evidence,
+        if (rebuilt.isUserExcluded) MinuteWindow.exclusionStartEndpointEvidence,
+      ],
+      userLabel: previous?.userLabel,
+      userNote: previous?.userNote,
+      userConfirmed: previous?.userConfirmed ?? false,
       userExclusionId: rebuilt.userExclusionId,
-      placeId: previous.placeId,
+      placeId: previous?.placeId,
     );
   }
 
