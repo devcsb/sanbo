@@ -74,7 +74,7 @@
 - 외부 지오코더 자동·배치 호출 없음
 
 ### 🗺️ 공개 지도 경로
-- **OpenStreetMap** 공개 타일(Carto Voyager) + 폴리라인 — **API 키 불필요**  
+- **OpenStreetMap** 데이터 기반 CARTO Voyager 베이스맵과 산책 경로 표시
 - 상용 맵 SDK · 브이월드 키 연동 없음  
 - 저작권 attribution 표시 (`© OpenStreetMap · © CARTO`)
 - 시간 슬라이더와 재생 버튼으로 경로·현재 활동·장소를 함께 회상
@@ -117,6 +117,10 @@
 ---
 
 ## 설치
+
+배포용 APK는 [최신 GitHub 릴리즈](https://github.com/devcsb/sanbo/releases/latest)에서
+받을 수 있습니다. 기존 앱을 삭제하지 않고 업데이트하면 이 기기의 기록이 유지됩니다.
+앱 삭제나 기기 변경 전에는 설정에서 전체 백업 파일을 별도로 저장해 주세요.
 
 ### 직접 빌드 (Android)
 
