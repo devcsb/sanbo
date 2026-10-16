@@ -19,6 +19,9 @@ native 두 job 모두 성공했다. 버전 준비 후 현재 head CI와 서명 �
 
 ## 서명 후보 점검
 
+산출물은 `app-release.aab`, `app-arm64-v8a-release.apk`,
+`app-armeabi-v7a-release.apk`, `app-x86_64-release.apk`와 `SHA256SUMS_v0.9.3.txt`다.
+
 기존 공개 버전은 [v0.9.2](https://github.com/devcsb/sanbo/releases/tag/v0.9.2)다.
 기존 인증서 SHA-256은 `ceb40402d706589acee5da5df5a010c3dd5c2e9329cd3218961dfce56a6d38ac`다.
 새 후보에서 버전, ABI별 증가한 versionCode, targetSdk 36과 minSdk 26, 위치 foreground
@@ -29,6 +32,8 @@ service 권한 및 서명을 확인한다. AAB는 bundletool 구조 검증과 JA
 빌드/검증 로그는 로컬 `.superpowers/sdd/2026-10-16-release-0.9.3/`에 보관한다.
 
 ## 검증 한계
+
+물리 Android 기기 검증: 미실행. 연결 대상은 전용 emulator이며 물리 iPhone도 미검증이다.
 
 합성 GPS와 emulator/simulator, 로컬 SQLite 검증은 물리 기기의 정확도와 배터리 측정이 아니다.
 물리 Android/iPhone GPS, 배터리, VoiceOver/TalkBack 실사용은 미검증이다.
