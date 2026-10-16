@@ -320,7 +320,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              '시속 10km 이상으로 감지된 구간은 산책에서 자동 제외했어요.',
+                              '빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.',
                               style: theme.textTheme.bodyMedium?.copyWith(
                                 fontWeight: FontWeight.w600,
                               ),

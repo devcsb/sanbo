@@ -641,16 +641,21 @@ void main() {
       sessionId = session.id;
     });
     addTearDown(() => tester.runAsync(repo.close));
-    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.physicalSize = const Size(320, 800);
     tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
     await tester.pumpWidget(detailApp(repo, sessionId));
     await settle(tester);
     await settle(tester);
 
-    expect(find.text('시속 10km 이상으로 감지된 구간은 산책에서 자동 제외했어요.'), findsOneWidget);
+    expect(
+      find.text('빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.'),
+      findsOneWidget,
+    );
     await tester.scrollUntilVisible(
       find.text('산책에서 제외됨'),
       300,

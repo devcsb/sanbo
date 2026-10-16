@@ -244,7 +244,13 @@ ALTER TABLE minute_windows ADD COLUMN user_exclusion_id TEXT
 
 `SessionGuard`의 observedAt 수신 시각은 최대 과거 30초와 미래 5초만 허용한다. `WalkRepository.excludeRouteSegment`는 한 SQLite transaction에서 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신 순으로 쓴다. 복원은 분 기록 전체 교체, 세션 집계 갱신, 제외 레코드 삭제 마지막 순서로 쓴다. 같은 SQLite transaction은 원본과 파생 상태를 함께 rollback한다. 제외된 분은 삭제하지 않고 `quality=gap`, `gap_reason=user_excluded`, 거리·속도·유효 샘플 수 0으로 바꾸며 원시 샘플 수, 사용자 라벨, 메모, 확정 상태와 장소 연결을 보존한다.
 
-완료 시 자동 제외 정책은 라이브 고속 경고와 분리한다. `AutomaticRouteExclusionPolicy`는 필터가 통과한 파생 `MinuteWindow.maxSpeedMps >= 10 / 3.6`(시속 10km/h 이상)을 고속 후보로 만들고, `SegmentMerger` 결과의 `ActivityLabel.vehicle` 확정 구간도 후보로 만든다. 단, 사용자가 차량이 아닌 활동으로 확정한 분은 고속 후보에서 제외해 빠른 걷기를 덮어쓰지 않는다. 후보는 세션 범위에 clamp하고 기존 제외와 겹치지 않게 한 뒤 맞닿거나 겹치는 범위를 합친다. 속도 후보의 `RouteExclusionReason`은 `highSpeed`, 차량 라벨 후보는 `vehicle`이며, 겹친 후보는 `highSpeed`를 우선한다. `finalizeSession`과 완료 세션의 사용자 라벨 변경은 같은 SQLite transaction에서 자동 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신을 수행한다. 원시 GPS 샘플과 사용자 메타데이터는 보존하고 상세 화면의 복원 경로는 일반 수동 제외와 동일하게 사용한다. 이 정책은 라이브 세션을 속도만으로 자동 종료하지 않는다.
+완료 시 자동 제외 정책은 라이브 고속 경고와 분리한다. `AutomaticRouteExclusionPolicy`는 저장할 필터 결과를 유지한 `LocationSample`을 `RoutePartitioner`에 전달한다. 양 끝점의 예상 오차가 유한한 0~25m이고, 인접 간격이 0초 초과 30초 이하이며, 좌표 기반 속도가 `10 / 3.6`m/s 이상이고 기존 `SampleFilterConfig.maxJumpSpeedMps` 이하인 선분만 연속 고속 증거로 쓴다. provider speed와 분의 최고 속도는 근거로 쓰지 않는다. 필터 거부, 무효 좌표, 끊긴 fragment, 낮은 속도와 부적합한 정확도에서는 연속성이 끊긴다. 동일 경로의 연속 선분 최소 3개(좌표 4개), 실제 관측 시간 30초 이상인 run만 후보를 뒷받침한다. 속도 경계의 부동소수점 오차는 1e-9m/s까지만 허용한다.
+
+분의 실제 범위 `[max(windowStart, session.startedAt), min(windowStart + 1분, session.endedAt))` 전체가 하나의 run 안에 있어야 한다. 시작/종료 부분 분도 전체 범위를 확인한다. 해당 분을 감싸는 실제 선분들의 양 끝점 순이동량이 그 선분 거리 합의 60% 이상이고 양 끝점 예상 오차 합보다 커야 한다. 경계 좌표를 만들어 보간하지 않는다. 왕복 흔들림과 급한 되돌림 등 불확실한 경로는 자동 제외를 보류한다. 이 보수적인 정책은 분 중간에 시작하거나 끝난 고속 이동을 포함할 수 있다.
+
+`userConfirmed && userLabel == ActivityLabel.vehicle`인 분은 GPS 조건과 별도로 사용자 확정 후보가 된다. 차량이 아닌 활동으로 확정한 분은 속도 후보에서 제외한다. 추정 vehicle 라벨과 확정하지 않은 사용자 라벨은 우회 근거가 되지 않는다. 후보는 세션 범위에 clamp하고 기존 제외 범위를 빼며, 맞닿거나 겹치는 범위를 합친다. 속도 후보의 `RouteExclusionReason`은 `highSpeed`, 차량 확정 후보는 `vehicle`이고 겹친 후보는 `highSpeed`를 우선한다.
+
+`finalizeSession`과 active 기록을 완료하는 `completeSession`에서만 속도 증거를 전달한다. 완료 세션의 라벨 편집은 속도 증거 없이 방금 차량으로 확정한 분만 전달한다. 따라서 과거 기록의 속도를 재평가하거나 다른 분을 편집한 뒤 제외 취소를 되돌리지 않는다. 제외 레코드 삽입, 분 기록 전체 교체, 세션 집계 갱신은 기존 SQLite transaction을 유지한다. 원시 GPS 샘플과 사용자 메타데이터는 보존하고 상세 화면의 복원 경로는 일반 수동 제외와 동일하게 사용한다. DB schemaVersion 6과 백업 schema 2는 유지하며 기존 제외도 소급 변경하지 않는다. 이 정책은 라이브 세션을 속도만으로 자동 종료하지 않으며 `계속 기록` 동작도 기존대로 경고 표시만 닫는다.
 
 알림 tap에서 warm tap은 즉시 `/`로 이동한다. cold tap은 복구가 끝난 뒤 active session이 있을 때만 경고를 표시한다. 종료됐거나 없는 세션은 tap을 버린다. native와 Dart의 pending buffer는 하나만 저장하고 한 번만 전달한다.
 
@@ -258,7 +264,7 @@ class AutomaticRouteExclusionPolicy {
   final double speedThresholdMps;
   List<AutomaticRouteExclusionCandidate> detect({
     required List<MinuteWindow> windows,
-    required List<ActivitySegment> segments,
+    required List<LocationSample> samples,
     required DateTime sessionStart,
     required DateTime sessionEnd,
     Iterable<RouteExclusion> existingExclusions = const [],
