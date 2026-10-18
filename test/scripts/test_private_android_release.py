@@ -37,7 +37,7 @@ class PrivateReleaseTest(unittest.TestCase):
 import json, os
 from pathlib import Path
 import sys, zipfile
-props = dict(line.split('=', 1) for line in Path('android/key.properties').read_text().splitlines() if '=' in line)
+props = dict(line.split('=', 1) for line in Path('android/key.properties').read_text(encoding='latin-1').split('\n') if '=' in line)
 Path(os.environ['RELEASE_TEST_CAPTURE']).write_text(json.dumps({
     'cwd': str(Path.cwd()),
     'storeFile': props['storeFile'],
@@ -47,6 +47,7 @@ Path(os.environ['RELEASE_TEST_CAPTURE']).write_text(json.dumps({
     'commit': os.popen('git rev-parse HEAD').read().strip(),
     'storePasswordEnv': os.environ.get('SANBO_RELEASE_STORE_PASSWORD'),
     'keyPasswordEnv': os.environ.get('SANBO_RELEASE_KEY_PASSWORD'),
+    'commentPreserved': '# 개인 서명 설정'.encode('utf-8') in Path('android/key.properties').read_bytes(),
 }))
 print(os.environ['CARTO_BASEMAP_KEY'])
 if os.environ.get('RELEASE_TEST_FAIL') == 'yes':
@@ -175,6 +176,16 @@ p.write_text('fixture checksums\n')
         self.assertEqual(facts['storePasswordEnv'], ' fixture-keychain-secret ')
         self.assertEqual(facts['keyPasswordEnv'], ' fixture-keychain-secret ')
         self.assertNotIn('fixture-keychain-secret', result.stdout + result.stderr)
+
+    def test_existing_non_ascii_signing_comment_is_preserved(self):
+        path = self.repo / 'android/key.properties'
+        path.write_bytes('# 개인 서명 설정\n'.encode('utf-8') + self.properties_before)
+        result = self.run_build()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertTrue(self.capture.exists())
+        self.assertTrue(json.loads(self.capture.read_text())['commentPreserved'])
+        self.assertTrue(path.read_bytes().startswith('# 개인 서명 설정\n'.encode('utf-8')))
+        self.assert_redacted(result)
 
 
 if __name__ == '__main__':

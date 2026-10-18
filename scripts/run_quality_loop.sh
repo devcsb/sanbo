@@ -98,9 +98,9 @@ esac
 
 case "$build_mode" in
   release|all)
-    expected_release_version="0.9.3+17"
+    expected_release_version="0.9.4+18"
     expected_version_name="${expected_release_version%%+*}"
-    release_evidence="docs/release/2026-10-16-high-speed-exclusion-release.md"
+    release_evidence="docs/release/2026-10-18-security-hardening-release.md"
     actual_release_version="$(sed -n 's/^version: //p' pubspec.yaml | head -1)"
     if [[ "$actual_release_version" != "$expected_release_version" ]]; then
       echo "release version mismatch: expected $expected_release_version" >&2

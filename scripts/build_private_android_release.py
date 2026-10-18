@@ -34,7 +34,7 @@ def _signing_text(source: Path, env: dict[str, str]) -> str:
     path = source / 'android/key.properties'
     original = path.read_text(encoding='latin-1') if path.exists() else ''
     props = {}
-    for line in original.splitlines():
+    for line in original.split('\n'):
         if match := _PROPERTY.fullmatch(line):
             if match[1] in props:
                 raise ValueError('ambiguous signing properties')
@@ -68,7 +68,7 @@ def _signing_text(source: Path, env: dict[str, str]) -> str:
     for name, variable in [('storePassword', 'SANBO_RELEASE_STORE_PASSWORD'), ('keyPassword', 'SANBO_RELEASE_KEY_PASSWORD')]:
         if not props.get(name) and not env.get(variable):
             raise ValueError('missing signing password')
-    lines = [line for line in original.splitlines() if not (match := _PROPERTY.fullmatch(line)) or match[1] not in {'storeFile', 'keyAlias'}]
+    lines = [line for line in original.split('\n') if not (match := _PROPERTY.fullmatch(line)) or match[1] not in {'storeFile', 'keyAlias'}]
     return '\n'.join(lines) + '\nstoreFile=' + _escape_property(str(store)) + '\nkeyAlias=' + _escape_property(alias) + '\n'
 
 
@@ -111,7 +111,7 @@ def main() -> int:
                 stage = Path(temp) / 'checkout'
                 subprocess.run(['git', 'clone', '--quiet', '--no-hardlinks', '--no-checkout', '--', str(source), str(stage)], stdout=log, stderr=subprocess.STDOUT, env=env, check=True)
                 subprocess.run(['git', 'checkout', '--quiet', '--detach', revision], cwd=stage, stdout=log, stderr=subprocess.STDOUT, env=env, check=True)
-                with (stage / 'android/key.properties').open('x', encoding='ascii') as settings:
+                with (stage / 'android/key.properties').open('x', encoding='latin-1') as settings:
                     os.fchmod(settings.fileno(), 0o600)
                     settings.write(signing)
                 subprocess.run(['bash', 'scripts/run_quality_loop.sh', '--release-apk'], cwd=stage, stdout=log, stderr=subprocess.STDOUT, env=env, check=True)

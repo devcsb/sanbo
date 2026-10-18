@@ -174,13 +174,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           alpha: 0.6,
                         ),
                       ),
-                      ListTile(
+                      const ListTile(
                         minTileHeight: 56,
-                        leading: const TonalIcon(
+                        leading: TonalIcon(
                           icon: Icons.location_searching_rounded,
                         ),
-                        title: const Text('주소 제안'),
-                        subtitle: const Text(
+                        title: Text('주소 제안'),
+                        subtitle: Text(
                           '주소 제안을 요청할 때만 해당 좌표를 운영체제의 주소 조회 서비스에 보내요. 네트워크를 사용할 수 있어요.',
                         ),
                       ),
