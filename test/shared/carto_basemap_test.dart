@@ -42,28 +42,59 @@ void main() {
     expect(notices, 0);
   });
 
-  test('HTTP200 authentication notice is retained and reported', () async {
-    final notice = File(
-      'test/fixtures/carto-api-key-required.png',
-    ).readAsBytesSync();
-    expect(notice.length, 2049);
-    expect(notice.take(8), [137, 80, 78, 71, 13, 10, 26, 10]);
-    var reported = 0;
-    final client = CartoTileClient(
-      MockClient(
-        (_) async => http.Response.bytes(
-          notice,
-          200,
-          headers: {'etag': '"wm-da89c20e77c1-light"'},
-        ),
-      ),
-      onAuthenticationNotice: () => reported++,
+  for (final etag in [
+    '"wm-da89c20e77c1-light"',
+    '"wm-6dc6c2207e69-light"',
+    'W/"wm-6dc6c2207e69-light"',
+  ]) {
+    test(
+      'HTTP200 authentication notice $etag is retained and reported',
+      () async {
+        final notice = File(
+          'test/fixtures/carto-api-key-required.png',
+        ).readAsBytesSync();
+        expect(notice.length, 2049);
+        expect(notice.take(8), [137, 80, 78, 71, 13, 10, 26, 10]);
+        var reported = 0;
+        final client = CartoTileClient(
+          MockClient(
+            (_) async =>
+                http.Response.bytes(notice, 200, headers: {'etag': etag}),
+          ),
+          onAuthenticationNotice: () => reported++,
+        );
+        addTearDown(client.close);
+        final result = await client.get(uri);
+        expect(result.bodyBytes, notice);
+        expect(reported, 1);
+      },
     );
-    addTearDown(client.close);
-    final result = await client.get(uri);
-    expect(result.bodyBytes, notice);
-    expect(reported, 1);
-  });
+  }
+
+  for (final etag in <String?>[
+    null,
+    '"martin-20261001-02"',
+    '"prefix-wm-6dc6c2207e69-light"',
+    'wm-6dc6c2207e69-light',
+    '"wm-6dc6c2207e69-dark"',
+  ]) {
+    test('unrelated or missing ETag $etag remains a normal image', () async {
+      var reported = 0;
+      final client = CartoTileClient(
+        MockClient(
+          (_) async => http.Response.bytes(
+            png,
+            200,
+            headers: {if (etag != null) 'etag': etag},
+          ),
+        ),
+        onAuthenticationNotice: () => reported++,
+      );
+      addTearDown(client.close);
+      expect((await client.get(uri)).bodyBytes, png);
+      expect(reported, 0);
+    });
+  }
 
   for (final status in [401, 403, 429, 500]) {
     test('HTTP$status produces an error without a key or URL', () async {
