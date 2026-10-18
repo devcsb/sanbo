@@ -163,7 +163,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         leading: TonalIcon(icon: Icons.map_outlined),
                         title: Text('OpenStreetMap · CARTO'),
                         subtitle: Text(
-                          '지도 타일을 볼 때 대략적인 지도 영역과 네트워크 정보가 CARTO에 전달됩니다',
+                          '지도 화면을 열면 표시 영역과 IP 주소 등 요청 정보가 CARTO에 전달돼요. 이 정보로 표시 위치를 추정할 수 있어요.',
+                        ),
+                      ),
+                      Divider(
+                        height: 1,
+                        indent: 16,
+                        endIndent: 16,
+                        color: theme.colorScheme.outlineVariant.withValues(
+                          alpha: 0.6,
+                        ),
+                      ),
+                      ListTile(
+                        minTileHeight: 56,
+                        leading: const TonalIcon(
+                          icon: Icons.location_searching_rounded,
+                        ),
+                        title: const Text('주소 제안'),
+                        subtitle: const Text(
+                          '주소 제안을 요청할 때만 해당 좌표를 운영체제의 주소 조회 서비스에 보내요. 네트워크를 사용할 수 있어요.',
                         ),
                       ),
                       Divider(
@@ -181,7 +199,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           color: theme.colorScheme.secondary,
                         ),
                         title: const Text('이 기기에만 저장'),
-                        subtitle: const Text('산책 원본 서버 업로드 · 계정 없음'),
+                        subtitle: const Text(
+                          '산책 원본은 이 기기에 저장해요. 서버 동기화와 계정은 없어요.',
+                        ),
                       ),
                     ],
                   ),
