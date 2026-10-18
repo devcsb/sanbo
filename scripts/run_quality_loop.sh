@@ -77,6 +77,9 @@ step() {
 step "PRD/TRD structural verification"
 python3 scripts/verify_prd_trd.py
 
+step "Android artifact and private build tooling tests"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test/scripts -p 'test_*.py'
+
 step "Flutter dependency resolution"
 flutter pub get
 
@@ -194,6 +197,10 @@ case "$build_mode" in
       echo "release checksum file was not produced" >&2
       exit 1
     fi
+    step "Android release artifact privacy"
+    python3 scripts/audit_android_artifact.py \
+      build/app/outputs/flutter-apk/app-*-release.apk \
+      build/app/outputs/bundle/release/app-release.aab
     ;;
 esac
 

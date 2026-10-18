@@ -123,7 +123,17 @@ void main() {
         final tmp = Directory('${temp.path}/tmp')..createSync();
         final calls = File('${temp.path}/calls');
         final capture = File('${temp.path}/captured.json');
+        final python = await Process.run('python3', [
+          '-c',
+          'import sys; print(sys.executable)',
+        ]);
         final stubs = {
+          // The Python tooling suite is tested separately; keep the real
+          // interpreter for this test's define generation and file handling.
+          'python3': r'''#!/bin/sh
+if [ "$1" = -m ] && [ "$2" = unittest ]; then exit 0; fi
+exec "$REAL_PYTHON" "$@"
+''',
           'git':
               '#!/bin/sh\nif [ "\$1" = describe ]; then echo v0.9.1; fi\nexit 0\n',
           'flutter': r'''#!/bin/bash
@@ -154,6 +164,7 @@ if [[ "$1" == build && "$FAIL_BUILD" == yes ]]; then exit 73; fi
             'DEFINE_CAPTURE': capture.path,
             'FAIL_BUILD': scenario == 'build-failure' ? 'yes' : 'no',
             'CARTO_BASEMAP_KEY': scenario == 'no-key' ? '' : secret,
+            'REAL_PYTHON': (python.stdout as String).trim(),
           },
         );
         expect(
