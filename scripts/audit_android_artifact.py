@@ -18,8 +18,10 @@ MAX_METADATA_BYTES = 8 * 1024**2
 _CHUNK_BYTES = 1024**2
 _OVERLAP_BYTES = 8192
 _PERSONAL_PATH = re.compile(
-    rb'(?:/Users/|/home/)[^/\x00\s]{1,255}/'
-    rb'|[A-Za-z]:[\\/]Users[\\/][^\\/\x00\s]{1,255}[\\/]'
+    # AOT strings are adjacent binary records; never consume record bytes as
+    # an owner name after a package URI such as features/home/home_screen.dart.
+    rb'(?:/Users/|/home/)[A-Za-z0-9_.@+ -]{1,255}/'
+    rb'|[A-Za-z]:[\\/]Users[\\/][A-Za-z0-9_.@+ -]{1,255}[\\/]'
 )
 _PRIVATE_KEY = re.compile(rb'-----BEGIN (?:RSA |EC |OPENSSH |ENCRYPTED )?PRIVATE KEY-----')
 _OTHER_CREDENTIAL = re.compile(

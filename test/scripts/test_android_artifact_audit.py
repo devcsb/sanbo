@@ -70,6 +70,11 @@ class ArtifactAuditTest(unittest.TestCase):
         path = self.archive([('assets/ordinary.bin', b'-----BEGIN PRIVATE KEY-----\nfixture')])
         self.assertIn('private_key', self.codes(path))
 
+    def test_dart_home_feature_uri_does_not_become_an_owner_path(self):
+        payload = b'package:sanbo/features/home/home_screen.dart\x80ConstantTween\x80package:flutter/src/widgets.dart'
+        path = self.archive([('lib/arm64-v8a/libapp.so', payload)])
+        self.assertEqual(audit.audit_archive(path), [])
+
     def test_supplied_private_text_is_found_but_not_returned(self):
         secret = b'private-owner@example.invalid'
         path = self.archive([('assets/ordinary.bin', secret)])
