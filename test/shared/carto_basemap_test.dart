@@ -82,11 +82,7 @@ void main() {
       var reported = 0;
       final client = CartoTileClient(
         MockClient(
-          (_) async => http.Response.bytes(
-            png,
-            200,
-            headers: {if (etag != null) 'etag': etag},
-          ),
+          (_) async => http.Response.bytes(png, 200, headers: {'etag': ?etag}),
         ),
         onAuthenticationNotice: () => reported++,
       );
