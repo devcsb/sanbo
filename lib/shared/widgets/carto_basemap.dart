@@ -23,6 +23,9 @@ class CartoBasemapUnavailable implements Exception {
 class CartoTileClient extends http.BaseClient {
   CartoTileClient(this._delegate, {this.onAuthenticationNotice});
 
+  static final _authenticationNoticeEtag = RegExp(
+    r'^(?:W/)?"wm-[0-9a-f]+-light"$',
+  );
   final http.Client _delegate;
   final VoidCallback? onAuthenticationNotice;
 
@@ -38,9 +41,10 @@ class CartoTileClient extends http.BaseClient {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw const CartoBasemapUnavailable();
       }
-      // Observed CARTO authentication notice, 2026-10-15. Keep its image visible.
-      // This tag can change; release QA must also inspect the real rendered map.
-      if (response.headers['etag'] == '"wm-da89c20e77c1-light"') {
+      // Observed CARTO notice family, 2026-10-18; retain the provider image.
+      // The marker is not an API contract: releases still need real map QA.
+      final etag = response.headers['etag']?.trim();
+      if (etag != null && _authenticationNoticeEtag.hasMatch(etag)) {
         onAuthenticationNotice?.call();
       }
       return http.StreamedResponse(

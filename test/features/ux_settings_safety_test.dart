@@ -40,6 +40,53 @@ class _FakeBackupFileService implements BackupFileService {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  testWidgets(
+    'privacy disclosures and backup remain readable on a small screen',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      late WalkRepository repository;
+      await tester.runAsync(
+        () async => repository = await openTestRepository(),
+      );
+      addTearDown(repository.close);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            walkRepositoryProvider.overrideWithValue(repository),
+            locationEngineProvider.overrideWithValue(
+              SyntheticLocationEngine(
+                permission: LocationPermissionState.granted,
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            builder: (_, child) => MediaQuery(
+              data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+              child: child!,
+            ),
+            home: const SettingsScreen(),
+          ),
+        ),
+      );
+      await tester.scrollUntilVisible(find.textContaining('IP 주소'), 250);
+      expect(find.textContaining('표시 위치를 추정'), findsOneWidget);
+      await tester.scrollUntilVisible(find.textContaining('주소 조회 서비스'), 200);
+      expect(find.textContaining('요청할 때만'), findsOneWidget);
+      await tester.scrollUntilVisible(find.text('전체 백업 내보내기'), 200);
+      expect(
+        tester
+            .widget<ListTile>(find.widgetWithText(ListTile, '전체 백업 내보내기'))
+            .enabled,
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
   testWidgets('recovered walk disables mode changes and delete-all', (
     tester,
   ) async {

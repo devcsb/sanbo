@@ -77,6 +77,9 @@ step() {
 step "PRD/TRD structural verification"
 python3 scripts/verify_prd_trd.py
 
+step "Android artifact and private build tooling tests"
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s test/scripts -p 'test_*.py'
+
 step "Flutter dependency resolution"
 flutter pub get
 
@@ -95,9 +98,9 @@ esac
 
 case "$build_mode" in
   release|all)
-    expected_release_version="0.9.3+17"
+    expected_release_version="0.9.4+18"
     expected_version_name="${expected_release_version%%+*}"
-    release_evidence="docs/release/2026-10-16-high-speed-exclusion-release.md"
+    release_evidence="docs/release/2026-10-18-security-hardening-release.md"
     actual_release_version="$(sed -n 's/^version: //p' pubspec.yaml | head -1)"
     if [[ "$actual_release_version" != "$expected_release_version" ]]; then
       echo "release version mismatch: expected $expected_release_version" >&2
@@ -194,6 +197,10 @@ case "$build_mode" in
       echo "release checksum file was not produced" >&2
       exit 1
     fi
+    step "Android release artifact privacy"
+    python3 scripts/audit_android_artifact.py \
+      build/app/outputs/flutter-apk/app-*-release.apk \
+      build/app/outputs/bundle/release/app-release.aab
     ;;
 esac
 

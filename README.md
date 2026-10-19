@@ -142,8 +142,7 @@ flutter run
 # 4. 디버그 APK
 flutter build apk --debug
 
-# 5. 릴리스 APK는 아래 서명 설정 후 빌드
-flutter build apk --release --split-per-abi
+# 5. 배포용 APK/AAB는 아래 서명 설정과 비공개 빌드 절차 사용
 ```
 
 산출물 예:
@@ -162,7 +161,7 @@ keytool -genkeypair -v -keystore upload-keystore.jks -keyalg RSA \
   -keysize 2048 -validity 10000 -alias upload
 cp android/key.properties.example android/key.properties
 # android/key.properties의 경로·비밀번호를 실제 값으로 변경
-flutter build appbundle --release
+python3 scripts/build_private_android_release.py --output /tmp/sanbo-release-candidate
 ```
 
 `android/key.properties`와 키스토어는 Git에서 제외됩니다. 저장·키 비밀번호는
@@ -171,14 +170,32 @@ flutter build appbundle --release
 항목이 있으면 비밀번호를 출력하지 않고 사용합니다. 키스토어는 접근 권한을 제한하고
 암호화된 별도 백업을 유지하세요. 키를 잃으면 이후 업데이트 배포가 어려워질 수 있습니다.
 
+배포 후보는 clean commit에서 `scripts/build_private_android_release.py`로 만듭니다.
+이 도구는 `/tmp`의 중립 경로에서 기존 품질 검사를 실행하고, 모든 ABI APK와 AAB의
+개인 경로/비밀 파일을 검사한 뒤 새 출력 디렉터리에 산출물과 체크섬만 복사합니다.
+기존 출력과 로그는 덮지 않습니다. 로그는 출력 폴더 옆의 `.private.log` 파일에
+0600으로 보관하므로 릴리스에 첨부하지 마세요. Python 3.11 이상을 사용합니다.
+지도 키는 기존 비공개 환경 입력 `CARTO_BASEMAP_KEY`로 전달합니다. 서명은
+`android/key.properties` 또는 기존 `SANBO_RELEASE_*` 환경 입력과 Keychain을 사용합니다.
+격리 작업트리에 서명 파일이 없다면 원래 키스토어의 절대 경로와 alias도 비공개 환경으로
+전달해야 합니다. 원래 키스토어를 작업트리나 APK에 복사하지 않습니다.
+
 ### 지도
 
 베이스맵은 **OpenStreetMap** 데이터와 CARTO 타일을 사용합니다. CARTO 타일 요청에는
 발급받은 basemap 키가 필요합니다. 키는 Git에 넣지 않고 비공개 빌드 설정으로 전달합니다.
+배포 앱에 포함된 이 클라이언트 키는 APK 분석으로 추출할 수 있습니다. 비공개 빌드 설정과
+난독화는 외부 재사용을 막는 인증 수단이 아닙니다.
 로컬 파일 준비와 빌드 절차는 [지도 키 준비 안내](docs/release/2026-10-14-maintenance-stage1-release.md#비공개-지도-키-준비와-빌드)를 따릅니다.
 산책 원본 좌표를 업로드하지는 않지만, 지도를 열면 표시 영역에 해당하는 타일 좌표와
-IP 등 네트워크 정보가 CARTO에 전달될 수 있습니다. 지도 타일을 불러오지 못해도 GPS 기록과
+줌 수준과 IP 등 요청 정보가 CARTO에 전달되며 이 정보로 표시 위치를 추정할 수 있습니다.
+사용자가 주소 제안을 요청하면 해당 좌표를 OS 주소 조회 서비스에 전달할 수 있습니다.
+지도 타일을 불러오지 못해도 GPS 기록과
 로컬 저장은 계속 동작합니다.
+
+광고 도입 전에는 CARTO의 상업용 분류와 무료 한도를 확인해야 합니다. 현재 앱에는 광고
+SDK가 없습니다. 건강/걸음 데이터를 광고에 이용하지 않는 조건과 계정에서 실제로 확인한
+사용량, 제한, 미확인 과금 조건은 [CARTO 운영 안내](docs/security/carto-operations.md)에 기록합니다.
 
 USB 디버깅이 켜진 폰:
 
@@ -208,7 +225,8 @@ adb shell am start -n com.sanbo.sanbo/.MainActivity
 
 설정에서 추적 모드(절전 20초 / 균형 8초 / 정밀 4초)를 바꾸고 전체 백업을
 내보내거나 가져올 수 있습니다. 백업 파일에는 정밀 위치가 있으므로 공유에
-주의하세요.
+주의하세요. `.sanbo` 백업은 암호화하지 않은 JSON이므로 보관하거나 공유한 서비스에서도
+파일 내용을 읽을 수 있습니다.
 
 ---
 

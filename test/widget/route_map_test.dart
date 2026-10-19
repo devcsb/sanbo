@@ -195,7 +195,7 @@ void main() {
           (_) async => http.Response.bytes(
             notice,
             200,
-            headers: {'etag': '"wm-da89c20e77c1-light"'},
+            headers: {'etag': '"wm-6dc6c2207e69-light"'},
           ),
         ),
       ),
@@ -331,6 +331,44 @@ void main() {
     await tester.pump();
     expect(restored.requests, greaterThan(0));
     expect(find.text(_unavailable), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  testWidgets('a reopened map reloads after a weak authentication notice', (
+    tester,
+  ) async {
+    final notice = File(
+      'test/fixtures/carto-api-key-required.png',
+    ).readAsBytesSync();
+    await tester.pumpWidget(
+      _mapApp(
+        keyValue: 'notice-recovery-key',
+        factory: () => MockClient(
+          (_) async => http.Response.bytes(
+            notice,
+            200,
+            headers: {'etag': 'W/"wm-6dc6c2207e69-light"'},
+          ),
+        ),
+      ),
+    );
+    await _waitForStatus(tester);
+    expect(find.text(_unavailable), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    final recovered = _TrackedClient(
+      MockClient(
+        (_) async => http.Response.bytes(TileProvider.transparentImage, 200),
+      ),
+    );
+    await tester.pumpWidget(
+      _mapApp(keyValue: 'notice-recovery-key', factory: () => recovered),
+    );
+    await tester.pump();
+    expect(recovered.requests, greaterThan(0));
+    expect(find.text(_unavailable), findsNothing);
+    expect(find.byType(PolylineLayer), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();
   });
