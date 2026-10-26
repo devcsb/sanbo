@@ -21,6 +21,7 @@ import '../domain/services/daily_walk_stats.dart';
 import '../domain/services/local_calendar.dart' as calendar;
 import '../domain/services/session_deadline.dart';
 import '../domain/services/session_guard.dart';
+import '../domain/services/session_week_summary.dart';
 import '../domain/services/session_pipeline.dart';
 import '../domain/services/walk_stats.dart';
 import 'app_database.dart';
@@ -180,6 +181,34 @@ WHERE status = ?
       totalDurationS: (row['total_duration_s'] as num?)?.toInt() ?? 0,
       longestDurationS: (row['longest_duration_s'] as num?)?.toInt() ?? 0,
       longestDistanceM: (row['longest_distance_m'] as num?)?.toDouble() ?? 0,
+    );
+  }
+
+  Future<SessionWeekSummary?> sessionWeekSummary(String sessionId) async {
+    final reference = await getSession(sessionId);
+    if (reference == null) return null;
+    final range = summarizeSessionWeek(
+      reference: reference,
+      sessions: const [],
+    );
+    // Guard bands cover UTC/offset and legacy wall-clock strings. Final overlap
+    // and calendar membership use the existing timezone-aware row parser.
+    final rows = await _db.query(
+      'sessions',
+      where:
+          'status = ? AND started_at < ? AND (ended_at IS NULL OR ended_at >= ?)',
+      whereArgs: [
+        SessionStatus.completed.name,
+        range.end.toUtc().add(const Duration(days: 2)).toIso8601String(),
+        range.previousStart
+            .toUtc()
+            .subtract(const Duration(days: 2))
+            .toIso8601String(),
+      ],
+    );
+    return summarizeSessionWeek(
+      reference: reference,
+      sessions: rows.map(_sessionFromRow).toList(),
     );
   }
 

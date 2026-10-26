@@ -124,7 +124,18 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     expect(find.text('한곳 체류'), findsOneWidget);
-    await tester.tap(find.byTooltip(RegExp('구간 편집')).first);
+    final editButton = find
+        .byWidgetPredicate(
+          (widget) =>
+              widget is IconButton &&
+              (widget.tooltip?.contains('구간 편집') ?? false),
+        )
+        .first;
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(editButton);
+    await tester.pumpAndSettle();
+    expect(editButton.hitTestable(), findsOneWidget);
+    await tester.tap(editButton);
     await tester.pumpAndSettle();
     expect(find.text('장소 이름 남기기'), findsOneWidget);
 
@@ -145,6 +156,7 @@ void main() {
       sessionId,
       expectedPlaceName: '세종대로 쉼터',
     );
+    await tester.pumpAndSettle();
     await tester.scrollUntilVisible(
       find.text('세종대로 쉼터'),
       200,

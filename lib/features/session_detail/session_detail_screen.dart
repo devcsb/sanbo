@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -23,12 +24,16 @@ import '../../domain/services/route_playback.dart';
 import '../../domain/services/completed_walk_metrics.dart';
 import '../../domain/services/session_export.dart';
 import '../../domain/services/walk_stats.dart';
+import '../../domain/services/session_week_summary.dart';
 import '../../platform/place/place_lookup.dart';
 import '../../shared/widgets/app_motion.dart';
 import '../../shared/widgets/route_map.dart';
 import '../../shared/widgets/ui_bits.dart';
 import '../history/history_providers.dart';
 import 'timeline_copy.dart';
+import 'session_summary_panels.dart';
+import 'session_week_provider.dart';
+import 'session_route_screen.dart';
 
 final sessionDetailProvider = FutureProvider.autoDispose
     .family<SessionDetailData?, String>((ref, id) async {
@@ -170,11 +175,14 @@ class SessionDetailScreen extends ConsumerStatefulWidget {
 
 class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   final _mapSectionKey = GlobalKey();
+  final _timelineSectionKey = GlobalKey();
   final _scrollController = ScrollController();
   Timer? _playbackTimer;
   // -1 means "show the completed route"; pressing play then starts at 0.
   var _playbackIndex = -1;
   var _isPlaying = false;
+  var _summaryIndex = 0;
+  var _routeScreenOpen = false;
   DateTime? _selectedSegmentStart;
   RoutePartitionResult? _playbackSource;
   List<RoutePlaybackPoint> _playbackCache = const [];
@@ -205,6 +213,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   @override
   Widget build(BuildContext context) {
     final async = ref.watch(sessionDetailProvider(sessionId));
+    final weekAsync = ref.watch(sessionWeekSummaryProvider(sessionId));
     final commandBusy = ref.watch(_detailCommandBusyProvider(sessionId));
     final hasLoadedData = async.hasValue && async.valueOrNull != null;
     final theme = Theme.of(context);
@@ -237,8 +246,10 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
         ],
       ),
       body: SmoothSwitcher(
+        key: ValueKey(sessionId),
         transitionKey: _detailTransitionKey(async),
         child: async.when(
+          skipLoadingOnReload: true,
           loading: () => const Center(child: CircularProgressIndicator()),
           error: (_, _) => EmptyStateView(
             icon: Icons.error_outline_rounded,
@@ -259,9 +270,8 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
             }
 
             final session = data.session;
-            final dateFmt = DateFormat('yyyy.MM.dd  HH:mm', 'ko');
+            final dateFmt = DateFormat('yyyy.MM.dd', 'ko');
             final km = (session.totalDistanceM ?? 0) / 1000.0;
-            final dur = Duration(seconds: session.durationS ?? 0);
             final averageSpeedMps = completedAverageSpeedMps(
               totalDistanceM: session.totalDistanceM,
               movingTimeS: session.movingTimeS,
@@ -309,247 +319,394 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                 controller: _scrollController,
                 padding: EdgeInsets.zero,
                 children: [
-                  PageIntro(
-                    eyebrow: '산책 기록',
-                    title: dateFmt.format(session.startedAt),
-                    description: '경로와 활동 흐름을 차분히 돌아보세요.',
-                  ),
-                  if (hasAutomaticHighSpeedExclusion) ...[
-                    const SizedBox(height: 16),
-                    SoftPanel(
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(
-                            Icons.auto_awesome_outlined,
-                            color: theme.colorScheme.primary,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              '빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.',
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  const SectionLabel('산책 경로'),
-                  KeyedSubtree(
-                    key: _mapSectionKey,
-                    child: RouteMap(
-                      fragments: fragments,
-                      geometry: _mapGeometry,
-                      height: 220,
-                      progress: currentPlaybackPoint == null
-                          ? null
-                          : RoutePlaybackCursor(
-                              fragmentIndex: currentPlaybackPoint.fragmentIndex,
-                              pointIndex: currentPlaybackPoint.pointIndex,
-                            ),
-                      highlightedGeometry: highlightedGeometry,
-                      highlightedFragments: highlightedFragments,
-                      currentPoint: currentSample == null
-                          ? null
-                          : (
-                              lat: currentSample.latitude,
-                              lon: currentSample.longitude,
-                            ),
-                      offlinePreview:
-                          !kIsWeb &&
-                          Platform.environment.containsKey('FLUTTER_TEST'),
-                    ),
-                  ),
-                  if (playbackPoints.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    _RoutePlaybackControls(
-                      timezone: session.timezone,
-                      playbackPoints: playbackPoints,
-                      sample: currentSample!,
-                      firstTimestamp: playbackPoints.first.sample.timestamp,
-                      lastTimestamp: playbackPoints.last.sample.timestamp,
-                      index: playbackIndex,
-                      sampleCount: playbackPoints.length,
-                      isPlaying: _isPlaying,
-                      currentSegment: currentSegment,
-                      selectedSegment: selectedSegment,
-                      onTogglePlayback: () =>
-                          _togglePlayback(playbackPoints.length),
-                      onIndexChanged: _setPlaybackIndex,
-                    ),
-                  ],
-                  const SizedBox(height: 24),
-                  const SectionLabel('핵심 기록'),
-                  MetricStrip(
-                    metrics: [
-                      MetricData(
-                        label: '거리',
-                        value: '${km.toStringAsFixed(2)} km',
-                        emphasize: true,
-                      ),
-                      MetricData(label: '시간', value: _fmt(dur)),
-                      MetricData(
-                        label: '평균 속도',
-                        value: kmh == null
-                            ? '측정되지 않음'
-                            : '${kmh.toStringAsFixed(1)} km/h',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  const SectionLabel('기록 세부 정보'),
-                  _SecondaryMetricStrip(
-                    metrics: [
-                      MetricData(
-                        label: '이동 시간',
-                        value: _optionalDuration(session.movingTimeS),
-                      ),
-                      MetricData(
-                        label: '정지 시간',
-                        value: _optionalDuration(session.stationaryTimeS),
-                      ),
-                      MetricData(
-                        label: 'GPS 유효 좌표',
-                        value: session.validSampleCount == null
-                            ? '측정되지 않음'
-                            : '${session.validSampleCount}개',
-                      ),
-                      MetricData(
-                        label: '중앙 정확도',
-                        value: session.medianAccuracyM == null
-                            ? '측정되지 않음'
-                            : '±${session.medianAccuracyM!.toStringAsFixed(1)} m',
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  const SectionLabel('메모'),
-                  _SessionNotesCard(
-                    sessionId: sessionId,
-                    initialNotes: session.notes,
-                    enabled: !commandBusy,
-                  ),
-                  if (pacePerKmLabel(averageSpeedMps) != null) ...[
-                    const SizedBox(height: 16),
-                    SoftPanel(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                      child: Row(
-                        children: [
-                          const TonalIcon(
-                            icon: Icons.speed_rounded,
-                            size: 40,
-                            iconSize: 20,
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '평균 페이스',
-                                  style: theme.textTheme.labelMedium?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  pacePerKmLabel(averageSpeedMps)!,
-                                  style: theme.textTheme.titleMedium?.copyWith(
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 28),
-                  const SectionLabel('활동 흐름'),
+                  // Sections are small and the timeline already builds its rows
+                  // together. Keep one content child so section links and notes
+                  // retain their mounted targets while scrolling.
                   Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          const StatusPill(
-                            label: '구간 탭하여 지도에서 보기',
-                            icon: Icons.map_outlined,
-                          ),
-                          if (rawCount > 0)
-                            StatusPill(
-                              label: rawCount == collapsedCount
-                                  ? '$collapsedCount개 구간'
-                                  : '$rawCount분 → $collapsedCount개 구간',
-                              icon: Icons.timeline_rounded,
+                      PageIntro(
+                        eyebrow: '산책을 저장했어요',
+                        title: '이동 기록을\n차곡차곡 남겼어요.',
+                        description:
+                            '${dateFmt.format(asLocal(session.startedAt, timezone: session.timezone))}\n'
+                            '${DateFormat('HH:mm').format(asLocal(session.startedAt, timezone: session.timezone))} 시작'
+                            '${session.endedAt == null ? '' : ' · ${DateFormat('HH:mm').format(asLocal(session.endedAt!, timezone: session.timezone))} 종료'}',
+                      ),
+                      if (!async.isLoading &&
+                          !weekAsync.isLoading &&
+                          !weekAsync.hasError)
+                        if (weekAsync.valueOrNull case final week?)
+                          if (!week.partial &&
+                              week.referenceMovingTimeS != null &&
+                              week.referenceMovingTimeS! > 0)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 12),
+                              child: Text(
+                                '이번 산책의 ${_movementDuration(week.referenceMovingTimeS)}도 차곡차곡.\n${_weekTitle(session)}에 산책 ${week.sessionCount}번을 기록했어요.',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  height: 1.5,
+                                ),
+                              ),
                             ),
+                      const SizedBox(height: 24),
+                      MetricStrip(
+                        metrics: [
+                          MetricData(
+                            label: '포함 거리',
+                            value:
+                                session.totalDistanceM == null ||
+                                    !session.totalDistanceM!.isFinite ||
+                                    session.totalDistanceM! < 0
+                                ? '측정되지 않음'
+                                : '${km.toStringAsFixed(2)} km',
+                            emphasize: true,
+                          ),
+                          MetricData(
+                            label: '이동 시간',
+                            value: _movementDuration(session.movingTimeS),
+                            emphasize: true,
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '같은 활동은 묶어서 보여 드려요. 수정은 각 구간의 편집 버튼에서 할 수 있어요.',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  if (segments.isEmpty)
-                    SoftPanel(
-                      child: Text(
-                        '구간이 없어요. 짧은 산책이거나 위치 기록이 부족했을 수 있습니다.',
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                    )
-                  else
-                    SoftPanel(
-                      padding: EdgeInsets.zero,
-                      child: Column(
-                        children: [
-                          for (var i = 0; i < segments.length; i++) ...[
-                            if (i > 0)
-                              Divider(
-                                height: 1,
-                                indent: 16,
-                                endIndent: 16,
-                                color: theme.colorScheme.outlineVariant
-                                    .withValues(alpha: 0.6),
+                      const SizedBox(height: 12),
+                      SoftPanel(
+                        child: Wrap(
+                          alignment: WrapAlignment.spaceBetween,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          spacing: 16,
+                          runSpacing: 8,
+                          children: [
+                            Text('이동 평균 속도', style: theme.textTheme.bodyMedium),
+                            Text(
+                              kmh == null
+                                  ? '측정되지 않음'
+                                  : '${kmh.toStringAsFixed(1)} km/h',
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
                               ),
-                            _SegmentRow(
-                              segment: segments[i],
-                              selected:
-                                  selectedSegment?.start.isAtSameMomentAs(
-                                    segments[i].start,
-                                  ) ??
-                                  false,
-                              onSelect: () =>
-                                  _selectSegment(segments[i], playbackPoints),
-                              onEdit: commandBusy
-                                  ? null
-                                  : () => _showSegmentActions(
-                                      context,
-                                      ref,
-                                      sessionId,
-                                      segments[i],
-                                    ),
+                            ),
+                            TextButton(
+                              onPressed: () => _showAverageCalculation(
+                                session,
+                                averageSpeedMps,
+                              ),
+                              child: const Text('계산 보기'),
                             ),
                           ],
+                        ),
+                      ),
+                      if (hasAutomaticHighSpeedExclusion) ...[
+                        const SizedBox(height: 16),
+                        SoftPanel(
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                Icons.auto_awesome_outlined,
+                                color: theme.colorScheme.primary,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.',
+                                      style: theme.textTheme.bodyMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                    ),
+                                    TextButton(
+                                      onPressed: _revealTimeline,
+                                      child: const Text('구간 살펴보기'),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 24),
+                      SessionSummaryPanels(
+                        key: ValueKey('summary-$sessionId'),
+                        index: _summaryIndex,
+                        onPageChanged: _changeSummaryPage,
+                        weekLabel: _weekTitle(session),
+                        route: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            KeyedSubtree(
+                              key: _mapSectionKey,
+                              child: _routeScreenOpen
+                                  ? const SizedBox(height: 220)
+                                  : RouteMap(
+                                      interactionFlags: InteractiveFlag.none,
+                                      fragments: fragments,
+                                      geometry: _mapGeometry,
+                                      height: 220,
+                                      progress: currentPlaybackPoint == null
+                                          ? null
+                                          : RoutePlaybackCursor(
+                                              fragmentIndex:
+                                                  currentPlaybackPoint
+                                                      .fragmentIndex,
+                                              pointIndex: currentPlaybackPoint
+                                                  .pointIndex,
+                                            ),
+                                      highlightedGeometry: highlightedGeometry,
+                                      highlightedFragments:
+                                          highlightedFragments,
+                                      currentPoint: currentSample == null
+                                          ? null
+                                          : (
+                                              lat: currentSample.latitude,
+                                              lon: currentSample.longitude,
+                                            ),
+                                      offlinePreview:
+                                          !kIsWeb &&
+                                          Platform.environment.containsKey(
+                                            'FLUTTER_TEST',
+                                          ),
+                                    ),
+                            ),
+                            if (playbackPoints.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              _RoutePlaybackControls(
+                                timezone: session.timezone,
+                                playbackPoints: playbackPoints,
+                                sample: currentSample!,
+                                firstTimestamp:
+                                    playbackPoints.first.sample.timestamp,
+                                lastTimestamp:
+                                    playbackPoints.last.sample.timestamp,
+                                index: playbackIndex,
+                                sampleCount: playbackPoints.length,
+                                isPlaying: _isPlaying,
+                                currentSegment: currentSegment,
+                                selectedSegment: selectedSegment,
+                                onTogglePlayback: () =>
+                                    _togglePlayback(playbackPoints.length),
+                                onIndexChanged: _setPlaybackIndex,
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                _pausePlayback();
+                                setState(() => _routeScreenOpen = true);
+                                await WidgetsBinding.instance.endOfFrame;
+                                if (!context.mounted) return;
+                                final route = MaterialPageRoute<void>(
+                                  builder: (_) => SessionRouteScreen(
+                                    fragments: fragments,
+                                    geometry: _mapGeometry,
+                                    highlightedGeometry: highlightedGeometry,
+                                    highlightedFragments: highlightedFragments,
+                                    progress: currentPlaybackPoint == null
+                                        ? null
+                                        : RoutePlaybackCursor(
+                                            fragmentIndex: currentPlaybackPoint
+                                                .fragmentIndex,
+                                            pointIndex:
+                                                currentPlaybackPoint.pointIndex,
+                                          ),
+                                    currentPoint: currentSample == null
+                                        ? null
+                                        : (
+                                            lat: currentSample.latitude,
+                                            lon: currentSample.longitude,
+                                          ),
+                                    offlinePreview:
+                                        !kIsWeb &&
+                                        Platform.environment.containsKey(
+                                          'FLUTTER_TEST',
+                                        ),
+                                  ),
+                                );
+                                await Navigator.of(context).push<void>(route);
+                                // Pop resolves before its reverse transition removes
+                                // the outgoing map and its tile client.
+                                await route.completed;
+                                if (mounted) {
+                                  setState(() => _routeScreenOpen = false);
+                                }
+                              },
+                              icon: const Icon(Icons.open_in_full),
+                              label: const Text('지도 크게 보기'),
+                            ),
+                          ],
+                        ),
+                        week: async.isLoading
+                            ? const SoftPanel(child: Text('주간 기록을 갱신하고 있어요'))
+                            : _buildWeekPanel(weekAsync, session),
+                      ),
+                      const SizedBox(height: 24),
+                      const SectionLabel('기록 세부 정보'),
+                      _SecondaryMetricStrip(
+                        metrics: [
+                          MetricData(
+                            label: '전체 기록 시간',
+                            value: _optionalDuration(session.durationS),
+                          ),
+                          MetricData(
+                            label: '정지 시간',
+                            value: _optionalDuration(session.stationaryTimeS),
+                          ),
+                          MetricData(
+                            label: 'GPS 유효 좌표',
+                            value: session.validSampleCount == null
+                                ? '측정되지 않음'
+                                : '${session.validSampleCount}개',
+                          ),
+                          MetricData(
+                            label: '중앙 정확도',
+                            value: session.medianAccuracyM == null
+                                ? '측정되지 않음'
+                                : '±${session.medianAccuracyM!.toStringAsFixed(1)} m',
+                          ),
                         ],
                       ),
-                    ),
+                      const SizedBox(height: 24),
+                      const SectionLabel('메모'),
+                      _SessionNotesCard(
+                        key: ValueKey('notes-$sessionId'),
+                        sessionId: sessionId,
+                        initialNotes: session.notes,
+                        enabled: !commandBusy,
+                      ),
+                      if (pacePerKmLabel(averageSpeedMps) != null) ...[
+                        const SizedBox(height: 16),
+                        SoftPanel(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 14,
+                          ),
+                          child: Row(
+                            children: [
+                              const TonalIcon(
+                                icon: Icons.speed_rounded,
+                                size: 40,
+                                iconSize: 20,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '평균 페이스',
+                                      style: theme.textTheme.labelMedium
+                                          ?.copyWith(
+                                            color: theme
+                                                .colorScheme
+                                                .onSurfaceVariant,
+                                          ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      pacePerKmLabel(averageSpeedMps)!,
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 28),
+                      KeyedSubtree(
+                        key: _timelineSectionKey,
+                        child: const SectionLabel('활동 흐름'),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              const StatusPill(
+                                label: '구간 탭하여 지도에서 보기',
+                                icon: Icons.map_outlined,
+                              ),
+                              if (rawCount > 0)
+                                StatusPill(
+                                  label: rawCount == collapsedCount
+                                      ? '$collapsedCount개 구간'
+                                      : '$rawCount분 → $collapsedCount개 구간',
+                                  icon: Icons.timeline_rounded,
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            '같은 활동은 묶어서 보여 드려요. 수정은 각 구간의 편집 버튼에서 할 수 있어요.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (segments.isEmpty)
+                        SoftPanel(
+                          child: Text(
+                            '구간이 없어요. 짧은 산책이거나 위치 기록이 부족했을 수 있습니다.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        )
+                      else
+                        SoftPanel(
+                          padding: EdgeInsets.zero,
+                          child: Column(
+                            children: [
+                              for (var i = 0; i < segments.length; i++) ...[
+                                if (i > 0)
+                                  Divider(
+                                    height: 1,
+                                    indent: 16,
+                                    endIndent: 16,
+                                    color: theme.colorScheme.outlineVariant
+                                        .withValues(alpha: 0.6),
+                                  ),
+                                _SegmentRow(
+                                  segment: segments[i],
+                                  selected:
+                                      selectedSegment?.start.isAtSameMomentAs(
+                                        segments[i].start,
+                                      ) ??
+                                      false,
+                                  onSelect: () => _selectSegment(
+                                    segments[i],
+                                    playbackPoints,
+                                  ),
+                                  onEdit: commandBusy
+                                      ? null
+                                      : () => _showSegmentActions(
+                                          context,
+                                          ref,
+                                          sessionId,
+                                          segments[i],
+                                        ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ],
               ),
             );
@@ -566,6 +723,292 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     }
     if (async.hasError) return 'error:$sessionId';
     return 'loading:$sessionId';
+  }
+
+  void _pausePlayback() {
+    _playbackTimer?.cancel();
+    _playbackTimer = null;
+    _isPlaying = false;
+  }
+
+  void _changeSummaryPage(int index) {
+    setState(() {
+      _summaryIndex = index;
+      if (index == 1) _pausePlayback();
+    });
+  }
+
+  String _weekTitle(WalkSession session) {
+    final end = asLocal(
+      (session.endedAt ?? session.startedAt).subtract(
+        const Duration(microseconds: 1),
+      ),
+      timezone: session.timezone,
+    );
+    final now = asLocal(DateTime.now(), timezone: session.timezone);
+    final days = DateTime.utc(
+      now.year,
+      now.month,
+      now.day,
+    ).difference(DateTime.utc(end.year, end.month, end.day)).inDays;
+    return days >= 0 && days < now.weekday && end.weekday == now.weekday - days
+        ? '이번 주'
+        : '그 주';
+  }
+
+  void _showAverageCalculation(WalkSession session, double? average) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('이동 평균 속도 계산'),
+        content: SingleChildScrollView(
+          child: Text(
+            average == null
+                ? '포함 거리나 이동 시간이 없거나 0이면 평균 속도는 측정되지 않음으로 표시해요.'
+                : '포함 거리 ${session.totalDistanceM} m ÷ 이동 시간 ${session.movingTimeS}초 × 3.6 = ${average * 3.6} km/h\n\n제외된 구간은 저장된 거리와 이동 시간에서 빠져 있어요. 계산에는 반올림 전 값을 쓰므로 화면의 표시값으로 계산하면 차이가 날 수 있어요. 이동 시간을 확정 걷기 시간으로 판정한 값은 아니에요.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('닫기'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWeekPanel(
+    AsyncValue<SessionWeekSummary?> async,
+    WalkSession session,
+  ) {
+    if (async.isLoading) {
+      return const SoftPanel(
+        key: ValueKey('week-loading'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(height: 12),
+            Text('주간 기록을 불러오고 있어요'),
+          ],
+        ),
+      );
+    }
+    if (async.hasError) {
+      return SoftPanel(
+        key: const ValueKey('week-error'),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('주간 기록을 불러오지 못했어요'),
+            TextButton(
+              onPressed: () =>
+                  ref.invalidate(sessionWeekSummaryProvider(sessionId)),
+              child: const Text('다시 시도'),
+            ),
+          ],
+        ),
+      );
+    }
+    final week = async.valueOrNull;
+    if (week == null) {
+      return const SoftPanel(
+        key: ValueKey('week-empty'),
+        child: Text('주간 기록이 없어요. 기록이 없다는 뜻이며, 이동하지 않았다는 뜻은 아니에요.'),
+      );
+    }
+    final format = DateFormat('M.d');
+    return SoftPanel(
+      key: ValueKey(
+        week.partial
+            ? 'week-partial'
+            : week.sessions.isEmpty
+            ? 'week-empty'
+            : 'week-data',
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            '${_weekTitle(session)}에 남긴 이동 시간',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '${format.format(week.weekStart)} 월요일 00:00부터 ${DateFormat('M.d HH:mm:ss').format(week.end)}까지',
+          ),
+          Text(week.timezone, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 16),
+          Text(
+            week.partial && week.sessions.isEmpty
+                ? '집계할 수 없음'
+                : _movementDuration(week.movingTimeS),
+            style: Theme.of(
+              context,
+            ).textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          Text('산보에 기록한 이동 시간${week.partial ? ' 중 합산 가능한 값' : ''}'),
+          if (!week.partial && week.sessions.isEmpty)
+            const Text('합산할 이동 기록이 없어요. 이동하지 않았다는 뜻은 아니에요.'),
+          if (!week.partial) Text('기록한 산책 ${week.sessionCount}번'),
+          if (week.referenceMovingTimeS != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(
+                '이번 산책이 더한 시간 ${_movementDuration(week.referenceMovingTimeS)}',
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+              ),
+            ),
+          if (week.partial)
+            const Text('일부 기록은 합산하지 못했어요. 날짜 경계나 이동 시간 등 저장된 근거가 부족해요.'),
+          const SizedBox(height: 16),
+          _weekChart(week),
+          if (week.previousMovingTimeS case final previous?) ...[
+            const SizedBox(height: 12),
+            Text('전주 같은 요일과 시각까지 ${_movementDuration(previous)}'),
+          ],
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: () => _showWeekRecords(week),
+            child: const Text('주간 기록 보기'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _weekChart(SessionWeekSummary week) {
+    final theme = Theme.of(context);
+    final maxSeconds = week.days.fold<int>(
+      1,
+      (value, day) => day.movingTimeS > value ? day.movingTimeS : value,
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = MediaQuery.textScalerOf(context).scale(12) > 18 ? 2 : 7;
+        final width = (constraints.maxWidth - (columns - 1) * 8) / columns;
+        return Wrap(
+          spacing: 8,
+          runSpacing: 16,
+          children: [
+            for (var i = 0; i < 7; i++)
+              SizedBox(
+                width: width,
+                child: Semantics(
+                  label:
+                      '${const ['월', '화', '수', '목', '금', '토', '일'][i]}요일 ${DateFormat('M.d').format(week.days[i].date)}, ${!week.days[i].date.isBefore(week.end) ? '집계 범위 밖' : '${week.days[i].movingTimeS}초${week.partial ? ', 일부 누락 가능' : ''}'}',
+                  excludeSemantics: true,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: 68,
+                        child: Align(
+                          alignment: Alignment.bottomCenter,
+                          child: Container(
+                            width: 22,
+                            height: !week.days[i].date.isBefore(week.end)
+                                ? 2
+                                : (week.days[i].movingTimeS / maxSeconds * 68)
+                                      .clamp(2, 68),
+                            decoration: BoxDecoration(
+                              color: !week.days[i].date.isBefore(week.end)
+                                  ? theme.colorScheme.outlineVariant
+                                  : theme.colorScheme.primary,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(5),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        const ['월', '화', '수', '목', '금', '토', '일'][i],
+                        style: theme.textTheme.labelMedium,
+                      ),
+                      Text(
+                        !week.days[i].date.isBefore(week.end)
+                            ? '범위 밖'
+                            : (week.days[i].movingTimeS > 0 &&
+                                      week.days[i].movingTimeS < 60
+                                  ? '${week.days[i].movingTimeS}초'
+                                  : '${week.days[i].movingTimeS ~/ 60}분'),
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.labelSmall,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showWeekRecords(SessionWeekSummary week) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => SafeArea(
+        child: FractionallySizedBox(
+          heightFactor: 0.8,
+          child: ListView(
+            padding: const EdgeInsets.all(24),
+            children: [
+              Text('주간 기록', style: Theme.of(context).textTheme.titleLarge),
+              Text(
+                '${DateFormat('yyyy.M.d').format(week.weekStart)}부터 ${DateFormat('M.d HH:mm:ss').format(week.end)}까지 · ${week.timezone}',
+              ),
+              const SizedBox(height: 16),
+              if (week.sessions.isEmpty) const Text('합산 가능한 산책 기록이 없어요.'),
+              for (final entry in week.sessions)
+                ListTile(
+                  title: Text(
+                    DateFormat('M월 d일 (E) HH:mm', 'ko').format(entry.startedAt),
+                  ),
+                  subtitle: Text(
+                    '이동 시간 ${_movementDuration(entry.movingTimeS)}',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.of(this.context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SessionDetailScreen(sessionId: entry.id),
+                      ),
+                    );
+                  },
+                ),
+              if (week.partial) const Text('합산하지 못한 기록'),
+              for (final id in week.omittedSessionIds)
+                ListTile(
+                  title: const Text('기록 살펴보기'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.of(this.context).push<void>(
+                      MaterialPageRoute(
+                        builder: (_) => SessionDetailScreen(sessionId: id),
+                      ),
+                    );
+                  },
+                ),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('닫기'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _setPlaybackIndex(int index) {
@@ -625,6 +1068,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     _playbackTimer?.cancel();
     _playbackTimer = null;
     setState(() {
+      _summaryIndex = 0;
       _selectedSegmentStart = segment.start;
       _isPlaying = false;
       if (playbackPoints.isNotEmpty) {
@@ -703,6 +1147,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     _playbackTimer?.cancel();
     setState(() {
       _playbackTimer = null;
+      _summaryIndex = 0;
+      _routeScreenOpen = false;
+      if (_scrollController.hasClients) _scrollController.jumpTo(0);
       _playbackIndex = -1;
       _isPlaying = false;
       _selectedSegmentStart = null;
@@ -715,6 +1162,26 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
       _highlightedGeometry = null;
       _highlightedFragments = const [];
     });
+  }
+
+  Future<void> _revealTimeline() async {
+    if (_timelineSectionKey.currentContext == null &&
+        _scrollController.hasClients) {
+      await _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: _motionDuration(context, const Duration(milliseconds: 260)),
+        curve: Curves.easeOutCubic,
+      );
+      if (!mounted) return;
+      await WidgetsBinding.instance.endOfFrame;
+    }
+    final target = _timelineSectionKey.currentContext;
+    if (mounted && target != null && target.mounted) {
+      await Scrollable.ensureVisible(
+        target,
+        duration: _motionDuration(context, const Duration(milliseconds: 260)),
+      );
+    }
   }
 
   Future<void> _revealMap() async {
@@ -1188,8 +1655,21 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
     return '$m:$s';
   }
 
+  String _movementDuration(int? seconds) {
+    if (seconds == null || seconds < 0) return '측정되지 않음';
+    if (seconds == 0) return '0분';
+    final duration = Duration(seconds: seconds);
+    return [
+      if (duration.inHours > 0) '${duration.inHours}시간',
+      if (duration.inMinutes.remainder(60) > 0)
+        '${duration.inMinutes.remainder(60)}분',
+      if (duration.inSeconds.remainder(60) > 0)
+        '${duration.inSeconds.remainder(60)}초',
+    ].join(' ');
+  }
+
   String _optionalDuration(int? seconds) {
-    if (seconds == null) return '측정되지 않음';
+    if (seconds == null || seconds < 0) return '측정되지 않음';
     return _fmt(Duration(seconds: seconds));
   }
 }
@@ -1884,6 +2364,7 @@ class _SegmentRow extends StatelessWidget {
 
 class _SessionNotesCard extends ConsumerStatefulWidget {
   const _SessionNotesCard({
+    super.key,
     required this.sessionId,
     required this.initialNotes,
     required this.enabled,
