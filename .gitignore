@@ -36,6 +36,9 @@ migrate_working_dir/
 # Local isolated worktrees
 .worktrees/
 
+# Local design previews and their session access tokens
+.superpowers/
+
 # Source brand drops at repo root (canonical copies live in assets/branding/)
 /sanbo-icon.jpg
 /sanbo-main.jpg
