@@ -124,6 +124,79 @@ void main() {
     expect(tester.widget<PageView>(find.byType(PageView)).controller!.page, 1);
     expect(tester.takeException(), isNull);
   });
+  for (final (origin, multiTouch, cancelled) in [
+    (0, false, true),
+    (1, false, true),
+    (0, true, true),
+    (0, true, false),
+  ]) {
+    testWidgets(
+      'interrupted drag restores panel $origin (multiple: $multiTouch, cancel: $cancelled)',
+      (tester) async {
+        await tester.binding.setSurfaceSize(const Size(320, 640));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        var selected = origin;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: StatefulBuilder(
+                builder: (context, setState) => SessionSummaryPanels(
+                  index: selected,
+                  onPageChanged: (index) => setState(() => selected = index),
+                  route: const SizedBox(height: 200, child: Text('route')),
+                  week: const SizedBox(height: 200, child: Text('week')),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final first = await tester.startGesture(
+          const Offset(160, 140),
+          pointer: 1,
+        );
+        await first.moveBy(Offset(origin == 0 ? -220 : 220, 0));
+        await tester.pump(const Duration(milliseconds: 100));
+        if (multiTouch) {
+          final second = await tester.startGesture(
+            const Offset(200, 160),
+            pointer: 2,
+          );
+          if (cancelled) {
+            await first.cancel();
+          } else {
+            await first.up();
+          }
+          await second.up();
+        } else {
+          await first.cancel();
+        }
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<SessionSummaryPanels>(find.byType(SessionSummaryPanels))
+              .index,
+          origin,
+        );
+        expect(
+          tester.widget<PageView>(find.byType(PageView)).controller!.page,
+          origin,
+        );
+        // A fresh, ordinary gesture still works after cancellation.
+        await tester.dragFrom(
+          const Offset(160, 140),
+          Offset(origin == 0 ? -280 : 280, 0),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<SessionSummaryPanels>(find.byType(SessionSummaryPanels))
+              .index,
+          1 - origin,
+        );
+      },
+    );
+  }
   for (final scale in [1.0, 1.6, 2.0]) {
     testWidgets('320px scale $scale natural panel heights fit long content', (
       tester,

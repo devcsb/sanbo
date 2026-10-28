@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
@@ -30,6 +31,10 @@ class _SessionSummaryPanelsState extends State<SessionSummaryPanels>
   );
   final _focus = [FocusNode(), FocusNode()];
   final _heights = [0.0, 0.0];
+  final _pointers = <int>{};
+  int? _pointerOrigin;
+  var _restorePointerOrigin = false;
+  var _restoringGesture = false;
   @override
   void didUpdateWidget(covariant SessionSummaryPanels oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -60,6 +65,35 @@ class _SessionSummaryPanelsState extends State<SessionSummaryPanels>
   void _select(int index) {
     _focus[index].requestFocus();
     widget.onPageChanged(index);
+  }
+
+  void _beginPointer(int pointer) {
+    if (_pointers.isEmpty) _pointerOrigin = widget.index;
+    _pointers.add(pointer);
+    if (_pointers.length > 1) _restorePointerOrigin = true;
+  }
+
+  void _endPointer(int pointer, {bool cancelled = false}) {
+    if (!_pointers.remove(pointer)) return;
+    _restorePointerOrigin |= cancelled;
+    if (_pointers.isNotEmpty) return;
+    final origin = _pointerOrigin;
+    final restore = _restorePointerOrigin;
+    _pointerOrigin = null;
+    _restorePointerOrigin = false;
+    if (!restore || origin == null) return;
+    // Run after PageView processes the pointer end and starts any settling.
+    // Observing events here does not compete with the OS back gesture.
+    scheduleMicrotask(() {
+      if (!mounted || !_controller.hasClients) return;
+      _restoringGesture = true;
+      try {
+        _controller.jumpToPage(origin);
+      } finally {
+        _restoringGesture = false;
+      }
+      if (widget.index != origin) widget.onPageChanged(origin);
+    });
   }
 
   @override
@@ -121,43 +155,51 @@ class _SessionSummaryPanelsState extends State<SessionSummaryPanels>
           const SizedBox(height: 12),
           SizedBox(
             height: math.max(1, math.max(_heights[0], _heights[1])),
-            child: PageView(
-              key: const ValueKey('summary-pages'),
-              controller: _controller,
-              allowImplicitScrolling: true,
-              onPageChanged: (index) {
-                if (index != widget.index) widget.onPageChanged(index);
-              },
-              children: [
-                for (var i = 0; i < 2; i++)
-                  _KeepPanelAlive(
-                    child: ExcludeSemantics(
-                      excluding: widget.index != i,
-                      child: ExcludeFocus(
+            child: Listener(
+              onPointerDown: (event) => _beginPointer(event.pointer),
+              onPointerUp: (event) => _endPointer(event.pointer),
+              onPointerCancel: (event) =>
+                  _endPointer(event.pointer, cancelled: true),
+              child: PageView(
+                key: const ValueKey('summary-pages'),
+                controller: _controller,
+                allowImplicitScrolling: true,
+                onPageChanged: (index) {
+                  if (!_restoringGesture && index != widget.index) {
+                    widget.onPageChanged(index);
+                  }
+                },
+                children: [
+                  for (var i = 0; i < 2; i++)
+                    _KeepPanelAlive(
+                      child: ExcludeSemantics(
                         excluding: widget.index != i,
-                        child: TickerMode(
-                          enabled: widget.index == i,
-                          child: OverflowBox(
-                            alignment: Alignment.topCenter,
-                            minHeight: 0,
-                            maxHeight: double.infinity,
-                            child: _PanelMeasure(
-                              onHeight: (height) {
-                                if (mounted && _heights[i] != height) {
-                                  setState(() => _heights[i] = height);
-                                }
-                              },
-                              child: KeyedSubtree(
-                                key: ValueKey('summary-panel-$i'),
-                                child: i == 0 ? widget.route : widget.week,
+                        child: ExcludeFocus(
+                          excluding: widget.index != i,
+                          child: TickerMode(
+                            enabled: widget.index == i,
+                            child: OverflowBox(
+                              alignment: Alignment.topCenter,
+                              minHeight: 0,
+                              maxHeight: double.infinity,
+                              child: _PanelMeasure(
+                                onHeight: (height) {
+                                  if (mounted && _heights[i] != height) {
+                                    setState(() => _heights[i] = height);
+                                  }
+                                },
+                                child: KeyedSubtree(
+                                  key: ValueKey('summary-panel-$i'),
+                                  child: i == 0 ? widget.route : widget.week,
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 8),
