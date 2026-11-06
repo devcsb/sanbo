@@ -35,9 +35,28 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   var _isDeletingAll = false;
   var _isExportingBackup = false;
   var _isImportingBackup = false;
+  var _isReadingBackup = false;
+  BackupFileService? _readingFiles;
+  var _importStatus = '파일을 불러오고 있어요.';
+  String? _dataError;
+  bool _failedImport = false;
 
   bool get _isManagingData =>
       _isDeletingAll || _isExportingBackup || _isImportingBackup;
+
+  @override
+  void dispose() {
+    final files = _readingFiles;
+    _readingFiles = null;
+    if (files != null) {
+      unawaited(
+        files.cancelPick().catchError((Object _) {
+          // Activity teardown may already have closed the native channel.
+        }),
+      );
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -198,9 +217,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           icon: Icons.phone_iphone_rounded,
                           color: theme.colorScheme.secondary,
                         ),
-                        title: const Text('이 기기에만 저장'),
-                        subtitle: const Text(
-                          '산책 원본은 이 기기에 저장해요. 서버 동기화와 계정은 없어요.',
+                        title: const Text('기기 안에 보관'),
+                        subtitle: Text(
+                          defaultTargetPlatform == TargetPlatform.iOS
+                              ? '산보 서버에 동기화하지 않아요. iOS의 기기 백업 설정에 따라 기록이 OS 백업에 포함될 수 있어요.'
+                              : '산보 서버에 동기화하지 않아요. 직접 저장한 백업 파일은 선택한 저장 위치에 남아요.',
                         ),
                       ),
                     ],
@@ -311,6 +332,70 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                             ),
                           ),
                         ),
+                      if (_isExportingBackup || _isImportingBackup)
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              _isImportingBackup
+                                  ? _importStatus
+                                  : '백업 파일을 준비하고 있어요. 저장 위치 선택창에서 완료해 주세요.',
+                            ),
+                          ),
+                        ),
+                      if (_isReadingBackup)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: () async {
+                              try {
+                                await _readingFiles?.cancelPick();
+                              } on Object {
+                                if (context.mounted) {
+                                  _showDataError(
+                                    context,
+                                    '파일 읽기를 취소하지 못했어요',
+                                    const FormatException(
+                                      '선택창을 닫거나 잠시 후 다시 시도해 주세요.',
+                                    ),
+                                  );
+                                }
+                              }
+                            },
+                            child: const Text('파일 읽기 취소'),
+                          ),
+                        ),
+                      if (_dataError != null)
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _dataError!,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.error,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  '기존 기록과 원본 파일은 그대로 있어요. 파일을 확인한 뒤 다시 시도해 주세요.',
+                                ),
+                                TextButton(
+                                  onPressed: canManageData
+                                      ? () => _failedImport
+                                            ? _importBackup(context)
+                                            : _exportBackup(context)
+                                      : null,
+                                  child: const Text('다시 시도'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       if (_isDeletingAll)
                         Padding(
                           padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -324,7 +409,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                         child: Text(
-                          '앱 업데이트에는 이 기기의 기록이 유지됩니다. 앱 삭제·기기 변경 전에는 백업 파일을 별도로 보관하세요. 백업에는 정밀한 위치가 포함됩니다.',
+                          '앱 업데이트에는 이 기기의 기록이 유지됩니다. 앱 삭제·기기 변경 전에는 백업 파일을 별도로 보관하세요. 백업에는 정밀한 위치와 메모가 포함돼요. 기록 목록에 넣지 못한 위치 자료도 기기에 남을 수 있으며, 모든 기록 삭제로 함께 지울 수 있어요.',
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                           ),
@@ -431,10 +516,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     }
     final confirmed = await showDialog<bool>(
       context: context,
+      animationStyle: MediaQuery.disableAnimationsOf(context)
+          ? AnimationStyle.noAnimation
+          : null,
       builder: (ctx) => AlertDialog(
+        scrollable: true,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
         title: const Text('전체 백업 내보내기'),
         content: const Text(
-          '백업 파일에는 산책 시각, 정밀한 GPS 경로, 활동 수정 내용과 저장한 장소 이름이 포함됩니다. 신뢰할 수 있는 곳에만 보관하세요.',
+          '백업 파일에는 정밀한 GPS 경로, 시각, 메모, 활동 수정 내용과 장소가 포함돼요. 암호화되지 않은 파일이니 신뢰할 수 있는 곳에 보관해 주세요.',
         ),
         actions: [
           TextButton(
@@ -454,15 +544,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    setState(() => _isExportingBackup = true);
+    setState(() {
+      _isExportingBackup = true;
+      _dataError = null;
+    });
     try {
+      final files = ref.read(backupFileServiceProvider);
       final raw = await ref.read(walkRepositoryProvider).createBackupJson();
-      final path = await ref
-          .read(backupFileServiceProvider)
-          .save(
-            fileName: _backupFileName(DateTime.now()),
-            bytes: Uint8List.fromList(utf8.encode(raw)),
-          );
+      if (!mounted) return;
+      final path = await files.save(
+        fileName: _backupFileName(DateTime.now()),
+        bytes: Uint8List.fromList(utf8.encode(raw)),
+      );
       if (!context.mounted || path == null) return;
       ScaffoldMessenger.of(
         context,
@@ -483,9 +576,23 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       return;
     }
 
-    setState(() => _isImportingBackup = true);
+    setState(() {
+      _isImportingBackup = true;
+      _isReadingBackup = true;
+      _importStatus = '파일을 불러오고 있어요.';
+      _dataError = null;
+    });
     try {
-      final picked = await ref.read(backupFileServiceProvider).pick();
+      final files = ref.read(backupFileServiceProvider);
+      _readingFiles = files;
+      final picked = await files.pick();
+      _readingFiles = null;
+      if (mounted) {
+        setState(() {
+          _isReadingBackup = false;
+          _importStatus = '백업 내용을 확인하고 있어요.';
+        });
+      }
       if (picked == null || !context.mounted) return;
       // Parsing can expand a near-limit JSON file several times in memory.
       // Do it once off the UI isolate, then reuse the validated archive for
@@ -495,7 +602,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final sessionCount = archive.table('sessions').length;
       final confirmed = await showDialog<bool>(
         context: context,
+        animationStyle: MediaQuery.disableAnimationsOf(context)
+            ? AnimationStyle.noAnimation
+            : null,
         builder: (ctx) => AlertDialog(
+          scrollable: true,
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 24,
+          ),
           title: const Text('백업 가져오기'),
           content: Text(
             '${picked.name}\n\n산책 $sessionCount개를 확인했습니다. 기존 기록은 지우지 않고, 같은 산책 ID는 건너뜁니다.',
@@ -517,10 +632,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _showSessionInProgressMessage(context);
         return;
       }
+      setState(() => _importStatus = '기존 기록에 추가하고 있어요.');
+      final historyTick = ref.read(historyTickProvider.notifier);
       final result = await ref
           .read(walkRepositoryProvider)
           .importBackup(archive);
-      ref.read(historyTickProvider.notifier).state++;
+      if (historyTick.mounted) historyTick.state++;
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -535,7 +652,13 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         _showDataError(context, '백업을 가져오지 못했어요', error);
       }
     } finally {
-      if (mounted) setState(() => _isImportingBackup = false);
+      _readingFiles = null;
+      if (mounted) {
+        setState(() {
+          _isImportingBackup = false;
+          _isReadingBackup = false;
+        });
+      }
     }
   }
 
@@ -549,9 +672,10 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final detail = error is FormatException
         ? error.message.toString()
         : '다시 시도해 주세요.';
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text('$summary. $detail')));
+    setState(() {
+      _dataError = '$summary. $detail';
+      _failedImport = _isImportingBackup;
+    });
   }
 
   void _showSessionInProgressMessage(BuildContext context) {

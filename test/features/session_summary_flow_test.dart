@@ -81,7 +81,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('summary-tab-1')));
       await tester.pumpAndSettle();
       expect(find.text('주간 기록을 불러오지 못했어요'), findsOneWidget);
-      expect(find.byTooltip('데이터 복사 (NDJSON)'), findsOneWidget);
+      expect(find.byTooltip('원본 파일 저장'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('메모 저장'),
         350,

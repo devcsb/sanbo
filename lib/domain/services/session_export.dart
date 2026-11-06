@@ -5,9 +5,9 @@ import '../models/location_sample.dart';
 import '../models/minute_window.dart';
 import '../models/route_exclusion.dart';
 import '../models/walk_session.dart';
-import '../pipeline/segment_merger.dart';
+import '../pipeline/geo.dart';
+import 'backup_limits.dart';
 import 'completed_walk_metrics.dart';
-import 'place_memory.dart';
 import 'walk_stats.dart';
 
 /// Local export helpers (FR-16). Pure Dart — no Flutter/IO.
@@ -19,62 +19,51 @@ class SessionExport {
     required WalkSession session,
     List<MinuteWindow> windows = const [],
   }) {
-    final date = session.startedAt.toIso8601String().replaceFirst('T', ' ');
-    final km = ((session.totalDistanceM ?? 0) / 1000).toStringAsFixed(2);
-    final dur = formatDurationCompact(
-      Duration(seconds: session.durationS ?? 0),
+    final date = asLocal(
+      session.startedAt,
+      timezone: session.timezone,
+    ).toIso8601String().replaceFirst('T', ' ');
+    final distance = session.totalDistanceM;
+    final safeDistance =
+        distance != null &&
+        distance.isFinite &&
+        distance >= 0 &&
+        distance <= maxStoredMagnitude;
+    final elapsed = session.endedAt == null
+        ? 0
+        : positiveDurationSeconds(session.startedAt, session.endedAt!);
+    bool validTime(int? value) =>
+        value != null &&
+        value >= 0 &&
+        value <= elapsed &&
+        value <= 9223372036854;
+    String time(int? value) => validTime(value)
+        ? formatDurationCompact(Duration(seconds: value!))
+        : '측정되지 않음';
+    final average = completedAverageSpeedMps(
+      totalDistanceM: safeDistance ? distance : null,
+      movingTimeS: validTime(session.movingTimeS) ? session.movingTimeS : null,
     );
-    final averageSpeedMps = completedAverageSpeedMps(
-      totalDistanceM: session.totalDistanceM,
-      movingTimeS: session.movingTimeS,
-    );
-    final kmh = averageSpeedMps == null
-        ? null
-        : (averageSpeedMps * 3.6).toStringAsFixed(1);
-    final pace = pacePerKmLabel(averageSpeedMps);
-    final segments = SegmentMerger().merge(
-      windows,
-      sessionId: session.id,
-      sessionStart: session.startedAt,
-      sessionEnd: session.endedAt,
-    );
+    final speed = average == null ? null : average * 3.6;
+    final pace = pacePerKmLabel(average);
     final buf = StringBuffer()
       ..writeln('산보 산책 요약')
       ..writeln('시작: $date')
-      ..writeln('거리: $km km')
-      ..writeln('시간: $dur')
-      ..writeln(kmh == null ? '평균 속도: 측정되지 않음' : '평균 속도: $kmh km/h');
+      ..writeln('시각 기준: ${session.timezone}')
+      ..writeln(
+        safeDistance
+            ? '포함 거리: ${(distance / 1000).toStringAsFixed(2)} km'
+            : '포함 거리: 측정되지 않음',
+      )
+      ..writeln('전체 시간: ${time(session.durationS)}')
+      ..writeln('이동 시간: ${time(session.movingTimeS)}')
+      ..writeln(
+        speed == null || !speed.isFinite
+            ? '평균 속도: 측정되지 않음'
+            : '평균 속도: ${speed.toStringAsFixed(1)} km/h',
+      );
     if (pace != null) buf.writeln('페이스: $pace');
-    if (session.movingTimeS != null) {
-      buf.writeln(
-        '이동 시간: ${formatDurationCompact(Duration(seconds: session.movingTimeS!))}',
-      );
-    }
-    if (session.stationaryTimeS != null) {
-      buf.writeln(
-        '정지 시간: ${formatDurationCompact(Duration(seconds: session.stationaryTimeS!))}',
-      );
-    }
-    if (session.notes != null && session.notes!.trim().isNotEmpty) {
-      buf.writeln('메모: ${session.notes!.trim()}');
-    }
-    if (segments.isNotEmpty) {
-      buf.writeln('활동 구간:');
-      for (final seg in segments.take(12)) {
-        final start = _hhmm(seg.startAt);
-        final end = _hhmm(seg.endExclusive);
-        final range = seg.isMultiMinute ? '$start–$end' : start;
-        final placeName = segmentPlaceName(seg);
-        buf.writeln(
-          '· $range ${seg.label.labelKo}'
-          '${placeName == null ? '' : ' · $placeName'}',
-        );
-      }
-      if (segments.length > 12) {
-        buf.writeln('· …외 ${segments.length - 12}개 구간');
-      }
-    }
-    buf.writeln('— 산보 (로컬 기록)');
+    buf.writeln('산보 (로컬 기록)');
     return buf.toString().trimRight();
   }
 
@@ -186,10 +175,4 @@ class SessionExport {
     'speed_mps': s.speedMps,
     'is_filtered_out': s.isFilteredOut,
   };
-
-  String _hhmm(DateTime t) {
-    final h = t.hour.toString().padLeft(2, '0');
-    final m = t.minute.toString().padLeft(2, '0');
-    return '$h:$m';
-  }
 }

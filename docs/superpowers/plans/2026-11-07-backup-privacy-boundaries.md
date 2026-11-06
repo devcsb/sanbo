@@ -1,6 +1,6 @@
 # 백업 입력과 개인정보 반출 구현 계획
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 조작된 백업의 자원 확대와 집계 실패를 막고, 원본 반출을 명확한 파일 저장 흐름으로 바꾼다.
 
@@ -46,9 +46,9 @@
 
 **Interfaces:** Android `sanbo/backup_import` 채널의 `pick`은 소유 cache 경로/이름/작업 ID를 반환한다. `release`/`cancel`은 해당 작업만 정리한다. Dart는 제한된 stream으로 읽고 finally에서 release한다. iOS/desktop도 `openRead`로 제한한다.
 
-- [ ] null/거짓 크기, 한도+1, I/O 실패, timeout/취소/Activity 종료와 늦은 결과 테스트를 RED로 확인한다.
-- [ ] 시스템 문서 picker, 단일 읽기 작업, worker에서 제한된 복사, native 취소/descriptor 닫기, 작업별 cache 정리와 stale 회수를 구현한다.
-- [ ] Dart/native 관련 테스트와 Android debug 컴파일을 확인하고 커밋한다.
+- [x] null/거짓 크기, 한도+1, I/O 실패, timeout/취소/Activity 종료와 늦은 결과 테스트를 추가하고 실제 결함의 RED를 확인한다.
+- [x] 시스템 문서 picker, 단일 읽기 작업, worker에서 제한된 복사, native 취소/descriptor 닫기, 작업별 cache 정리와 stale 회수를 구현한다.
+- [x] Dart/native 관련 테스트와 Android debug 컴파일을 확인하고 커밋한다.
 
 ## Task 3: 통계 실패와 기록 목록 분리
 
@@ -66,16 +66,19 @@
 
 **Interfaces:** 원본 저장은 기존 `BackupFileService.save(fileName:,bytes:)`를 재사용하며 확장자별 desktop 필터를 쓴다. 단일 세션 파일은 전체 복원용이 아님을 설명한다.
 
-- [ ] 원본 저장 취소/완료/실패, clipboard 미사용, 요약 개인정보 제외를 RED로 확인한다.
-- [ ] 정밀 위치/메모/암호화 여부 안내, 중복 작업 방지, 작은 화면에서 스크롤 가능한 확인창과 진행 피드백을 구현한다.
-- [ ] OS 백업/실패 기록 보관 문구를 실제 동작에 맞추고, 기존 모션으로 상태 전환을 유지한다.
-- [ ] 320px/200%/다크/reduce-motion과 기존 메모/내보내기/구간 편집 회귀를 검증하고 커밋한다.
+- [x] 원본 저장 취소/완료/실패, clipboard 미사용, 요약 개인정보 제외를 RED로 확인한다.
+- [x] 정밀 위치/메모/암호화 여부 안내, 중복 작업 방지, 작은 화면에서 스크롤 가능한 확인창과 진행 피드백을 구현한다.
+- [x] OS 백업/실패 기록 보관 문구를 실제 동작에 맞추고, 기존 모션으로 상태 전환을 유지한다.
+- [x] 320px/200%/다크/reduce-motion과 기존 메모/내보내기/구간 편집 회귀를 검증하고 커밋한다.
 
 ## Task 5: 통합 검증과 완료 감사
 
 **Files:** 승인 설계 상태, `docs/superpowers/verification/2026-11-07-backup-privacy-boundaries.md`(신규), 관련 PRD/TRD 링크.
 
-- [ ] 원본 보존과 정상 복원, native 경계와 UI 상태를 교차 검토하고 발견한 실제 반례를 해결한다.
-- [ ] `bash scripts/run_quality_loop.sh --debug-apk` 및 변경 범위의 native 검사를 실행한다. 완료 문구/산출물을 직접 확인한다.
-- [ ] 합성 자료로 화면을 렌더링해 확인하고 필요한 디테일을 수정한다. 실제 기기 최대 크기/취소 검증의 한계를 구분해 기록한다.
-- [ ] 승인 설계의 모든 요구와 증거를 대조하고 한국어 커밋, 결과와 남은 한계를 전달한다. 실제 완료 전에는 goal을 완료 처리하지 않는다.
+- [x] 원본 보존과 정상 복원, native 경계와 UI 상태를 교차 검토하고 발견한 실제 반례를 해결한다.
+- [x] `bash scripts/run_quality_loop.sh --debug-apk` 및 변경 범위의 native 검사를 실행한다. 완료 문구/산출물을 직접 확인한다.
+- [x] 합성 자료로 화면을 렌더링해 확인하고 필요한 디테일을 수정한다. 실제 기기 최대 크기/취소 검증의 한계를 구분해 기록한다.
+- [x] 승인 설계의 모든 요구와 증거를 대조하고 한국어 커밋, 결과와 남은 한계를 전달한다. 실제 완료 전에는 goal을 완료 처리하지 않는다.
+
+완료 결과와 요구사항별 증거는 [검증 기록](../verification/2026-11-07-backup-privacy-boundaries.md)에 정리했다.
+작업 2와 4는 파일 서비스 인터페이스와 확인 흐름이 연결되어 같은 변경 묶음으로 커밋한다.

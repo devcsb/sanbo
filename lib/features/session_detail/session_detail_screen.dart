@@ -1,7 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, compute;
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter/services.dart';
@@ -26,6 +27,7 @@ import '../../domain/services/session_export.dart';
 import '../../domain/services/walk_stats.dart';
 import '../../domain/services/session_week_summary.dart';
 import '../../platform/place/place_lookup.dart';
+import '../../platform/backup/backup_file_service.dart';
 import '../../shared/widgets/app_motion.dart';
 import '../../shared/widgets/route_map.dart';
 import '../../shared/widgets/ui_bits.dart';
@@ -183,6 +185,7 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   var _isPlaying = false;
   var _summaryIndex = 0;
   var _routeScreenOpen = false;
+  var _isExportingSession = false;
   DateTime? _selectedSegmentStart;
   RoutePartitionResult? _playbackSource;
   List<RoutePlaybackPoint> _playbackCache = const [];
@@ -229,8 +232,17 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
               onPressed: commandBusy ? null : () => _copySummary(context, ref),
             ),
             IconButton(
-              tooltip: '데이터 복사 (NDJSON)',
-              icon: const Icon(Icons.data_object_rounded),
+              tooltip: '원본 파일 저장',
+              icon: _isExportingSession
+                  ? Semantics(
+                      liveRegion: true,
+                      label: '원본 파일을 준비하고 있어요',
+                      child: const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  : const Icon(Icons.file_download_outlined),
               onPressed: commandBusy
                   ? null
                   : () => _exportSession(context, ref),
@@ -1226,33 +1238,80 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   }
 
   Future<void> _exportSession(BuildContext context, WidgetRef ref) async {
+    if (_isExportingSession ||
+        ref.read(_detailCommandBusyProvider(sessionId))) {
+      return;
+    }
     final data = ref.read(sessionDetailProvider(sessionId)).valueOrNull;
     if (data == null) return;
-    ref.read(_detailCommandBusyProvider(sessionId).notifier).state = true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      animationStyle: MediaQuery.disableAnimationsOf(context)
+          ? AnimationStyle.noAnimation
+          : null,
+      builder: (ctx) => AlertDialog(
+        scrollable: true,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        title: const Text('원본 파일 저장'),
+        content: const Text(
+          '정밀한 GPS 경로와 시각, 제외된 원본, 메모와 장소가 포함돼요. 파일은 암호화되지 않으니 신뢰할 수 있는 곳에 보관해 주세요.\n\n이 파일은 개별 산책의 NDJSON 자료예요. 앱 전체 복원에는 설정의 .sanbo 백업을 사용해 주세요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('파일 저장'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final id = sessionId;
+    ref.read(_detailCommandBusyProvider(id).notifier).state = true;
+    setState(() => _isExportingSession = true);
     try {
-      const exporter = SessionExport();
-      final ndjson = exporter.toNdjson(
+      final bytes = await compute(_sessionExportBytes, (
         session: data.session,
         windows: data.windows,
         samples: data.samples,
         exclusions: data.exclusions,
-      );
-      // Copy the data itself, not a temp-file path: an app-private systemTemp
-      // path is unreachable to the user on mobile. Clipboard NDJSON is a real,
-      // pasteable export until a system share-sheet lands.
-      await Clipboard.setData(ClipboardData(text: ndjson));
-      if (!context.mounted) return;
+      ));
+      if (!mounted) return;
+      final destination = await ref
+          .read(backupFileServiceProvider)
+          .save(
+            fileName:
+                'sanbo-session-${DateFormat('yyyyMMdd-HHmmss').format(data.session.startedAt)}.ndjson',
+            bytes: bytes,
+          );
+      if (destination == null || !context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('산책 데이터(NDJSON)를 클립보드에 복사했어요.')),
+        const SnackBar(
+          content: Text('원본 파일을 저장했어요. 전체 복원에는 .sanbo 백업을 사용해 주세요.'),
+        ),
       );
-    } on Object {
+    } on Object catch (error) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('내보내기에 실패했어요. 다시 시도해 주세요.')),
+          SnackBar(
+            content: Text(
+              error is FormatException
+                  ? error.message
+                  : '파일을 저장하지 못했어요. 다시 시도해 주세요.',
+            ),
+          ),
         );
       }
     } finally {
-      ref.read(_detailCommandBusyProvider(sessionId).notifier).state = false;
+      if (mounted) {
+        if (sessionId == id) {
+          ref.read(_detailCommandBusyProvider(id).notifier).state = false;
+        }
+        setState(() => _isExportingSession = false);
+      }
     }
   }
 
@@ -1656,7 +1715,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   }
 
   String _movementDuration(int? seconds) {
-    if (seconds == null || seconds < 0) return '측정되지 않음';
+    if (seconds == null || seconds < 0 || seconds > 9223372036854) {
+      return '측정되지 않음';
+    }
     if (seconds == 0) return '0분';
     final duration = Duration(seconds: seconds);
     return [
@@ -1669,7 +1730,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
   }
 
   String _optionalDuration(int? seconds) {
-    if (seconds == null || seconds < 0) return '측정되지 않음';
+    if (seconds == null || seconds < 0 || seconds > 9223372036854) {
+      return '측정되지 않음';
+    }
     return _fmt(Duration(seconds: seconds));
   }
 }
@@ -2442,7 +2505,7 @@ class _SessionNotesCardState extends ConsumerState<_SessionNotesCard> {
           Text('그날의 한마디', style: theme.textTheme.titleSmall),
           const SizedBox(height: 4),
           Text(
-            '일기처럼 짧게 남겨 두세요. 이 기기에만 저장됩니다.',
+            '일기처럼 짧게 남겨 두세요. 앱 안에 보관되며 백업 파일에도 포함됩니다.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
             ),
@@ -2485,3 +2548,22 @@ class _SessionNotesCardState extends ConsumerState<_SessionNotesCard> {
     );
   }
 }
+
+Uint8List _sessionExportBytes(
+  ({
+    WalkSession session,
+    List<MinuteWindow> windows,
+    List<LocationSample> samples,
+    List<RouteExclusion> exclusions,
+  })
+  data,
+) => Uint8List.fromList(
+  utf8.encode(
+    const SessionExport().toNdjson(
+      session: data.session,
+      windows: data.windows,
+      samples: data.samples,
+      exclusions: data.exclusions,
+    ),
+  ),
+);

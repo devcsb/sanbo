@@ -63,13 +63,19 @@ abstract final class AppBackupCodec {
     if (bytes.length > maxBackupBytes) {
       throw const FormatException('백업 파일이 50MB 제한을 초과합니다');
     }
-    return decode(utf8.decode(bytes, allowMalformed: false));
+    return _decodeValidated(utf8.decode(bytes, allowMalformed: false));
   }
 
   static AppBackupArchive decode(String raw) {
     if (utf8.encode(raw).length > maxBackupBytes) {
       throw const FormatException('백업 파일이 50MB 제한을 초과합니다');
     }
+    return _decodeValidated(raw);
+  }
+
+  // decodeBytes already checked the original UTF-8 byte length. Avoid encoding
+  // a near-limit file a second time just to repeat that allocation/check.
+  static AppBackupArchive _decodeValidated(String raw) {
     final decoded = jsonDecode(raw);
     if (decoded is! Map<String, dynamic>) {
       throw const FormatException('백업 최상위 형식이 올바르지 않습니다');

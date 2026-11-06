@@ -1987,7 +1987,14 @@ void main() {
     final samples = await repo.getSamples(session.id);
     expect(samples, hasLength(1));
     expect(samples.single.isFilteredOut, isTrue);
-    expect(container.read(sessionControllerProvider).notice, contains('저장하지'));
+    expect(
+      container.read(sessionControllerProvider).notice,
+      contains('기록 목록에 넣지 못했어요'),
+    );
+    expect(
+      container.read(sessionControllerProvider).notice,
+      contains('기기에 보관돼요'),
+    );
   });
 
   test('engine start failure keeps the new session recoverable', () async {

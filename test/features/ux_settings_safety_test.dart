@@ -24,6 +24,9 @@ class _FakeBackupFileService implements BackupFileService {
   String? savedName;
 
   @override
+  Future<void> cancelPick() async {}
+
+  @override
   Future<PickedBackupFile?> pick() async => toPick;
 
   @override

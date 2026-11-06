@@ -4,6 +4,7 @@ import 'package:sanbo/domain/models/walk_session.dart';
 import 'package:sanbo/domain/models/tracking_mode.dart';
 import 'package:sanbo/domain/services/session_pipeline.dart';
 import '../helpers/test_db.dart';
+import '../helpers/route_exclusion_fixture.dart';
 
 Map<String, Object?> row({
   String end = '2026-11-07T00:01:00Z',
@@ -38,6 +39,38 @@ String backup(Map<String, Object?> session) => jsonEncode({
 });
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('rejected numeric backups preserve all five populated tables', () async {
+    final repo = await openTestRepository();
+    addTearDown(repo.close);
+    final fixture = await seedCompletedTwoMinuteWalk(repo);
+    await repo.excludeRouteSegment(
+      sessionId: fixture.session.id,
+      segment: fixture.segments.last,
+    );
+    final at = DateTime.utc(2026, 11, 7);
+    final before = await repo.createBackupJson(exportedAt: at);
+    final tables =
+        (jsonDecode(before) as Map<String, dynamic>)['tables']
+            as Map<String, dynamic>;
+    expect(tables, hasLength(5));
+    for (final rows in tables.values) {
+      expect(rows as List<dynamic>, isNotEmpty);
+    }
+    for (final input in [
+      row(duration: 9223372036854775807),
+      row(distance: 1e308),
+      row(end: '3026-11-07T00:00:00Z'),
+      row(moving: 50, stationary: 20),
+      row(duration: 1e100),
+      row(moving: 61),
+    ]) {
+      await expectLater(
+        repo.importBackupJson(backup(input)),
+        throwsFormatException,
+      );
+      expect(await repo.createBackupJson(exportedAt: at), before);
+    }
+  });
   for (final input in [
     row(duration: 9223372036854775807),
     row(distance: 1e308),

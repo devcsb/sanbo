@@ -1924,7 +1924,7 @@ class SessionController extends Notifier<LiveSessionState> {
         _lastAccuracyM = null;
         _validSampleCount = 0;
         state = const LiveSessionState(
-          notice: 'GPS를 받지 못해 산책을 저장하지 않았어요. 야외에서 다시 시작해 주세요.',
+          notice: 'GPS가 불확실해 기록 목록에 넣지 못했어요. 받은 위치 자료는 기기에 보관돼요.',
         );
         return null;
       }

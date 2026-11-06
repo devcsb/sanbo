@@ -958,7 +958,7 @@ NFR-02: 기본 balanced; 정밀 모드만 CPU WakeLock을 유지한다. 실기�
 | 삭제 | session cascade delete samples/windows/places 고아 정리 (FR-18) |
 | Export | 사용자 명시; 파일에 schema_version; 공유 시트는 OS 공유 |
 | OS 자동 백업 | Android `allowBackup=false` + Android 11/12+ 백업 규칙으로 앱 데이터 전체 제외. 앱 업데이트 자체는 샌드박스 DB를 유지한다. iOS 출시 전 exclude-backup 별도 적용 — 위치 민감 |
-| 수동 전체 백업 | 암호화하지 않은 `.sanbo` JSON, 50MB/테이블 50만 행 상한. 완료 세션·원본 위치·윈도우·수정·메모·참조 장소 포함. 내보내기 전 정밀 위치 경고 |
+| 수동 전체 백업 | 암호화하지 않은 `.sanbo` JSON, 50MiB/테이블 50만 행 상한. 완료 세션·원본 위치·윈도우·수정·메모·참조 장소 포함. 내보내기 전 정밀 위치 경고 |
 | 복원 | 기존 세션 ID는 건너뛰는 병합. 좌표·범위·FK·버전을 검증한 단일 SQLite transaction; 오류 시 전체 rollback |
 | DB 마이그레이션 | 스키마 버전 증가형 `onUpgrade`, FK 활성화, 열기 후 `quick_check`; 미래 버전 downgrade 금지 |
 | 암호화 | 기기 암호화 의존; SQLCipher는 P2 |
@@ -1009,6 +1009,10 @@ session meta line (JSON)
 one raw LocationSample per line (NDJSON), route exclusion records,
 and minute windows including user_exclusion_id
 ```
+
+개별 NDJSON은 확인 후 시스템 파일 저장기로 내보내며 원본을 클립보드에 복사하지 않는다.
+일반 요약은 지표와 시각만 포함한다. 데이터 경계와 보관 안내의 승인 계약은
+[백업 입력과 데이터 반출 설계](superpowers/specs/2026-10-25-import-and-privacy-boundaries-design.md)를 따른다.
 
 ### 9.3 전체 백업 포맷
 
