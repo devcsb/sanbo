@@ -1,4 +1,5 @@
 import '../services/backup_limits.dart';
+import '../services/gps_jitter_assessment.dart';
 import '../models/location_sample.dart';
 import '../models/minute_window.dart';
 import '../models/route_exclusion.dart';
@@ -310,6 +311,11 @@ class WindowAggregator {
       startLon: sorted.isEmpty ? null : sorted.first.longitude,
       endLat: sorted.isEmpty ? null : sorted.last.latitude,
       endLon: sorted.isEmpty ? null : sorted.last.longitude,
+      evidence: [
+        // A removed fix breaks continuity. Do not infer across that boundary.
+        if (rawSampleCount == sorted.length && hasSuspectedGpsJitter(sorted))
+          MinuteWindow.gpsJitterEvidence,
+      ],
     );
     return _withInference(draft);
   }

@@ -302,6 +302,9 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
             final hasAutomaticHighSpeedExclusion = data.exclusions.any(
               (exclusion) => exclusion.reason == RouteExclusionReason.highSpeed,
             );
+            final needsGpsReview = data.windows.any(
+              (window) => window.needsGpsReview,
+            );
             final playbackIndex = playbackPoints.isEmpty
                 ? 0
                 : _playbackIndex < 0
@@ -409,14 +412,16 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                           ],
                         ),
                       ),
-                      if (hasAutomaticHighSpeedExclusion) ...[
+                      if (hasAutomaticHighSpeedExclusion || needsGpsReview) ...[
                         const SizedBox(height: 16),
                         SoftPanel(
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Icon(
-                                Icons.auto_awesome_outlined,
+                                needsGpsReview
+                                    ? Icons.gps_not_fixed_rounded
+                                    : Icons.auto_awesome_outlined,
                                 color: theme.colorScheme.primary,
                               ),
                               const SizedBox(width: 12),
@@ -424,13 +429,26 @@ class _SessionDetailScreenState extends ConsumerState<SessionDetailScreen> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      '빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.',
-                                      style: theme.textTheme.bodyMedium
-                                          ?.copyWith(
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                    ),
+                                    if (hasAutomaticHighSpeedExclusion)
+                                      Text(
+                                        '빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.',
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                    if (needsGpsReview) ...[
+                                      Text(
+                                        'GPS 확인이 필요한 구간이 있어요',
+                                        style: theme.textTheme.bodyMedium
+                                            ?.copyWith(
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                      ),
+                                      const Text(
+                                        'GPS 흔들림으로 거리와 속도가 실제 이동과 다를 수 있어요.',
+                                      ),
+                                    ],
                                     TextButton(
                                       onPressed: _revealTimeline,
                                       child: const Text('구간 살펴보기'),

@@ -4,6 +4,8 @@ enum WindowQuality { high, medium, low, gap }
 
 /// One wall-clock minute aggregation (Sanbo first-class record).
 class MinuteWindow {
+  static const gpsJitterEvidence = 'gps_signal:jitter_suspected_v1';
+
   /// Persisted on excluded windows when metrics use the retained start fix.
   /// Missing evidence keeps historical detail geometry at its saved contract.
   static const exclusionStartEndpointEvidence =
@@ -71,6 +73,9 @@ class MinuteWindow {
   ActivityLabel get displayLabel => userLabel ?? hypothesisLabel;
 
   bool get isUserExcluded => userExclusionId != null;
+
+  bool get needsGpsReview =>
+      !isUserExcluded && !userConfirmed && evidence.contains(gpsJitterEvidence);
 
   /// Returns a display-only place enrichment without changing persistence.
   /// Detail providers can safely reuse a known local place while keeping read

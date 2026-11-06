@@ -716,6 +716,13 @@ LocationSample 수집
 4. 샘플 0: `quality=gap`, distance=0, hypothesis=`unknown`, confidence=0.  
 5. **부분 분**: `duration_s = actual`, `partial=true`.
 
+연속 관측에서 위치 오차 안의 반복 왕복이 확인되면 `gps_signal:jitter_suspected_v1`
+evidence와 낮은 확신의 unknown 추정을 남긴다. 사용자 확정이 표시 우선이며 원본,
+거리/시간과 품질 등급을 바꾸지 않는다. 필터 거부가 들어간 분을 가로질러 감지하지 않는다.
+구체적인 한계와 기준은 [GPS 신뢰도 후속 설계](superpowers/specs/2026-11-07-gps-quality-followup-design.md)에 둔다.
+RoutePartitioner는 정렬 뒤 포함 검사와 교차 검사에 각각 전진 커서를 사용해
+O(샘플 수 + 제외 수)로 순회한다. 보존 경계와 제외/공백 단절 계약은 동일하다.
+
 **매핑**: FR-04, FR-05, G1.
 
 ### 4.4 WindowMetrics
@@ -724,7 +731,7 @@ LocationSample 수집
 - **avg_speed_mps**:  
   - 기본: `distance_m / max(duration_s - estimated_stationary_s, 1)` (이동 시간 분모)  
   - 대안 표시용: `distance_m / duration_s` (전체 평균)  
-- **stationary**: 순간 속도 < `stationary_speed_mps` (default **0.3**) 인 구간의 시간 비율; 또는 연속 점 이동 < `stationary_radius_m` (default **8m**) 유지 시간.  
+- **stationary**: 신뢰 가능한 경로 선분 속도 < `stationary_speed_mps` (default **0.3**) 인 관측 시간의 비율. 과거 문서의 8m 반경 기반 정지 판정은 현재 구현에 포함하지 않는다.
 - **세션 롤업 거리**: 윈도우 distance **합을 쓰지 않음**. 세션 전체 필터 샘플 경로를 다시 한 번 계산 (PRD 재검증 축 B).
 
 **페이스** (선택 표시): `pace_s_per_km = 1000 / avg_speed_mps` when speed > ε.

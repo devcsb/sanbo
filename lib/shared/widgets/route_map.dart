@@ -413,26 +413,30 @@ class _RouteMapState extends State<RouteMap> {
                       ),
                     Positioned(
                       left: 10,
+                      right: 10,
                       bottom: 8,
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainer
-                                .withValues(alpha: 0.94),
-                            borderRadius: BorderRadius.circular(
-                              AppTheme.radiusSmall,
+                      child: Align(
+                        alignment: Alignment.bottomLeft,
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainer
+                                  .withValues(alpha: 0.94),
+                              borderRadius: BorderRadius.circular(
+                                AppTheme.radiusSmall,
+                              ),
                             ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            child: Text(
-                              RouteMap.attribution,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                                fontSize: 10,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              child: Text(
+                                RouteMap.attribution,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontSize: 10,
+                                ),
                               ),
                             ),
                           ),
