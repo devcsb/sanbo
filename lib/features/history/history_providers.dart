@@ -49,7 +49,7 @@ class HistorySnapshot {
   });
 
   final List<WalkSession> sessions;
-  final WalkStats stats;
+  final WalkStats? stats;
   final bool hasMore;
 }
 
@@ -61,11 +61,23 @@ final completedHistoryProvider = FutureProvider<HistorySnapshot>((ref) async {
   final loaded = await repo.listCompleted(limit: requested + 1);
   final hasMore = loaded.length > requested;
   final sessions = hasMore ? loaded.sublist(0, requested) : loaded;
-  return HistorySnapshot(
-    sessions: sessions,
-    stats: await repo.completedStats(),
-    hasMore: hasMore,
-  );
+  WalkStats? stats;
+  try {
+    final value = await repo.completedStats();
+    if (value.totalDistanceM.isFinite &&
+        value.totalDistanceM >= 0 &&
+        value.longestDistanceM.isFinite &&
+        value.longestDistanceM >= 0 &&
+        value.totalDurationS >= 0 &&
+        value.totalDurationS <= 9223372036854 &&
+        value.longestDurationS >= 0 &&
+        value.longestDurationS <= 9223372036854) {
+      stats = value;
+    }
+  } on Object {
+    // Statistics are optional; damaged legacy totals must not hide user records.
+  }
+  return HistorySnapshot(sessions: sessions, stats: stats, hasMore: hasMore);
 });
 
 final dailyActivityProvider = FutureProvider<DailyActivitySnapshot>((
