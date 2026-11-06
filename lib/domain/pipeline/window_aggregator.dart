@@ -1,3 +1,4 @@
+import '../services/backup_limits.dart';
 import '../models/location_sample.dart';
 import '../models/minute_window.dart';
 import '../models/route_exclusion.dart';
@@ -44,6 +45,7 @@ class WindowAggregator {
     required DateTime sessionEnd,
     String? timezone,
   }) {
+    validateProcessingSpan(sessionStart, sessionEnd);
     if (!sessionEnd.isAfter(sessionStart)) return const [];
 
     final startLocal = asLocal(sessionStart, timezone: timezone);
@@ -78,6 +80,9 @@ class WindowAggregator {
     final windows = <MinuteWindow>[];
     var cursor = floorToMinute(startLocal, timezone: timezone);
     while (cursor.isBefore(endLocal)) {
+      if (windows.length >= maxProcessingWindows) {
+        throw const FormatException('산책의 계산 범위를 초과했어요');
+      }
       final windowEnd = cursor.add(const Duration(minutes: 1));
       final spanStart = startLocal.isAfter(cursor) ? startLocal : cursor;
       final spanEnd = endLocal.isBefore(windowEnd) ? endLocal : windowEnd;
@@ -190,21 +195,21 @@ class WindowAggregator {
         final byStart = a.startAt.compareTo(b.startAt);
         return byStart != 0 ? byStart : a.id.compareTo(b.id);
       });
+    var exclusionIndex = 0;
     var cursor = floorToMinute(sessionStart, timezone: timezone);
     final endLocal = asLocal(sessionEnd, timezone: timezone);
     while (cursor.isBefore(endLocal)) {
       final windowEnd = cursor.add(const Duration(minutes: 1));
       final spanStart = _later(cursor, sessionStart);
       final spanEnd = _earlier(windowEnd, sessionEnd);
-      final touching = ordered
-          .where((exclusion) => exclusion.overlaps(spanStart, spanEnd))
-          .toList(growable: false);
-      if (touching.isNotEmpty) {
-        // v2 backups may contain partial or disjoint exclusions in one minute
-        // even though newly-created route edits are authoritative full-minute
-        // selections. The row has one representative ID, so preserve the
-        // stable first touching ID for that legacy shape.
-        result[cursor] = touching.first.id;
+      while (exclusionIndex < ordered.length &&
+          !ordered[exclusionIndex].endAt.isAfter(spanStart)) {
+        exclusionIndex++;
+      }
+      if (exclusionIndex < ordered.length &&
+          ordered[exclusionIndex].overlaps(spanStart, spanEnd)) {
+        // Stable first touching ID, including legacy partial-minute exclusions.
+        result[cursor] = ordered[exclusionIndex].id;
       }
       cursor = windowEnd;
     }

@@ -23,6 +23,7 @@ import '../domain/services/session_deadline.dart';
 import '../domain/services/session_guard.dart';
 import '../domain/services/session_week_summary.dart';
 import '../domain/services/session_pipeline.dart';
+import '../domain/services/backup_limits.dart';
 import '../domain/services/walk_stats.dart';
 import 'app_database.dart';
 
@@ -1801,18 +1802,10 @@ WHERE w.session_id = ?
           if (exclusion == null || exclusion['session_id'] != sessionId) {
             throw const FormatException('구간 제외 참조가 올바르지 않습니다');
           }
-          final touching = validatedExclusions
-              .where((candidate) {
-                if (candidate['session_id'] != sessionId) return false;
-                final candidateStart = _requiredDate(candidate, 'start_at');
-                final candidateEnd = _requiredDate(candidate, 'end_at');
-                return actualWindowStart.isBefore(candidateEnd) &&
-                    candidateStart.isBefore(actualWindowEnd);
-              })
-              .toList(growable: false);
-          if (!touching.any(
-            (candidate) => candidate['id'] == userExclusionId,
-          )) {
+          final exclusionStart = _requiredDate(exclusion, 'start_at');
+          final exclusionEnd = _requiredDate(exclusion, 'end_at');
+          if (!actualWindowStart.isBefore(exclusionEnd) ||
+              !exclusionStart.isBefore(actualWindowEnd)) {
             throw const FormatException('제외 범위 밖의 구간이 있습니다');
           }
         }
@@ -2031,8 +2024,29 @@ WHERE w.session_id = ?
       timezone: timezone,
     ).toUtc();
     final endedAt = _requiredDate(raw, 'ended_at', timezone: timezone).toUtc();
-    if (endedAt.isBefore(startedAt)) {
-      throw const FormatException('종료 시각이 시작 시각보다 빠른 산책이 있습니다');
+    final elapsedSeconds = validateProcessingSpan(startedAt, endedAt);
+    final duration = _optionalInt(
+      raw,
+      'duration_s',
+      min: 0,
+      max: elapsedSeconds,
+    );
+    final moving = _optionalInt(
+      raw,
+      'moving_time_s',
+      min: 0,
+      max: elapsedSeconds,
+    );
+    final stationary = _optionalInt(
+      raw,
+      'stationary_time_s',
+      min: 0,
+      max: elapsedSeconds,
+    );
+    if (moving != null &&
+        stationary != null &&
+        moving + stationary > elapsedSeconds + 1) {
+      throw const FormatException('이동 시간과 정지 시간이 산책 범위를 초과합니다');
     }
     final status = _requiredString(raw, 'status', maxLength: 30);
     if (status != SessionStatus.completed.name) {
@@ -2050,11 +2064,16 @@ WHERE w.session_id = ?
       'tracking_mode': trackingMode,
       'timezone': timezone,
       'total_distance_m': _optionalDouble(raw, 'total_distance_m', min: 0),
-      'duration_s': _optionalInt(raw, 'duration_s', min: 0),
-      'moving_time_s': _optionalInt(raw, 'moving_time_s', min: 0),
-      'stationary_time_s': _optionalInt(raw, 'stationary_time_s', min: 0),
+      'duration_s': duration,
+      'moving_time_s': moving,
+      'stationary_time_s': stationary,
       'avg_speed_mps': _optionalDouble(raw, 'avg_speed_mps', min: 0),
-      'valid_sample_count': _optionalInt(raw, 'valid_sample_count', min: 0),
+      'valid_sample_count': _optionalInt(
+        raw,
+        'valid_sample_count',
+        min: 0,
+        max: maxStoredSampleCount,
+      ),
       'median_accuracy_m': _optionalDouble(raw, 'median_accuracy_m', min: 0),
       'notes': _optionalString(raw, 'notes', maxLength: 10000),
     };
@@ -2104,6 +2123,13 @@ WHERE w.session_id = ?
     if (value is! num || !value.isFinite || value != value.roundToDouble()) {
       throw FormatException('$key 정수가 올바르지 않습니다');
     }
+    final bound =
+        max ?? (key.endsWith('sample_count') ? maxStoredSampleCount : null);
+    if ((value is! int && value.abs() > 9007199254740991) ||
+        (min != null && value < min) ||
+        (bound != null && value > bound)) {
+      throw FormatException('$key 범위가 올바르지 않습니다');
+    }
     final result = value.toInt();
     if ((min != null && result < min) || (max != null && result > max)) {
       throw FormatException('$key 범위가 올바르지 않습니다');
@@ -2132,7 +2158,9 @@ WHERE w.session_id = ?
       throw FormatException('$key 숫자가 올바르지 않습니다');
     }
     final result = value.toDouble();
-    if ((min != null && result < min) || (max != null && result > max)) {
+    if (result.abs() > maxStoredMagnitude ||
+        (min != null && result < min) ||
+        (max != null && result > max)) {
       throw FormatException('$key 범위가 올바르지 않습니다');
     }
     return result;
@@ -2400,7 +2428,9 @@ WHERE w.session_id = ?
     if (value == null) return null;
     if (value is! num || !value.isFinite) return null;
     final result = value.toDouble();
-    if ((min != null && result < min) || (max != null && result > max)) {
+    if (result.abs() > maxStoredMagnitude ||
+        (min != null && result < min) ||
+        (max != null && result > max)) {
       return null;
     }
     return result;

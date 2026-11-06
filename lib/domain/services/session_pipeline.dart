@@ -1,3 +1,4 @@
+import 'backup_limits.dart';
 import '../models/location_sample.dart';
 import '../models/minute_window.dart';
 import '../models/route_exclusion.dart';
@@ -81,6 +82,7 @@ class SessionPipeline {
     if (endedAt == null || session.status != SessionStatus.completed) {
       throw StateError('완료된 산책만 다시 계산할 수 있습니다');
     }
+    validateProcessingSpan(session.startedAt, endedAt);
     final normalized =
         exclusions.map((item) => item.clampedTo(session)).toList()
           ..sort((a, b) => a.startAt.compareTo(b.startAt));
