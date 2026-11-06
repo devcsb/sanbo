@@ -756,10 +756,20 @@ void main() {
     await settle(tester);
     await settle(tester);
 
+    await tester.scrollUntilVisible(
+      find.text('빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(
       find.text('빠른 이동으로 추정한 구간을 자동 제외했어요. 산책한 구간이라면 제외를 취소할 수 있어요.'),
       findsOneWidget,
     );
+    await tester.ensureVisible(find.text('구간 살펴보기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('구간 살펴보기'));
+    await tester.pumpAndSettle();
+    expect(find.text('활동 흐름').hitTestable(), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('산책에서 제외됨'),
       300,
@@ -926,6 +936,11 @@ void main() {
 
       repo.releaseFailure.complete();
       await settle(tester);
+      await tester.scrollUntilVisible(
+        oldMetric,
+        -300,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(oldMetric, findsOneWidget);
       await tester.drag(find.byType(ListView).first, const Offset(0, 1000));
       await tester.pump();

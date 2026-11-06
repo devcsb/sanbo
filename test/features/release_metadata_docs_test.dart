@@ -8,12 +8,12 @@ void main() {
     () {
       final pubspec = File('pubspec.yaml').readAsStringSync();
       final release = File(
-        'docs/release/2026-10-18-security-hardening-release.md',
+        'docs/release/2026-11-07-measurement-privacy-release.md',
       ).readAsStringSync();
 
-      expect(pubspec, contains('version: 0.9.4+18'));
+      expect(pubspec, contains('version: 0.9.5+19'));
       for (final contract in [
-        '0.9.4+18',
+        '0.9.5+19',
         'app-release.aab',
         'app-arm64-v8a-release.apk',
         'SHA-256',

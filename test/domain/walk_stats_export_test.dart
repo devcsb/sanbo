@@ -175,7 +175,7 @@ void main() {
   });
 
   group('SessionExport', () {
-    test('human summary includes distance time and notes', () {
+    test('human summary includes metrics and excludes private notes', () {
       final session = _session(
         id: 'x',
         distance: 2500,
@@ -185,7 +185,7 @@ void main() {
       final text = const SessionExport().humanSummary(session: session);
       expect(text, contains('산보 산책 요약'));
       expect(text, contains('2.50 km'));
-      expect(text, contains('강변 산책'));
+      expect(text, isNot(contains('강변 산책')));
       expect(text, contains('로컬 기록'));
     });
 
@@ -205,7 +205,7 @@ void main() {
       expect(text, isNot(contains('평균 속도: 1.8 km/h')));
     });
 
-    test('human summary includes a confirmed place memory', () {
+    test('raw export preserves place memory while summary omits it', () {
       final session = _session(id: 'place', distance: 10, duration: 120);
       final start = DateTime(2026, 7, 18, 9);
       final windows = [
@@ -232,7 +232,7 @@ void main() {
         session: session,
         windows: windows,
       );
-      expect(text, contains('강변 벤치'));
+      expect(text, isNot(contains('강변 벤치')));
 
       final json = const SessionExport().toJsonDocument(
         session: session,

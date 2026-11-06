@@ -179,6 +179,8 @@ void main() {
       greaterThan(1),
     );
 
+    await tester.ensureVisible(find.byTooltip('경로 재생'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('경로 재생'));
     await tester.pump();
     expect(find.byTooltip('경로 재생 일시정지'), findsOneWidget);
@@ -187,6 +189,22 @@ void main() {
     expect(advancedSlider.value, greaterThan(0));
     final advancedMap = tester.widget<RouteMap>(find.byType(RouteMap));
     expect(identical(advancedMap.geometry, initialMap.geometry), isTrue);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('summary-tab-1')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('summary-tab-1')));
+    await tester.pumpAndSettle();
+    final hiddenSlider = find.byKey(
+      const ValueKey('route-playback-slider'),
+      skipOffstage: false,
+    );
+    final pausedValue = tester.widget<Slider>(hiddenSlider).value;
+    await tester.pump(const Duration(seconds: 2));
+    expect(tester.widget<Slider>(hiddenSlider).value, pausedValue);
+    await tester.tap(find.byKey(const ValueKey('summary-tab-0')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Slider>(hiddenSlider).value, pausedValue);
+    expect(find.byTooltip('경로 재생'), findsOneWidget);
 
     final segmentFinder = find.byWidgetPredicate((widget) {
       final key = widget.key;

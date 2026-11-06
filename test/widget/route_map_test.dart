@@ -10,6 +10,35 @@ import 'package:sanbo/domain/services/route_playback.dart';
 import 'package:sanbo/shared/widgets/route_map.dart';
 
 void main() {
+  testWidgets('map attribution wraps inside narrow maps at double text size', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: const Scaffold(
+          body: Center(
+            child: SizedBox(
+              width: 260,
+              child: RouteMap(offlinePreview: true, fragments: []),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final credits = find.text(RouteMap.attribution);
+    final map = tester.getRect(find.byType(RouteMap));
+    expect(tester.getRect(credits).right, lessThanOrEqualTo(map.right));
+    expect(tester.getRect(credits).left, greaterThanOrEqualTo(map.left));
+    expect(MediaQuery.textScalerOf(tester.element(credits)).scale(10), 20);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('RouteMap draws each route fragment as a separate polyline', (
     tester,
   ) async {

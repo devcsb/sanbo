@@ -8,12 +8,14 @@ String timelineWindowSubtitle(MinuteWindow w) {
   }
   final meters = _formatMeters(w.distanceM);
   final kmh = (w.avgSpeedMps * 3.6).toStringAsFixed(1);
-  final qualityNote = switch (w.quality) {
-    WindowQuality.low => ' · GPS 약함',
-    WindowQuality.medium => '',
-    WindowQuality.high => '',
-    WindowQuality.gap => '',
-  };
+  final qualityNote = w.needsGpsReview
+      ? ' · GPS 확인 필요'
+      : switch (w.quality) {
+          WindowQuality.low => ' · GPS 약함',
+          WindowQuality.medium => '',
+          WindowQuality.high => '',
+          WindowQuality.gap => '',
+        };
   // Confidence is shown as the 추정 chip on the row title — keep subtitle lean.
   return '$meters · $kmh km/h$qualityNote';
 }
@@ -30,12 +32,14 @@ String timelineSegmentSubtitle(ActivitySegment segment) {
   }
   final meters = _formatMeters(segment.distanceM);
   final kmh = (segment.avgSpeedMps * 3.6).toStringAsFixed(1);
-  final qualityNote = switch (segment.quality) {
-    WindowQuality.low => ' · GPS 약함',
-    WindowQuality.medium => '',
-    WindowQuality.high => '',
-    WindowQuality.gap => '',
-  };
+  final qualityNote = segment.windows.any((window) => window.needsGpsReview)
+      ? ' · GPS 확인 필요'
+      : switch (segment.quality) {
+          WindowQuality.low => ' · GPS 약함',
+          WindowQuality.medium => '',
+          WindowQuality.high => '',
+          WindowQuality.gap => '',
+        };
   if (segment.isMultiMinute) {
     return '${segment.minuteCount}분 · $meters · $kmh km/h$qualityNote';
   }

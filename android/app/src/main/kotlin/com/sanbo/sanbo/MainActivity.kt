@@ -76,15 +76,19 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingSessionId: String? = null
     private var pendingPermissionResult: MethodChannel.Result? = null
     private var backupExportHandler: BackupExportHandler? = null
+    private var backupImportHandler: BackupImportHandler? = null
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         if (backupExportHandler?.onActivityResult(requestCode, resultCode, data) == true) return
+        if (backupImportHandler?.onActivityResult(requestCode, resultCode, data) == true) return
         super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onDestroy() {
         backupExportHandler?.close()
         backupExportHandler = null
+        backupImportHandler?.close()
+        backupImportHandler = null
         super.onDestroy()
     }
 
@@ -94,6 +98,8 @@ class MainActivity : FlutterFragmentActivity() {
         backupExportHandler = BackupExportHandler(this).also {
             it.attach(flutterEngine.dartExecutor.binaryMessenger)
         }
+        backupImportHandler?.close()
+        backupImportHandler = BackupImportHandler(this).also { it.attach(flutterEngine.dartExecutor.binaryMessenger) }
         createNotificationChannel()
 
         // A configuration change can create a new Dart messenger. Never reuse

@@ -73,6 +73,8 @@ abstract final class RoutePartitioner {
     final fragments = <RouteFragment>[];
     final segments = <RouteSegment>[];
     var current = <LocationSample>[];
+    var pointExclusionIndex = 0;
+    var edgeExclusionIndex = 0;
 
     void flush() {
       if (current.isEmpty) return;
@@ -81,16 +83,23 @@ abstract final class RoutePartitioner {
     }
 
     for (final sample in orderedSamples) {
-      final excluded = orderedExclusions.any(
-        (exclusion) => exclusion.contains(sample.timestamp),
-      );
+      // Disjoint intervals and sorted samples let both cursors move only forward:
+      // O(samples + exclusions) after sorting, even for dense edited backups.
+      while (pointExclusionIndex < orderedExclusions.length &&
+          !orderedExclusions[pointExclusionIndex].endAt.isAfter(
+            sample.timestamp,
+          )) {
+        pointExclusionIndex++;
+      }
+      final pointExclusion = pointExclusionIndex < orderedExclusions.length
+          ? orderedExclusions[pointExclusionIndex]
+          : null;
+      final excluded = pointExclusion?.contains(sample.timestamp) ?? false;
       final closesIncludedFragment =
           excluded &&
           preserveExclusionStartEndpoint &&
           current.isNotEmpty &&
-          orderedExclusions.any(
-            (exclusion) => exclusion.startAt.isAtSameMomentAs(sample.timestamp),
-          );
+          pointExclusion!.startAt.isAtSameMomentAs(sample.timestamp);
       if (sample.isFilteredOut ||
           !_validFix(sample) ||
           (excluded && !closesIncludedFragment)) {
@@ -106,9 +115,18 @@ abstract final class RoutePartitioner {
 
       final previous = current.last;
       final duration = sample.timestamp.difference(previous.timestamp);
-      final crossesExclusion = orderedExclusions.any(
-        (exclusion) => exclusion.overlaps(previous.timestamp, sample.timestamp),
-      );
+      while (edgeExclusionIndex < orderedExclusions.length &&
+          !orderedExclusions[edgeExclusionIndex].endAt.isAfter(
+            previous.timestamp,
+          )) {
+        edgeExclusionIndex++;
+      }
+      final crossesExclusion =
+          edgeExclusionIndex < orderedExclusions.length &&
+          orderedExclusions[edgeExclusionIndex].overlaps(
+            previous.timestamp,
+            sample.timestamp,
+          );
       final distance = haversineMeters(
         lat1: previous.latitude,
         lon1: previous.longitude,

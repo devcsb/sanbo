@@ -48,6 +48,8 @@ class RouteMap extends StatefulWidget {
     super.key,
     required this.fragments,
     this.geometry,
+    this.interactionFlags = InteractiveFlag.pinchZoom,
+    this.mapController,
     this.highlightedGeometry,
     this.height = 220,
     this.offlinePreview = false,
@@ -66,6 +68,8 @@ class RouteMap extends StatefulWidget {
   /// Playback rebuilds the widget frequently; callers can pass this value to
   /// avoid converting the same tuple coordinates into [LatLng] on every tick.
   final RouteMapGeometry? highlightedGeometry;
+  final int interactionFlags;
+  final MapController? mapController;
   final double height;
   final bool offlinePreview;
 
@@ -185,6 +189,7 @@ class _RouteMapState extends State<RouteMap> {
                 child: Stack(
                   children: [
                     FlutterMap(
+                      mapController: widget.mapController,
                       options: MapOptions(
                         initialCenter: center,
                         initialZoom: latLngs.length < 2 ? 13 : 15,
@@ -195,11 +200,10 @@ class _RouteMapState extends State<RouteMap> {
                                 maxZoom: 17,
                               )
                             : null,
-                        // Inline glance-preview inside a scrolling page: no drag, or
-                        // a vertical swipe starting on the map pans the map instead of
-                        // scrolling to the timeline below (scroll dead-zone).
-                        interactionOptions: const InteractionOptions(
-                          flags: InteractiveFlag.pinchZoom,
+                        // Default callers retain pinch-only interaction inside scrolling
+                        // pages. Summary previews and exploration opt in separately.
+                        interactionOptions: InteractionOptions(
+                          flags: widget.interactionFlags,
                         ),
                       ),
                       children: [
@@ -409,26 +413,30 @@ class _RouteMapState extends State<RouteMap> {
                       ),
                     Positioned(
                       left: 10,
+                      right: 10,
                       bottom: 8,
-                      child: IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: theme.colorScheme.surfaceContainer
-                                .withValues(alpha: 0.94),
-                            borderRadius: BorderRadius.circular(
-                              AppTheme.radiusSmall,
+                      child: Align(
+                        alignment: Alignment.bottomLeft,
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.surfaceContainer
+                                  .withValues(alpha: 0.94),
+                              borderRadius: BorderRadius.circular(
+                                AppTheme.radiusSmall,
+                              ),
                             ),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 4,
-                            ),
-                            child: Text(
-                              RouteMap.attribution,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                                fontSize: 10,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              child: Text(
+                                RouteMap.attribution,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                  fontSize: 10,
+                                ),
                               ),
                             ),
                           ),

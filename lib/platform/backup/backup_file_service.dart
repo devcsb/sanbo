@@ -1,10 +1,13 @@
 import 'dart:io';
+import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../domain/services/app_backup.dart';
@@ -20,6 +23,8 @@ abstract interface class BackupFileService {
   Future<String?> save({required String fileName, required Uint8List bytes});
 
   Future<PickedBackupFile?> pick();
+
+  Future<void> cancelPick();
 }
 
 class PlatformBackupFileService implements BackupFileService {
@@ -27,12 +32,21 @@ class PlatformBackupFileService implements BackupFileService {
     this._platform,
     Future<Directory> Function()? temporaryDirectory,
     MethodChannel? channel,
+    MethodChannel? importChannel,
   }) : _temporaryDirectory = temporaryDirectory ?? getTemporaryDirectory,
-       _channel = channel ?? const MethodChannel('sanbo/backup_export');
+       _channel = channel ?? const MethodChannel('sanbo/backup_export'),
+       _importChannel =
+           importChannel ?? const MethodChannel('sanbo/backup_import');
 
   final TargetPlatform? _platform;
   final Future<Directory> Function() _temporaryDirectory;
   final MethodChannel _channel;
+  final MethodChannel _importChannel;
+  Completer<void>? _pickCancellation;
+  String? _pickOperationId;
+  bool get _usesAndroidImport =>
+      _platform == TargetPlatform.android ||
+      (_platform == null && !kIsWeb && Platform.isAndroid);
   static final _activeExports = <String>{};
 
   bool get _usesNativeExport {
@@ -73,7 +87,16 @@ class PlatformBackupFileService implements BackupFileService {
     if (_usesNativeExport) return _saveNative(fileName, bytes);
     final location = await getSaveLocation(
       suggestedName: fileName,
-      acceptedTypeGroups: _backupTypes,
+      acceptedTypeGroups: fileName.toLowerCase().endsWith('.ndjson')
+          ? const [
+              XTypeGroup(
+                label: '산책 원본 NDJSON',
+                extensions: ['ndjson'],
+                mimeTypes: ['application/x-ndjson'],
+                uniformTypeIdentifiers: ['public.data'],
+              ),
+            ]
+          : _backupTypes,
       confirmButtonText: '저장',
     );
     if (location == null) return null;
@@ -138,24 +161,135 @@ class PlatformBackupFileService implements BackupFileService {
   }
 
   @override
+  Future<void> cancelPick() async {
+    final cancellation = _pickCancellation;
+    if (cancellation == null) return;
+    if (!cancellation.isCompleted) cancellation.complete();
+    if (_usesAndroidImport) {
+      await _importChannel.invokeMethod<void>('cancel', {
+        'operationId': _pickOperationId,
+      });
+    }
+  }
+
+  @override
   Future<PickedBackupFile?> pick() async {
-    final file = await openFile(
-      acceptedTypeGroups: _backupTypes,
-      confirmButtonText: '선택',
-    );
-    if (file == null) return null;
-    final length = await file.length();
-    if (length > maxBackupBytes) {
-      throw const FormatException('백업 파일이 50MB 제한을 초과합니다');
+    if (_pickCancellation != null) throw PlatformException(code: 'import_busy');
+    final cancellation = Completer<void>();
+    _pickCancellation = cancellation;
+    final operationId = const Uuid().v4();
+    _pickOperationId = operationId;
+    try {
+      if (_usesAndroidImport) {
+        final picked = await _importChannel.invokeMapMethod<String, dynamic>(
+          'pick',
+          {'operationId': operationId},
+        );
+        if (picked == null) return null;
+        final token = picked['operationId'];
+        if (token != operationId) {
+          throw const FormatException('가져오기 작업을 확인할 수 없어요');
+        }
+        final source = picked['sourcePath'];
+        final name = picked['fileName'];
+        if (source is! String || name is! String) {
+          throw const FormatException('백업 파일을 확인할 수 없어요');
+        }
+        final cache = await _temporaryDirectory();
+        final root = await Directory(
+          p.join(cache.path, 'sanbo_imports'),
+        ).resolveSymbolicLinks();
+        final canonical = await File(source).resolveSymbolicLinks();
+        if (!p.isWithin(root, canonical)) {
+          throw const FormatException('백업 임시 파일의 위치가 올바르지 않아요');
+        }
+        final bytes = await readLimitedBackup(
+          File(canonical).openRead(),
+          cancelled: cancellation.future,
+        );
+        return PickedBackupFile(name: name, bytes: bytes);
+      }
+      final file = await openFile(
+        acceptedTypeGroups: _backupTypes,
+        confirmButtonText: '선택',
+      );
+      if (file == null || cancellation.isCompleted) return null;
+      if (await file.length() > maxBackupBytes) {
+        throw const FormatException('백업 파일이 50MiB 제한을 초과해요');
+      }
+      return PickedBackupFile(
+        name: file.name,
+        bytes: await readLimitedBackup(
+          file.openRead(),
+          cancelled: cancellation.future,
+        ),
+      );
+    } on PlatformException catch (error) {
+      if (error.code == 'import_cancelled') return null;
+      if (error.code == 'import_too_large') {
+        throw const FormatException('백업 파일이 50MiB 제한을 초과해요');
+      }
+      if (error.code == 'import_timeout') {
+        throw const FormatException(
+          '파일 읽기에 시간이 오래 걸려 중단했어요. 파일을 기기에 저장한 뒤 다시 시도해 주세요.',
+        );
+      }
+      rethrow;
+    } finally {
+      if (_usesAndroidImport) {
+        try {
+          await _importChannel.invokeMethod<void>('release', {
+            'operationId': operationId,
+          });
+        } on Object {
+          /* Activity teardown may remove the channel; native owns stale cleanup. */
+        }
+      }
+      _pickCancellation = null;
+      _pickOperationId = null;
     }
-    final bytes = await file.readAsBytes();
-    if (bytes.length > maxBackupBytes) {
-      throw const FormatException('백업 파일이 50MB 제한을 초과합니다');
-    }
-    return PickedBackupFile(name: file.name, bytes: bytes);
   }
 }
 
 final backupFileServiceProvider = Provider<BackupFileService>((ref) {
   return PlatformBackupFileService();
 });
+
+/// Bounded input boundary shared by platform adapters; closes the actual stream.
+Future<Uint8List> readLimitedBackup(
+  Stream<List<int>> stream, {
+  int maxBytes = maxBackupBytes,
+  Duration timeout = const Duration(seconds: 30),
+  Future<void>? cancelled,
+}) async {
+  final iterator = StreamIterator(stream);
+  final output = BytesBuilder(copy: false);
+  final watch = Stopwatch()..start();
+  var stopped = false;
+  final stop = cancelled?.then((_) {
+    stopped = true;
+    return false;
+  });
+  try {
+    while (true) {
+      final remaining = timeout - watch.elapsed;
+      if (remaining <= Duration.zero) {
+        throw TimeoutException('백업 파일 읽기 시간이 초과됐어요');
+      }
+      final next = await Future.any<bool>([
+        iterator.moveNext(),
+        ?stop,
+      ]).timeout(remaining);
+      if (stopped) throw PlatformException(code: 'import_cancelled');
+      if (!next) break;
+      final chunk = iterator.current;
+      if (chunk.length > maxBytes - output.length) {
+        throw const FormatException('백업 파일이 50MiB 제한을 초과해요');
+      }
+      output.add(chunk);
+    }
+    return output.takeBytes();
+  } finally {
+    await iterator.cancel();
+  }
+}

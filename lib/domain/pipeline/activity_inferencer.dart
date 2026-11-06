@@ -20,7 +20,14 @@ class ActivityInferencer {
   final double minDisplayConfidence;
 
   ActivityHypothesis infer(MinuteWindow w, {String? placeCategory}) {
-    final evidence = <String>[];
+    final evidence = <String>[...w.evidence];
+    if (evidence.contains(MinuteWindow.gpsJitterEvidence)) {
+      return ActivityHypothesis(
+        label: ActivityLabel.unknown,
+        confidence: 0.25,
+        evidence: evidence,
+      );
+    }
 
     if (w.quality == WindowQuality.gap || w.sampleCount < 3) {
       evidence.add('quality:${w.quality.name}');
@@ -46,8 +53,7 @@ class ActivityInferencer {
       );
     }
 
-    final stay =
-        w.stationaryRatio >= 0.7 && w.distanceM < 25;
+    final stay = w.stationaryRatio >= 0.7 && w.distanceM < 25;
     if (stay) {
       if (placeCategory == 'cafe' ||
           placeCategory == 'shop' ||

@@ -28,6 +28,11 @@ internal fun copyBackupExport(source: File, openOutput: () -> OutputStream) {
 
 // Late Activity results must not complete a newer picker (16-bit request limit).
 private var nextBackupRequestCode = 4105
+internal fun allocateBackupRequestCode(): Int {
+    val code = nextBackupRequestCode
+    nextBackupRequestCode = if (code >= 65530) 4105 else code + 1
+    return code
+}
 
 internal class BackupExportHandler(private val activity: FlutterFragmentActivity) {
     private class Pending(val source: File, val result: MethodChannel.Result, val requestCode: Int) {
@@ -61,8 +66,7 @@ internal class BackupExportHandler(private val activity: FlutterFragmentActivity
                     result.error("invalid_arguments", "The export file is invalid.", null)
                     return@setMethodCallHandler
                 }
-                val code = nextBackupRequestCode
-                nextBackupRequestCode = if (code >= 65530) 4105 else code + 1
+                val code = allocateBackupRequestCode()
                 val operation = Pending(source, result, code)
                 pending = operation
                 try {

@@ -5,6 +5,8 @@ import 'package:intl/intl.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../domain/services/walk_stats.dart';
+import '../../domain/services/backup_limits.dart';
+import '../../domain/pipeline/geo.dart';
 import '../../shared/widgets/app_motion.dart';
 import '../../shared/widgets/ui_bits.dart';
 import 'daily_activity_panel.dart';
@@ -94,7 +96,9 @@ class HistoryScreen extends ConsumerWidget {
                 itemBuilder: (context, index) {
                   if (index == 0) {
                     final stats = snapshot.stats;
-                    final milestones = stats.satisfied().take(3).toList();
+                    final milestones =
+                        stats?.satisfied().take(3).toList() ??
+                        <WalkMilestone>[];
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -103,93 +107,120 @@ class HistoryScreen extends ConsumerWidget {
                           description: '걸었던 길과 시간을 차분히 돌아보세요.',
                         ),
                         const SizedBox(height: 16),
-                        SoftPanel(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 16,
-                          ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('나의 흐름', style: theme.textTheme.titleSmall),
-                              const SizedBox(height: 6),
-                              Text(
-                                stats.summaryLine(),
-                                style: theme.textTheme.bodyMedium?.copyWith(
-                                  color: theme.colorScheme.onSurfaceVariant,
-                                ),
+                        if (stats == null)
+                          SoftPanel(
+                            child: Semantics(
+                              liveRegion: true,
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Text('일부 통계를 표시할 수 없어요'),
+                                  const SizedBox(height: 8),
+                                  const Text(
+                                    '기록은 아래에서 계속 확인할 수 있어요. 필요한 기록을 열어 원본을 보관할 수도 있어요.',
+                                  ),
+                                  TextButton(
+                                    onPressed: () => ref.invalidate(
+                                      completedHistoryProvider,
+                                    ),
+                                    child: const Text('통계 다시 불러오기'),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 14),
-                              LayoutBuilder(
-                                builder: (context, constraints) {
-                                  final stack =
-                                      constraints.maxWidth < 300 ||
-                                      MediaQuery.textScalerOf(
-                                            context,
-                                          ).scale(14) >
-                                          18;
-                                  final tiles = [
-                                    _StatChip(
-                                      label: '산책',
-                                      value: '${stats.walkCount}',
-                                    ),
-                                    _StatChip(
-                                      label: '누적',
-                                      value:
-                                          '${stats.totalDistanceKm.toStringAsFixed(stats.totalDistanceKm >= 10 ? 0 : 1)} km',
-                                    ),
-                                    _StatChip(
-                                      label: '최장',
-                                      value: formatDurationCompact(
-                                        stats.longestDuration,
+                            ),
+                          )
+                        else
+                          SoftPanel(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 16,
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '나의 흐름',
+                                  style: theme.textTheme.titleSmall,
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  stats.summaryLine(),
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                                const SizedBox(height: 14),
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    final stack =
+                                        constraints.maxWidth < 300 ||
+                                        MediaQuery.textScalerOf(
+                                              context,
+                                            ).scale(14) >
+                                            18;
+                                    final tiles = [
+                                      _StatChip(
+                                        label: '산책',
+                                        value: '${stats.walkCount}',
                                       ),
-                                    ),
-                                  ];
-                                  if (stack) {
-                                    return Column(
+                                      _StatChip(
+                                        label: '누적',
+                                        value:
+                                            '${stats.totalDistanceKm.toStringAsFixed(stats.totalDistanceKm >= 10 ? 0 : 1)} km',
+                                      ),
+                                      _StatChip(
+                                        label: '최장',
+                                        value: formatDurationCompact(
+                                          stats.longestDuration,
+                                        ),
+                                      ),
+                                    ];
+                                    if (stack) {
+                                      return Column(
+                                        children: [
+                                          for (
+                                            var i = 0;
+                                            i < tiles.length;
+                                            i++
+                                          ) ...[
+                                            if (i > 0)
+                                              const SizedBox(height: 8),
+                                            tiles[i],
+                                          ],
+                                        ],
+                                      );
+                                    }
+                                    return Row(
                                       children: [
                                         for (
                                           var i = 0;
                                           i < tiles.length;
                                           i++
                                         ) ...[
-                                          if (i > 0) const SizedBox(height: 8),
-                                          tiles[i],
+                                          if (i > 0) const SizedBox(width: 8),
+                                          Expanded(child: tiles[i]),
                                         ],
                                       ],
                                     );
-                                  }
-                                  return Row(
-                                    children: [
-                                      for (
-                                        var i = 0;
-                                        i < tiles.length;
-                                        i++
-                                      ) ...[
-                                        if (i > 0) const SizedBox(width: 8),
-                                        Expanded(child: tiles[i]),
-                                      ],
-                                    ],
-                                  );
-                                },
-                              ),
-                              if (milestones.isNotEmpty) ...[
-                                const SizedBox(height: 14),
-                                Wrap(
-                                  spacing: 8,
-                                  runSpacing: 8,
-                                  children: [
-                                    for (final m in milestones)
-                                      StatusPill(
-                                        label: m.title,
-                                        icon: Icons.auto_awesome_rounded,
-                                      ),
-                                  ],
+                                  },
                                 ),
+                                if (milestones.isNotEmpty) ...[
+                                  const SizedBox(height: 14),
+                                  Wrap(
+                                    spacing: 8,
+                                    runSpacing: 8,
+                                    children: [
+                                      for (final m in milestones)
+                                        StatusPill(
+                                          label: m.title,
+                                          icon: Icons.auto_awesome_rounded,
+                                        ),
+                                    ],
+                                  ),
+                                ],
                               ],
-                            ],
+                            ),
                           ),
-                        ),
                         const SizedBox(height: 16),
                         const DailyActivityPanel(),
                         const SizedBox(height: 20),
@@ -200,7 +231,9 @@ class HistoryScreen extends ConsumerWidget {
                           children: [
                             const SectionLabel('최근 산책'),
                             StatusPill(
-                              label: '${snapshot.stats.walkCount}개의 산책',
+                              label: snapshot.stats == null
+                                  ? '불러온 기록 ${sessions.length}개'
+                                  : '${snapshot.stats!.walkCount}개의 산책',
                               icon: Icons.directions_walk_rounded,
                             ),
                           ],
@@ -225,10 +258,22 @@ class HistoryScreen extends ConsumerWidget {
 
                   final s = sessions[index - 1];
                   final km = (s.totalDistanceM ?? 0) / 1000.0;
-                  final dur = Duration(seconds: s.durationS ?? 0);
+                  final duration = s.durationS;
+                  final validDuration =
+                      duration != null &&
+                      duration >= 0 &&
+                      s.endedAt != null &&
+                      duration <=
+                          positiveDurationSeconds(s.startedAt, s.endedAt!);
+                  final distance = s.totalDistanceM;
+                  final validDistance =
+                      distance != null &&
+                      distance.isFinite &&
+                      distance >= 0 &&
+                      distance <= maxStoredMagnitude;
                   final title = dateFmt.format(s.startedAt);
                   final subtitle =
-                      '${km.toStringAsFixed(2)} km  ·  ${_fmt(dur)}';
+                      '${validDistance ? '${km.toStringAsFixed(2)} km' : '거리 확인 필요'}  ·  ${validDuration ? _fmt(Duration(seconds: duration)) : '시간 확인 필요'}';
                   return Semantics(
                     button: true,
                     label: '$title, $subtitle. 상세 보기',
@@ -266,7 +311,9 @@ class HistoryScreen extends ConsumerWidget {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        '${km.toStringAsFixed(2)} km',
+                                        validDistance
+                                            ? '${km.toStringAsFixed(2)} km'
+                                            : '거리 확인 필요',
                                         style: theme.textTheme.titleMedium
                                             ?.copyWith(
                                               fontWeight: FontWeight.w700,
@@ -275,7 +322,9 @@ class HistoryScreen extends ConsumerWidget {
                                       ),
                                       const SizedBox(height: 3),
                                       Text(
-                                        '소요 시간 ${_fmt(dur)}',
+                                        validDuration
+                                            ? '소요 시간 ${_fmt(Duration(seconds: duration))}'
+                                            : '시간 확인 필요',
                                         style: theme.textTheme.bodySmall
                                             ?.copyWith(
                                               color: theme
